@@ -7,8 +7,8 @@ from datetime import timedelta
 
 import pytest
 
-from sathop.orchestrator import db as orch_db
 from sathop.orchestrator import background as retention
+from sathop.orchestrator import db as orch_db
 from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Event, Granule, GranuleObject, utcnow
 from sathop.shared.protocol import GranuleState

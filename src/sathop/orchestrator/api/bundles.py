@@ -20,9 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import BundleDetail, BundleSummary
 
-from ..config import require_token
 from ..bundle_schema import InputsSchema, parse_shared_files
-from ..config import settings
+from ..config import require_token, settings
 from ..db import Batch, Bundle, SharedFile, session, utcnow
 from ..pubsub import log_event as log
 from ..pubsub import publish

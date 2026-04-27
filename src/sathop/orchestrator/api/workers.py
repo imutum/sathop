@@ -24,8 +24,7 @@ from sathop.shared.protocol import (
     WorkerRegisterResponse,
 )
 
-from ..config import require_token
-from ..config import settings
+from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, Worker, session, utcnow
 from ..pubsub import log_event as log
 from ..pubsub import publish

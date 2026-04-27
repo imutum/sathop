@@ -23,9 +23,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import require_token, require_token_or_query
 from ..bundle_schema import parse_shared_files
-from ..config import settings
+from ..config import require_token, require_token_or_query, settings
 from ..db import Bundle, SharedFile, session, utcnow
 from ..pubsub import log_event as log
 from ..pubsub import publish

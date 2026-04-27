@@ -9,9 +9,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router as api_router
+from .background import run_lease_sweeper, run_retention
 from .config import settings
 from .db import init_db, shutdown_db
-from .background import run_lease_sweeper, run_retention
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WEB_DIST = PROJECT_ROOT / "frontend" / "dist"

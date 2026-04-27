@@ -46,6 +46,7 @@ class OrchestratorClient:
     async def ack(self, req: AckReport) -> None:
         (await self._client.post("/api/receivers/ack", json=req.model_dump())).raise_for_status()
 
+
 log = logging.getLogger("sathop.receiver")
 
 _CHUNK = 256 * 1024

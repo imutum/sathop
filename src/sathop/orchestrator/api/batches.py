@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import BatchCreate, BatchSummary, GranuleBulkAdd, GranuleRow, GranuleState
 
-from ..config import require_token
 from ..bundle_schema import InputsSchema, parse_shared_files, validate_granule
+from ..config import require_token
 from ..db import Batch, Bundle, Granule, SharedFile, session, utcnow
 from ..pubsub import log_event as log
 from ..pubsub import publish

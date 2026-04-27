@@ -19,14 +19,10 @@ def parse_sathop_url(url: str) -> tuple[str, str]:
     elif p.scheme == "sathops":
         transport = "https"
     else:
-        raise ValueError(
-            f"SATHOP_URL must use sathop:// or sathops:// scheme, got: {url!r}"
-        )
+        raise ValueError(f"SATHOP_URL must use sathop:// or sathops:// scheme, got: {url!r}")
     token = unquote(p.password or p.username or "")
     if not token:
-        raise ValueError(
-            f"SATHOP_URL missing token (expected sathop://TOKEN@host:port): {url!r}"
-        )
+        raise ValueError(f"SATHOP_URL missing token (expected sathop://TOKEN@host:port): {url!r}")
     if not p.hostname:
         raise ValueError(f"SATHOP_URL missing host: {url!r}")
     netloc = p.hostname + (f":{p.port}" if p.port else "")
@@ -45,9 +41,7 @@ def resolve_orch() -> tuple[str, str]:
     return os.environ["SATHOP_ORCH_URL"].rstrip("/"), os.environ["SATHOP_TOKEN"]
 
 
-def cli_resolve_orch(
-    url: str, orch_url: str, token: str, *, require_token: bool = True
-) -> tuple[str, str]:
+def cli_resolve_orch(url: str, orch_url: str, token: str, *, require_token: bool = True) -> tuple[str, str]:
     """Resolve (orch_url, token) from CLI args. --url overrides --orch-url + --token.
 
     Each arg may be empty (unset env, empty default). Pass require_token=False to
