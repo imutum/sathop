@@ -73,7 +73,7 @@ jobs:
             */pyproject.toml
 
       - name: Sync workspace (prod + dev deps)
-        run: uv sync --all-packages --group dev
+        run: uv sync --all-extras --dev
 
       - name: Run pytest
         run: uv run pytest -v --tb=short
