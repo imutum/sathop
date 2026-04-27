@@ -1,0 +1,35 @@
+# VCS + IDE
+.git/
+.github/
+.vscode/
+.idea/
+
+# Python build/runtime
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime state — must NOT be baked into images
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+logs/
+
+# Secrets
+.env
+.env.local
+*.key
+*.pem
+
+# Frontend build artifacts (orchestrator copies web/dist only when needed)
+frontend/node_modules/
+
+# Vendored native binaries (aria2c, minio) — provided by their own images in prod
+vendor/
+

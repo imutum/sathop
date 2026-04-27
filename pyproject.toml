@@ -1,0 +1,84 @@
+[project]
+name = "sathop"
+version = "0.1.0"
+description = "Remote-sensing data pipeline: accelerated distributed download + pluggable processing + pull-based sync"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.9",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+orchestrator = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.20",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "minio>=7.2",
+    "python-multipart>=0.0.12",
+    "prometheus-client>=0.20",
+]
+worker = [
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "minio>=7.2",
+    "aria2p>=0.12",
+    "psutil>=6.0",
+    "watchdog>=5.0",
+    # LocalStorage MVP backend serves storage_root via fastapi static files.
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+receiver = [
+    "httpx>=0.27",
+    "minio>=7.2",
+]
+
+[project.scripts]
+sathop-orchestrator    = "sathop.orchestrator.main:run"
+sathop-worker          = "sathop.worker.main:run"
+sathop-receiver        = "sathop.receiver.main:run"
+sathop-validate-bundle = "sathop.cli.validate_bundle:main"
+sathop-upload-bundle   = "sathop.cli.upload_bundle:main"
+sathop-reconcile       = "sathop.cli.reconcile:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sathop"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["legacy", "frontend", "vendor", "data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP"]
+ignore = [
+    "E501",  # line length — ruff format owns this; don't double-warn on long strings/comments
+    "UP007", # `X | Y` vs `Optional[X]` — we use both deliberately in wire-format DTOs
+    "UP042", # GranuleState(str, Enum) is a stable serialization contract; don't churn to StrEnum
+    "E702",  # inline `a; b` on one line is deliberate in terse test setup helpers
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401"]  # tests sometimes import fixtures for side-effects
+
+[tool.ruff.format]
+# Defaults (black-compatible) are fine.

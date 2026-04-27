@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    # Style is OS-independent; one runner is enough. Fails fast (~30s) so
+    # a bad format doesn't burn the whole matrix.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Install ruff
+        run: uv sync --group dev --no-install-workspace
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+  gitleaks:
+    # Scan full history for accidentally committed secrets. Uses the gitleaks
+    # binary directly (not gitleaks-action) so it works for both public and
+    # private repos without the GITLEAKS_LICENSE requirement.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+      - name: Scan repo
+        run: gitleaks detect --redact --no-banner --verbose
+
+  tests:
+    # Dual-OS matrix: this project has Windows-specific code paths
+    # (venv Scripts/ vs bin/, cmd.exe $VAR non-expansion, path separators),
+    # so Linux-only CI would let Windows regressions reach main.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Pin Python to match the Docker images.
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+            */pyproject.toml
+
+      - name: Sync workspace (prod + dev deps)
+        run: uv sync --all-packages --group dev
+
+      - name: Run pytest
+        run: uv run pytest -v --tb=short
+        env:
+          PYTHONUNBUFFERED: "1"
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install web deps
+        run: npm ci
+        working-directory: frontend
+
+      - name: Typecheck + build
+        run: npm run build
+        working-directory: frontend

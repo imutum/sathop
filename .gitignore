@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv_cache/
+
+# Build artifacts
+dist/
+build/
+*.spec
+
+# Local state
+*.db
+*.db-wal
+*.db-shm
+data/
+logs/
+*.log
+
+# Secrets / env
+.env
+.env.local
+*.key
+*.pem
+
+# Node
+node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Claude Code
+CLAUDE.md
+.claude/
+
+# Local test binaries (MinIO, aria2c)
+vendor/
+
+# TypeScript / Vite build caches
+frontend/*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js

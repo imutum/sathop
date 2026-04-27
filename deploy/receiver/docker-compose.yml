@@ -1,0 +1,9 @@
+services:
+  receiver:
+    image: ${SATHOP_IMAGE:-ghcr.io/imutum/sathop}/receiver:${SATHOP_TAG:-latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SATHOP_STORAGE_DIR: /data/archive
+    volumes:
+      - ${RECEIVER_HOST_ARCHIVE:-./archive}:/data/archive
