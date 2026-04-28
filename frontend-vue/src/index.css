@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light theme — refined neutrals leaning warm-cool zinc */
+  :root {
+    --bg: 220 20% 98%;
+    --surface: 0 0% 100%;
+    --elevated: 0 0% 100%;
+    --subtle: 220 14% 96%;
+    --border: 220 13% 90%;
+    --ring: 224 71% 56%;
+    --muted: 220 9% 46%;
+    --text: 224 71% 6%;
+    --accent: 224 76% 56%;
+    --accent-fg: 0 0% 100%;
+    --accent-soft: 224 76% 95%;
+    --success: 152 61% 38%;
+    --warning: 32 92% 48%;
+    --danger: 0 72% 50%;
+    --shadow: 220 40% 12%;
+    --surface-edge: 0 0% 100%;
+    color-scheme: light;
+  }
+
+  /* Dark theme — deep slate with cool undertone, refined contrast */
+  .dark {
+    --bg: 224 22% 5%;
+    --surface: 224 19% 8%;
+    --elevated: 224 18% 11%;
+    --subtle: 224 18% 11%;
+    --border: 220 14% 17%;
+    --ring: 217 91% 62%;
+    --muted: 215 14% 60%;
+    --text: 210 20% 96%;
+    --accent: 217 91% 62%;
+    --accent-fg: 0 0% 100%;
+    --accent-soft: 217 91% 16%;
+    --success: 152 70% 48%;
+    --warning: 38 92% 58%;
+    --danger: 0 84% 64%;
+    --shadow: 0 0% 0%;
+    --surface-edge: 220 14% 14%;
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+    font-feature-settings: "ss01", "cv11", "cv01";
+    font-size: 14px;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: hsl(var(--accent) / 0.30);
+    color: hsl(var(--text));
+  }
+
+  :where(button, a, input, select, textarea, [role="button"]):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px hsl(var(--bg)), 0 0 0 4px hsl(var(--ring) / 0.55);
+    border-radius: 0.5rem;
+  }
+}
+
+@layer components {
+  .input {
+    @apply w-full rounded-lg border border-border bg-bg px-3 py-2 outline-none transition hover:border-accent/40 focus:border-accent disabled:opacity-60;
+  }
+  /* Small uppercase muted label above a stat value (e.g. WorkerCard CPU/内存). */
+  .stat-label {
+    @apply text-[10.5px] font-medium uppercase tracking-[0.10em] text-muted;
+  }
+  /* Inline keycap (Ctrl / Enter / Esc) used in shortcut hints. */
+  .kbd {
+    @apply rounded-md border border-border bg-subtle px-1.5 py-0.5 font-mono text-[10.5px];
+  }
+  /* Standard table head typography. Pair with `bg-subtle/50` (or `/60`). */
+  .th-row {
+    @apply text-left text-[10.5px] font-semibold uppercase tracking-[0.10em] text-muted;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family:
+      "Geist", "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.6) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.6) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: -1px -1px;
+  }
+  .bg-dotgrid {
+    background-image: radial-gradient(
+      hsl(var(--border) / 0.85) 1px,
+      transparent 1px
+    );
+    background-size: 18px 18px;
+  }
+  .bg-radial-fade {
+    background: radial-gradient(
+      circle at 30% 20%,
+      hsl(var(--accent) / 0.18),
+      transparent 55%
+    ),
+    radial-gradient(circle at 80% 90%, hsl(var(--accent) / 0.10), transparent 50%);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted) / 0.6);
+  background-clip: content-box;
+}
+* {
+  scrollbar-color: hsl(var(--border)) transparent;
+  scrollbar-width: thin;
+}

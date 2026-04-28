@@ -1,0 +1,140 @@
+<script setup lang="ts">
+import { ref } from "vue";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { API, type SharedFileInfo } from "../api";
+import { fmtBytes } from "../ui/format";
+import { fmtAge } from "../i18n";
+import { useToast } from "../composables/useToast";
+import ActionButton from "../ui/ActionButton.vue";
+import Card from "../ui/Card.vue";
+import CopyButton from "../ui/CopyButton.vue";
+import EmptyState from "../ui/EmptyState.vue";
+import PageHeader from "../ui/PageHeader.vue";
+import UploadSharedModal from "./UploadSharedModal.vue";
+import { Icon } from "../ui/Icon";
+
+const qc = useQueryClient();
+const toast = useToast();
+const showUpload = ref(false);
+const replaceTarget = ref<SharedFileInfo | null>(null);
+
+const list = useQuery({ queryKey: ["shared-files"], queryFn: API.sharedFiles });
+
+const del = useMutation({
+  mutationFn: (name: string) => API.deleteSharedFile(name),
+  onSuccess: (_r, name) => {
+    qc.invalidateQueries({ queryKey: ["shared-files"] });
+    toast.success(`已删除 ${name}`);
+  },
+  onError: (e: Error) => toast.error(`删除失败：${e.message}`),
+});
+
+function confirmDelete(f: SharedFileInfo) {
+  if (
+    confirm(
+      `删除共享文件 ${f.name}？\n\n若仍被某个任务包的 shared_files 引用，将返回 409。`,
+    )
+  ) {
+    del.mutate(f.name);
+  }
+}
+
+function onUploaded() {
+  qc.invalidateQueries({ queryKey: ["shared-files"] });
+  showUpload.value = false;
+  replaceTarget.value = null;
+}
+</script>
+
+<template>
+  <div class="space-y-6">
+    <PageHeader title="共享文件">
+      <template #description>
+        被任务包通过
+        <code class="rounded bg-subtle px-1.5 py-0.5 font-mono text-[11px]">shared_files</code>
+        引用的辅助资源，Worker 按需拉取到
+        <code class="rounded bg-subtle px-1.5 py-0.5 font-mono text-[11px]">$SATHOP_SHARED_DIR</code>。
+      </template>
+      <template #actions>
+        <ActionButton tone="primary" @click="showUpload = true">
+          <Icon name="upload" :size="13" />
+          上传文件
+        </ActionButton>
+      </template>
+    </PageHeader>
+
+    <Card :padded="false">
+      <EmptyState
+        v-if="(list.data.value?.length ?? 0) === 0 && !list.isLoading.value"
+        title="还没有共享文件"
+        description='点击上方"上传文件"添加第一个。'
+      >
+        <template #icon>
+          <Icon name="shared" :size="20" />
+        </template>
+      </EmptyState>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-subtle/50 th-row">
+            <tr>
+              <th class="px-5 py-3">名称</th>
+              <th class="px-2 py-3">大小</th>
+              <th class="px-2 py-3">SHA256</th>
+              <th class="px-2 py-3">描述</th>
+              <th class="px-2 py-3">上传</th>
+              <th class="px-5 py-3 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="f in list.data.value ?? []"
+              :key="f.name"
+              class="border-t border-border/60 transition hover:bg-subtle/40"
+            >
+              <td class="px-5 py-3 font-mono text-[12px] font-medium">{{ f.name }}</td>
+              <td class="px-2 py-3 text-[11.5px] text-muted tabular-nums">
+                {{ fmtBytes(f.size) }}
+              </td>
+              <td class="px-2 py-3 text-[11.5px]">
+                <span class="font-mono" :title="f.sha256">{{ f.sha256.slice(0, 12) }}…</span>
+                <CopyButton :value="f.sha256" title="复制完整 SHA256" />
+              </td>
+              <td class="px-2 py-3 text-[11.5px] text-muted">
+                <template v-if="f.description">{{ f.description }}</template>
+                <span v-else class="text-muted/50">—</span>
+              </td>
+              <td class="px-2 py-3 text-[11.5px] text-muted">{{ fmtAge(f.uploaded_at) }}</td>
+              <td class="px-5 py-3 text-right">
+                <div class="inline-flex gap-1.5">
+                  <ActionButton size="sm" @click="replaceTarget = f">替换</ActionButton>
+                  <ActionButton
+                    tone="danger"
+                    size="sm"
+                    :pending="del.isPending.value && del.variables.value === f.name"
+                    pending-label="删除中…"
+                    @click="confirmDelete(f)"
+                  >
+                    删除
+                  </ActionButton>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </Card>
+
+    <UploadSharedModal
+      v-if="showUpload"
+      @close="showUpload = false"
+      @uploaded="onUploaded"
+    />
+    <UploadSharedModal
+      v-if="replaceTarget"
+      :lock-name="replaceTarget.name"
+      :current-description="replaceTarget.description ?? ''"
+      @close="replaceTarget = null"
+      @uploaded="onUploaded"
+    />
+  </div>
+</template>

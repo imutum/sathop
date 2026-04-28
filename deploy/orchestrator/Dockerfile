@@ -24,9 +24,10 @@ COPY src src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --extra orchestrator
 
-# Prebuilt frontend (produced by CI web-build job or local `npm run build`).
-# The image still works without it — orchestrator just won't serve "/" routes.
-COPY frontend/dist ./frontend/dist
+# Prebuilt Vue UI (produced by the release workflow's npm-build step or a
+# local `cd frontend-vue && npm run build`). The image still works without
+# it — orchestrator just won't serve "/" routes.
+COPY frontend-vue/dist ./frontend-vue/dist
 
 # --- runtime --------------------------------------------------------------
 ENV PATH="/app/.venv/bin:$PATH" \

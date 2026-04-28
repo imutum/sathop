@@ -26,7 +26,7 @@ logs/
 
 # Node
 node_modules/
-frontend/dist/
+frontend-vue/dist/
 
 # IDE
 .vscode/
@@ -37,11 +37,12 @@ frontend/dist/
 # Claude Code
 CLAUDE.md
 .claude/
+.playwright-mcp/
 
 # Local test binaries (MinIO, aria2c)
 vendor/
 
 # TypeScript / Vite build caches
-frontend/*.tsbuildinfo
-frontend/vite.config.d.ts
-frontend/vite.config.js
+frontend-vue/*.tsbuildinfo
+frontend-vue/vite.config.d.ts
+frontend-vue/vite.config.js
