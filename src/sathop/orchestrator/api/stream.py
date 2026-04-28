@@ -12,7 +12,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from ..config import require_token_or_query
@@ -24,21 +24,16 @@ _HEARTBEAT_SEC = 20
 
 
 @router.get("/stream")
-async def stream(request: Request) -> StreamingResponse:
+async def stream() -> StreamingResponse:
     async def gen() -> AsyncIterator[bytes]:
         yield b"event: ready\ndata: {}\n\n"
-        sub = subscribe()
-        try:
+        with subscribe() as q:
             while True:
-                if await request.is_disconnected():
-                    return
                 try:
-                    evt = await asyncio.wait_for(sub.__anext__(), timeout=_HEARTBEAT_SEC)
+                    evt = await asyncio.wait_for(q.get(), timeout=_HEARTBEAT_SEC)
                     yield f"data: {json.dumps(evt)}\n\n".encode()
                 except TimeoutError:
                     yield b": keepalive\n\n"  # SSE comment line
-        finally:
-            await sub.aclose()
 
     return StreamingResponse(
         gen(),

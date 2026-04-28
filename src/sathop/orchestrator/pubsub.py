@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,12 +25,20 @@ def publish(event: dict) -> None:
             log.warning("subscriber queue full, dropping event: %s", event)
 
 
-async def subscribe() -> AsyncIterator[dict]:
+@contextmanager
+def subscribe() -> Iterator[asyncio.Queue[dict]]:
+    """Yield a fresh subscriber queue. Caller awaits ``q.get()`` per event.
+
+    Returning the queue (not an async iterator) is deliberate: SSE handlers
+    race ``q.get()`` against a heartbeat via ``asyncio.wait_for``; cancelling
+    a wrapped ``__anext__`` corrupts an async generator (subsequent calls
+    raise ``StopAsyncIteration``), but cancelling a fresh ``q.get()`` each
+    iteration is safe.
+    """
     q: asyncio.Queue[dict] = asyncio.Queue(maxsize=_QUEUE_MAX)
     _subscribers.add(q)
     try:
-        while True:
-            yield await q.get()
+        yield q
     finally:
         _subscribers.discard(q)
 
