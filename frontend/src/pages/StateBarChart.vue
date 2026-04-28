@@ -18,6 +18,7 @@ const isDark = computed(() => effective.value === "dark");
 
 const ORDER: GranuleState[] = [
   "pending",
+  "queued",
   "downloading",
   "downloaded",
   "processing",
@@ -29,6 +30,7 @@ const ORDER: GranuleState[] = [
 
 const COLORS_DARK: Record<GranuleState, string> = {
   pending: "#64748b",
+  queued: "#fbbf24",
   downloading: "#38bdf8",
   downloaded: "#0ea5e9",
   processing: "#818cf8",
@@ -42,6 +44,7 @@ const COLORS_DARK: Record<GranuleState, string> = {
 
 const COLORS_LIGHT: Record<GranuleState, string> = {
   pending: "#94a3b8",
+  queued: "#d97706",
   downloading: "#0284c7",
   downloaded: "#0369a1",
   processing: "#4f46e5",

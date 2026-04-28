@@ -46,8 +46,11 @@ _LEASE_LOCK = asyncio.Lock()
 
 # Non-terminal states where the worker actually holds storage for the granule's
 # staged inputs (before upload). Post-upload the worker releases leased_by but
-# still holds output objects — counted separately via granule_objects.
+# still holds output objects — counted separately via granule_objects. QUEUED
+# counts: the worker's handler is running and the work_dir is created, even if
+# the bytes haven't started moving yet.
 _HOLDING_STATES = (
+    GranuleState.QUEUED.value,
     GranuleState.DOWNLOADING.value,
     GranuleState.DOWNLOADED.value,
     GranuleState.PROCESSING.value,
@@ -103,6 +106,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     w.cpu_percent = req.cpu_percent
     w.mem_percent = req.mem_percent
     w.monthly_egress_gb = req.monthly_egress_gb
+    w.queue_queued = req.queue_queued
     w.queue_downloading = req.queue_downloading
     w.queue_processing = req.queue_processing
     w.queue_uploading = req.queue_uploading
@@ -148,7 +152,10 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
 
     items: list[LeaseItem] = []
     for g in rows:
-        g.state = GranuleState.DOWNLOADING.value
+        # State starts at QUEUED — the worker promotes to DOWNLOADING once it
+        # actually acquires the download semaphore. Keeps the UI honest about
+        # what's actively transferring vs. queued behind concurrency limits.
+        g.state = GranuleState.QUEUED.value
         g.leased_by = req.worker_id
         g.lease_expires_at = expires
         g.updated_at = now
@@ -189,9 +196,10 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     return LeaseResponse(items=items, lease_expires_at=expires)
 
 
-# Forward-only transitions reported by a leased worker. lease() writes
-# DOWNLOADING and upload() writes UPLOADED, so neither appears here.
+# Forward-only transitions reported by a leased worker. lease() writes QUEUED
+# and upload() writes UPLOADED, so neither appears here.
 _STATE_PREDECESSOR = {
+    GranuleState.DOWNLOADING.value: GranuleState.QUEUED.value,
     GranuleState.DOWNLOADED.value: GranuleState.DOWNLOADING.value,
     GranuleState.PROCESSING.value: GranuleState.DOWNLOADED.value,
     GranuleState.PROCESSED.value: GranuleState.PROCESSING.value,

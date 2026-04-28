@@ -158,7 +158,13 @@ function onKey(e: KeyboardEvent) {
           <ProgressBar :value="worker.disk_used_gb" :max="worker.disk_total_gb" :tone="diskTone" />
         </div>
 
-        <div class="grid grid-cols-3 gap-3 rounded-xl border border-border bg-subtle/60 p-3 text-center">
+        <div class="grid grid-cols-4 gap-3 rounded-xl border border-border bg-subtle/60 p-3 text-center">
+          <div>
+            <div class="stat-label">排队</div>
+            <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-text">
+              {{ worker.queue_queued }}
+            </div>
+          </div>
           <div>
             <div class="stat-label">下载</div>
             <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-text">

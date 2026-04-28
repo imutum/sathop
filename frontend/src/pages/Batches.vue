@@ -21,6 +21,7 @@ const TERMINAL: GranuleState[] = ["acked", "deleted"];
 const ERRORED: GranuleState[] = ["failed", "blacklisted"];
 const IN_FLIGHT: GranuleState[] = [
   "pending",
+  "queued",
   "downloading",
   "downloaded",
   "processing",

@@ -104,6 +104,7 @@ class Worker:
                         disk_total_gb=du.total / 1024**3,
                         cpu_percent=psutil.cpu_percent(interval=None),
                         mem_percent=vm.percent,
+                        queue_queued=self.stage["queued"],
                         queue_downloading=self.stage["downloading"],
                         queue_processing=self.stage["processing"],
                         queue_uploading=self.stage["uploading"],
@@ -172,10 +173,16 @@ class Worker:
                 current = None
 
         try:
-            _enter("downloading")
-            log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
+            # Lease wrote state=QUEUED. We hold that bucket until the download
+            # semaphore frees up, then promote QUEUED→DOWNLOADING so the UI
+            # only flags rows whose bytes are actually moving.
+            _enter("queued")
             paths: list[Path] = []
             async with self._download_sem:
+                _exit()
+                _enter("downloading")
+                await self._report_state(gid, GranuleState.DOWNLOADING)
+                log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
                 for spec in item.inputs:
                     dst = input_dir / spec.filename
                     auth = _auth_for(item.credentials, spec.credential, gid)

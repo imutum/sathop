@@ -3,6 +3,7 @@
 // straight through.
 export const BADGE_TONES = {
   pending: "bg-subtle text-muted ring-border",
+  queued: "bg-amber-500/10 text-amber-600 ring-amber-500/25 dark:text-amber-300",
   downloading: "bg-sky-500/10 text-sky-500 ring-sky-500/25 dark:text-sky-300",
   downloaded: "bg-sky-500/10 text-sky-500 ring-sky-500/25 dark:text-sky-300",
   processing: "bg-indigo-500/10 text-indigo-500 ring-indigo-500/25 dark:text-indigo-300",

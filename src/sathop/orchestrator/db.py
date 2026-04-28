@@ -50,6 +50,10 @@ class Worker(Base):
     cpu_percent: Mapped[float] = mapped_column(Float, default=0.0)
     mem_percent: Mapped[float] = mapped_column(Float, default=0.0)
     monthly_egress_gb: Mapped[float] = mapped_column(Float, default=0.0)
+    # Worker-reported queue depths. queue_queued = leased granules whose handler
+    # is blocked on the download semaphore (state=queued). Nullable so older
+    # workers that don't send the field still register cleanly via _ensure_columns.
+    queue_queued: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     queue_downloading: Mapped[int] = mapped_column(Integer, default=0)
     queue_processing: Mapped[int] = mapped_column(Integer, default=0)
     queue_uploading: Mapped[int] = mapped_column(Integer, default=0)

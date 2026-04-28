@@ -54,6 +54,7 @@ def _full_lifecycle(client, gid: str = "g1") -> None:
     r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 1})
     assert r.status_code == 200
     assert any(it["granule_id"] == gid for it in r.json()["items"])
+    assert _state(client, gid, GranuleState.DOWNLOADING.value).status_code == 200
     assert _state(client, gid, GranuleState.DOWNLOADED.value).status_code == 200
     assert _state(client, gid, GranuleState.PROCESSING.value).status_code == 200
     assert _state(client, gid, GranuleState.PROCESSED.value).status_code == 200
@@ -87,6 +88,7 @@ async def test_failure_records_only_completed_stages(client):
     await _seed_worker_batch_granule()
     r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 1})
     assert r.status_code == 200
+    assert _state(client, "g1", GranuleState.DOWNLOADING.value).status_code == 200
     assert _state(client, "g1", GranuleState.DOWNLOADED.value).status_code == 200
     r = client.post(
         "/api/workers/failure",

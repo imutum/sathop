@@ -24,6 +24,7 @@ import { Icon } from "../ui/Icon";
 const STATE_FILTERS: { value: GranuleState | "all"; label: string }[] = [
   { value: "all", label: "全部" },
   { value: "pending", label: "待处理" },
+  { value: "queued", label: "排队中" },
   { value: "downloading", label: "下载中" },
   { value: "processing", label: "处理中" },
   { value: "uploaded", label: "已上传" },
@@ -35,6 +36,7 @@ const STATE_FILTERS: { value: GranuleState | "all"; label: string }[] = [
 
 const CANCELLABLE = new Set<GranuleState>([
   "pending",
+  "queued",
   "downloading",
   "downloaded",
   "processing",
@@ -43,6 +45,7 @@ const CANCELLABLE = new Set<GranuleState>([
 const RETRYABLE = new Set<GranuleState>(["failed", "blacklisted"]);
 const INFLIGHT_STATES: GranuleState[] = [
   "pending",
+  "queued",
   "downloading",
   "downloaded",
   "processing",

@@ -20,6 +20,7 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(requir
 
 NON_TERMINAL = {
     GranuleState.PENDING.value,
+    GranuleState.QUEUED.value,
     GranuleState.DOWNLOADING.value,
     GranuleState.DOWNLOADED.value,
     GranuleState.PROCESSING.value,

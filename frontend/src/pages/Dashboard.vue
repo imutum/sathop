@@ -25,6 +25,7 @@ const StateBarChart = defineAsyncComponent({
 
 const ORDER: GranuleState[] = [
   "pending",
+  "queued",
   "downloading",
   "downloaded",
   "processing",
@@ -57,7 +58,7 @@ const stuckTotal = computed(() =>
 );
 const failed = computed(() => (counts.value.failed ?? 0) + (counts.value.blacklisted ?? 0));
 const inflightTotal = computed(() =>
-  ORDER.slice(0, 7).reduce((s, k) => s + (counts.value[k] ?? 0), 0),
+  ORDER.slice(0, 8).reduce((s, k) => s + (counts.value[k] ?? 0), 0),
 );
 const done = computed(() => counts.value.deleted ?? 0);
 

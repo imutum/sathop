@@ -9,6 +9,10 @@ from pydantic import BaseModel, Field
 
 class GranuleState(str, Enum):
     PENDING = "pending"
+    # Lease succeeded but the worker is still waiting on its local download
+    # semaphore (SATHOP_DOWNLOAD_CONCURRENCY). Distinct from DOWNLOADING so the
+    # UI doesn't show 40 "downloading" rows when only 1 byte is actually moving.
+    QUEUED = "queued"
     DOWNLOADING = "downloading"
     DOWNLOADED = "downloaded"
     PROCESSING = "processing"
@@ -25,6 +29,7 @@ class GranuleState(str, Enum):
 # `IN_FLIGHT` constants in Batches.vue / BatchDetail.vue must mirror this.
 IN_FLIGHT_STATES: tuple[str, ...] = (
     GranuleState.PENDING.value,
+    GranuleState.QUEUED.value,
     GranuleState.DOWNLOADING.value,
     GranuleState.DOWNLOADED.value,
     GranuleState.PROCESSING.value,
@@ -74,6 +79,9 @@ class WorkerHeartbeat(BaseModel):
     cpu_percent: float = 0.0
     mem_percent: float = 0.0
     monthly_egress_gb: float = 0.0
+    # Granules leased + handler running but blocked on the download semaphore
+    # (i.e. state=queued in the orchestrator's view).
+    queue_queued: int = 0
     queue_downloading: int = 0
     queue_processing: int = 0
     queue_uploading: int = 0
@@ -217,8 +225,9 @@ class ProcessFailure(BaseModel):
 
 class StateUpdate(BaseModel):
     """Worker-reported phase boundary for a leased granule. The endpoint accepts
-    only forward transitions through `downloaded → processing → processed`;
-    `downloading` and `uploaded` are written by lease/upload directly."""
+    forward transitions through `downloading → downloaded → processing →
+    processed`; `queued` is written by lease and `uploaded` by the upload
+    endpoint."""
 
     granule_id: str
     worker_id: str

@@ -410,6 +410,7 @@ async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dic
 # a no-op operationally.
 _CANCELLABLE = {
     GranuleState.PENDING.value,
+    GranuleState.QUEUED.value,
     GranuleState.DOWNLOADING.value,
     GranuleState.DOWNLOADED.value,
     GranuleState.PROCESSING.value,
@@ -503,6 +504,7 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
 # the next state report and orphans staged inputs. Cancel first, or pass
 # `?force=true` to override.
 _INFLIGHT_FOR_DELETE = (
+    GranuleState.QUEUED.value,
     GranuleState.DOWNLOADING.value,
     GranuleState.DOWNLOADED.value,
     GranuleState.PROCESSING.value,

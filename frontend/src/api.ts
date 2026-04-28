@@ -2,6 +2,7 @@
 
 export type GranuleState =
   | "pending"
+  | "queued"
   | "downloading"
   | "downloaded"
   | "processing"
@@ -40,6 +41,9 @@ export type WorkerInfo = {
   cpu_percent: number;
   mem_percent: number;
   monthly_egress_gb: number;
+  // queue_queued: leased granules whose handler is waiting on the worker's
+  // local download semaphore; queue_downloading: actively transferring bytes.
+  queue_queued: number;
   queue_downloading: number;
   queue_processing: number;
   queue_uploading: number;

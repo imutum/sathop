@@ -1,5 +1,5 @@
-"""Worker state-transition endpoint + lease-sweeper coverage of the new
-in-flight states (downloaded/processing/processed)."""
+"""Worker state-transition endpoint + lease-sweeper coverage of the in-flight
+states (queued/downloading/downloaded/processing/processed)."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ async def client(tmp_path):
 
 async def _seed(
     granule_id: str = "g1",
-    state: str = GranuleState.DOWNLOADING.value,
+    state: str = GranuleState.QUEUED.value,
     leased_by: str | None = "w1",
     expires_in: timedelta = timedelta(minutes=30),
 ) -> None:
@@ -72,6 +72,7 @@ def _post(client, gid: str, state: str, worker_id: str = "w1"):
 async def test_full_forward_chain(client):
     await _seed()
     for nxt in (
+        GranuleState.DOWNLOADING.value,
         GranuleState.DOWNLOADED.value,
         GranuleState.PROCESSING.value,
         GranuleState.PROCESSED.value,
@@ -87,17 +88,18 @@ async def test_full_forward_chain(client):
 
 async def test_rejects_when_worker_does_not_hold_lease(client):
     await _seed(leased_by="w-other")
-    r = _post(client, "g1", GranuleState.DOWNLOADED.value, worker_id="w1")
+    r = _post(client, "g1", GranuleState.DOWNLOADING.value, worker_id="w1")
     assert r.status_code == 409
-    assert await _state("g1") == GranuleState.DOWNLOADING.value
+    assert await _state("g1") == GranuleState.QUEUED.value
 
 
 async def test_rejects_skipping_intermediate(client):
-    """From DOWNLOADING you cannot jump straight to PROCESSING."""
+    """From QUEUED you cannot jump straight to DOWNLOADED — DOWNLOADING is
+    required to mark the start of byte transfer."""
     await _seed()
-    r = _post(client, "g1", GranuleState.PROCESSING.value)
+    r = _post(client, "g1", GranuleState.DOWNLOADED.value)
     assert r.status_code == 409
-    assert await _state("g1") == GranuleState.DOWNLOADING.value
+    assert await _state("g1") == GranuleState.QUEUED.value
 
 
 async def test_rejects_backwards_transition(client):
@@ -108,16 +110,17 @@ async def test_rejects_backwards_transition(client):
 
 async def test_rejects_unknown_granule(client):
     await _seed()
-    r = _post(client, "ghost", GranuleState.DOWNLOADED.value)
+    r = _post(client, "ghost", GranuleState.DOWNLOADING.value)
     assert r.status_code == 404
 
 
 async def test_rejects_non_reportable_state(client):
-    """downloading / uploaded / pending are owned by lease/upload/etc., not
-    by the worker state endpoint."""
+    """queued / uploaded / pending are owned by lease/upload/etc., not by the
+    worker state endpoint. downloading IS reportable now (worker promotes from
+    queued once the download semaphore frees)."""
     await _seed()
     for forbidden in (
-        GranuleState.DOWNLOADING.value,
+        GranuleState.QUEUED.value,
         GranuleState.UPLOADED.value,
         GranuleState.PENDING.value,
         GranuleState.FAILED.value,
@@ -132,6 +135,7 @@ async def test_rejects_non_reportable_state(client):
 @pytest.mark.parametrize(
     "state",
     [
+        GranuleState.QUEUED.value,
         GranuleState.DOWNLOADING.value,
         GranuleState.DOWNLOADED.value,
         GranuleState.PROCESSING.value,

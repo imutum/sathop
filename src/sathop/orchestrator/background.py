@@ -22,6 +22,7 @@ SWEEP_INTERVAL_SEC = 60
 # All states where a worker holds the lease. UPLOADED already clears
 # leased_by, so it doesn't need reclaiming.
 _RECLAIMABLE_STATES = (
+    GranuleState.QUEUED.value,
     GranuleState.DOWNLOADING.value,
     GranuleState.DOWNLOADED.value,
     GranuleState.PROCESSING.value,

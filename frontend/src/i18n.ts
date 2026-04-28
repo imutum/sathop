@@ -20,6 +20,7 @@ export function useNow() {
 
 export const GRANULE_STATE_ZH: Record<GranuleState, string> = {
   pending: "待处理",
+  queued: "排队中",
   downloading: "下载中",
   downloaded: "下载完成",
   processing: "处理中",
