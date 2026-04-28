@@ -18,6 +18,14 @@ class Settings:
     retain_deleted_days: int = int(os.getenv("SATHOP_RETAIN_DELETED_DAYS", "7"))
     retention_sweep_sec: int = int(os.getenv("SATHOP_RETENTION_SWEEP_SEC", "3600"))
     max_inflight_per_worker: int = int(os.getenv("SATHOP_MAX_INFLIGHT_PER_WORKER", "0"))
+    # Auto-blacklist threshold: a granule that has failed this many times stops
+    # being retried by the lease loop. Operator can still hit "重试" to reset.
+    max_retries: int = max(1, int(os.getenv("SATHOP_MAX_RETRIES", "3")))
+    # Receivers stop being offered an object after this many pull failures.
+    # Otherwise a worker that vanishes (presigned URL unreachable) would have
+    # its objects polled forever by every receiver. Operator can still ack
+    # success=true to retire an object early; no auto-recovery once exhausted.
+    max_pull_failures: int = max(1, int(os.getenv("SATHOP_MAX_PULL_FAILURES", "5")))
 
 
 settings = Settings()

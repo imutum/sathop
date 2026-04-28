@@ -88,6 +88,18 @@ async def _collect(s: AsyncSession) -> bytes:
     g_recv_free = Gauge(
         "sathop_receiver_disk_free_bytes", "Receiver free disk bytes", ["receiver_id"], registry=reg
     )
+    g_recv_pulling = Gauge(
+        "sathop_receiver_queue_pulling",
+        "Receiver in-flight pull count",
+        ["receiver_id"],
+        registry=reg,
+    )
+    g_recv_bps = Gauge(
+        "sathop_receiver_throughput_bytes_per_second",
+        "Receiver pull throughput (rolling ~60s) in bytes/sec",
+        ["receiver_id"],
+        registry=reg,
+    )
     g_queue = Gauge(
         "sathop_worker_queue", "Worker in-flight items by stage", ["worker_id", "stage"], registry=reg
     )
@@ -137,6 +149,8 @@ async def _collect(s: AsyncSession) -> bytes:
     for r in receivers:
         g_hb_receiver.labels(receiver_id=r.receiver_id).set(_age_seconds(now, r.last_seen))
         g_recv_free.labels(receiver_id=r.receiver_id).set(r.disk_free_gb * GB)
+        g_recv_pulling.labels(receiver_id=r.receiver_id).set(r.queue_pulling or 0)
+        g_recv_bps.labels(receiver_id=r.receiver_id).set(r.recent_pull_bps or 0)
 
     day_ago = now - timedelta(hours=24)
     ev_counts = dict(

@@ -20,6 +20,18 @@ class GranuleState(str, Enum):
     BLACKLISTED = "blacklisted"
 
 
+# States where the worker pipeline still has work to do. Excludes UPLOADED
+# (worker done, waiting on receiver) and the terminal/error states. Frontend
+# `IN_FLIGHT` constants in Batches.vue / BatchDetail.vue must mirror this.
+IN_FLIGHT_STATES: tuple[str, ...] = (
+    GranuleState.PENDING.value,
+    GranuleState.DOWNLOADING.value,
+    GranuleState.DOWNLOADED.value,
+    GranuleState.PROCESSING.value,
+    GranuleState.PROCESSED.value,
+)
+
+
 class WorkerRegister(BaseModel):
     worker_id: str
     version: str = ""
@@ -65,6 +77,10 @@ class WorkerHeartbeat(BaseModel):
     queue_downloading: int = 0
     queue_processing: int = 0
     queue_uploading: int = 0
+    # True while the worker is gating off new leases for any reason (currently
+    # disk-watermark backpressure). Surfaces to operators so an "online but
+    # idle" worker doesn't look like the orchestrator is starving it.
+    paused: bool = False
 
 
 class ReceiverRegister(BaseModel):
@@ -76,6 +92,13 @@ class ReceiverRegister(BaseModel):
 class ReceiverHeartbeat(BaseModel):
     receiver_id: str
     disk_free_gb: float = 0.0
+    # Number of pulls currently in flight (mirrors worker.queue_*). Lets
+    # operators tell "idle" from "actively pulling" without watching logs.
+    queue_pulling: int = 0
+    # Bytes pulled in the recent rolling window (~60s) reported by the receiver
+    # — divide by the window for MB/s. Persisted as the latest sample, not a
+    # counter; next heartbeat overwrites.
+    recent_pull_bps: int = 0
 
 
 class InputSpec(BaseModel):
@@ -119,6 +142,14 @@ class BatchSummary(BaseModel):
     status: str
     created_at: datetime
     counts: dict[str, int]
+    # Count of this batch's still-pending objects whose receiver pulls hit
+    # max_pull_failures. Computed authoritatively by the orchestrator (one
+    # query, all granules) so a >200-granule batch's stuck-delivery signal
+    # surfaces in the listing without relying on the client-side granule page.
+    objects_exhausted: int = 0
+    # Wall-clock-extrapolated remaining seconds; None when sample <3 uploads
+    # or no in-flight granules.
+    eta_seconds: int | None = None
 
 
 class GranuleBulkAdd(BaseModel):
@@ -136,6 +167,10 @@ class GranuleRow(BaseModel):
     leased_by: str | None
     error: str | None
     updated_at: datetime
+    # Count of this granule's objects that have hit max_pull_failures and are
+    # no longer offered to receivers. Lets the UI flag granules stuck in
+    # UPLOADED whose downstream delivery has effectively given up.
+    objects_exhausted: int = 0
 
 
 class LeaseRequest(BaseModel):
@@ -229,6 +264,9 @@ class BundleSummary(BaseModel):
     size: int
     description: str | None = None
     uploaded_at: datetime
+    # How many batches reference this bundle. Orchestrator computes; worker doesn't read.
+    # Lets the registry UI show "safe to delete?" at a glance.
+    in_use_count: int = 0
 
 
 class BundleDetail(BundleSummary):

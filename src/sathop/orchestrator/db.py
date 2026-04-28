@@ -54,6 +54,9 @@ class Worker(Base):
     queue_processing: Mapped[int] = mapped_column(Integer, default=0)
     queue_uploading: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Worker self-reports True while it's gating off leases (disk pressure today).
+    # Display-only — actual lease gating happens worker-side.
+    paused: Mapped[bool] = mapped_column(Boolean, default=False)
     # Runtime concurrency override; NULL ⇒ worker's env capacity. Rides heartbeat replies.
     desired_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -66,6 +69,10 @@ class Receiver(Base):
     last_seen: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     disk_free_gb: Mapped[float] = mapped_column(Float, default=0.0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Latest heartbeat samples (overwritten each beat). Nullable so receivers
+    # running an older protocol still register cleanly via _ensure_columns.
+    queue_pulling: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    recent_pull_bps: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
 
 
 class Batch(Base):
@@ -116,6 +123,11 @@ class GranuleObject(Base):
     acked_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     acked_by: Mapped[str | None] = mapped_column(String, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    # Receiver pull-attempt failure counter; objects past max_pull_failures stop
+    # being offered (otherwise a permanently-broken URL spins receivers forever).
+    # Nullable for forward-compat: rows pre-dating this column read as NULL,
+    # which we coalesce to 0 in the pull/ack handlers.
+    failed_pulls: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
 
 
 class Event(Base):

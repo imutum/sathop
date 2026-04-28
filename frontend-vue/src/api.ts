@@ -23,6 +23,10 @@ export type BatchSummary = {
   // Authoritative count of stuck-delivery objects in this batch (failed_pulls
   // ≥ max). Surfaces in the listing without paging through granules.
   objects_exhausted: number;
+  // Estimated seconds-to-completion for in-flight granules; null when too
+  // little data to extrapolate (need ≥3 closed upload stages + at least one
+  // in-flight granule).
+  eta_seconds: number | null;
 };
 
 export type WorkerInfo = {

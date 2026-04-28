@@ -14,6 +14,7 @@ import asyncio
 import logging
 import shutil
 import time
+import traceback
 from collections import Counter
 from pathlib import Path
 
@@ -56,6 +57,10 @@ class Worker:
         self.stage: Counter[str] = Counter()
         self._pause_lease = False
         self._download_sem = asyncio.Semaphore(s.download_concurrency)
+        # Strong refs for handler tasks: asyncio.create_task() only weak-refs
+        # tasks, so without this set Python's GC may collect a long-running
+        # _handle() mid-flight and silently cancel it. See asyncio docs.
+        self._handlers: set[asyncio.Task[None]] = set()
         # Updated from heartbeat replies; orchestrator may clamp below s.capacity.
         self._effective_capacity = s.capacity
         self.progress = ProgressServer(self.client, port=s.progress_port)
@@ -102,6 +107,7 @@ class Worker:
                         queue_downloading=self.stage["downloading"],
                         queue_processing=self.stage["processing"],
                         queue_uploading=self.stage["uploading"],
+                        paused=self._pause_lease,
                     )
                 )
                 desired = resp.desired_capacity
@@ -137,7 +143,9 @@ class Worker:
                 continue
 
             for item in resp.items:
-                asyncio.create_task(self._handle(item))
+                t = asyncio.create_task(self._handle(item))
+                self._handlers.add(t)
+                t.add_done_callback(self._handlers.discard)
 
     async def _handle(self, item: LeaseItem) -> None:
         gid = item.granule_id
@@ -147,8 +155,24 @@ class Worker:
         input_dir.mkdir()
         nonce, progress_url = self.progress.issue(gid)
 
+        # Track which stage counter we currently hold so the except-block
+        # decrements only this granule's contribution. Decrementing every
+        # non-zero counter would corrupt concurrent granules' queue display.
+        current: str | None = None
+
+        def _enter(stage: str) -> None:
+            nonlocal current
+            self.stage[stage] += 1
+            current = stage
+
+        def _exit() -> None:
+            nonlocal current
+            if current is not None:
+                self.stage[current] -= 1
+                current = None
+
         try:
-            self.stage["downloading"] += 1
+            _enter("downloading")
             log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
             paths: list[Path] = []
             async with self._download_sem:
@@ -157,11 +181,13 @@ class Worker:
                     auth = _auth_for(item.credentials, spec.credential, gid)
                     cb = self._make_download_progress_cb(gid, spec.filename)
                     await self.downloader.fetch(spec.url, dst, auth=auth, progress_cb=cb)
+                    if spec.checksum:
+                        await downloader.verify_sha256(dst, spec.checksum)
                     paths.append(dst)
-            self.stage["downloading"] -= 1
+            _exit()
             await self._report_state(gid, GranuleState.DOWNLOADED)
 
-            self.stage["processing"] += 1
+            _enter("processing")
             await self._report_state(gid, GranuleState.PROCESSING)
             handle = await asyncio.to_thread(
                 bundle.ensure,
@@ -183,7 +209,7 @@ class Worker:
                 item.execution_env,
                 progress_url,
             )
-            self.stage["processing"] -= 1
+            _exit()
 
             if not result.ok:
                 await self.client.report_failure(
@@ -198,33 +224,35 @@ class Worker:
                 return
 
             await self._report_state(gid, GranuleState.PROCESSED)
-            self.stage["uploading"] += 1
+            _enter("uploading")
             uploaded: list[UploadedObject] = []
             key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
             for out in result.outputs:
                 key = _render_key(key_tpl, out, item.meta)
                 uploaded.append(self.storage.put(out, key))
             await self.client.report_upload(gid, self.s.worker_id, uploaded)
-            self.stage["uploading"] -= 1
+            _exit()
             log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
 
         except Exception as e:
             log.exception("[%s] unhandled error", gid)
-            for k in ("downloading", "processing", "uploading"):
-                if self.stage[k] > 0:
-                    self.stage[k] -= 1
             try:
+                # Carry exception type + tail of traceback so operators can
+                # diagnose without ssh'ing into the worker. Orchestrator caps
+                # the field at 2000 chars; the tail keeps the deepest frames.
+                tb = "".join(traceback.format_exception(e))[-1500:]
                 await self.client.report_failure(
                     ProcessFailure(
                         granule_id=gid,
                         worker_id=self.s.worker_id,
-                        error=f"worker exception: {e}",
+                        error=f"worker {type(e).__name__}: {e}\n\n{tb}",
                         exit_code=None,
                     )
                 )
             except Exception:
                 pass
         finally:
+            _exit()
             self.progress.revoke(nonce)
             shutil.rmtree(work_dir, ignore_errors=True)
 

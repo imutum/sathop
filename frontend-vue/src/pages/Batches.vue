@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, type BatchSummary, type GranuleState } from "../api";
-import { fmtAge } from "../i18n";
+import { fmtAge, fmtDuration } from "../i18n";
 import { useToast } from "../composables/useToast";
 import ActionButton from "../ui/ActionButton.vue";
 import Badge from "../ui/Badge.vue";
@@ -287,6 +287,13 @@ function onCreated() {
                     <span class="ml-1 text-muted">({{ r.pct }}%)</span>
                   </span>
                   <span class="flex items-center gap-2">
+                    <span
+                      v-if="r.b.eta_seconds != null"
+                      class="text-muted tabular-nums"
+                      :title="`按当前吞吐外推剩余 ${r.inFlight} 条`"
+                    >
+                      ≈ {{ fmtDuration(r.b.eta_seconds * 1000) }}
+                    </span>
                     <span v-if="r.errors > 0" class="text-danger">失败 {{ r.errors }}</span>
                     <span
                       v-if="r.b.objects_exhausted > 0"

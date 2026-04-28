@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import timedelta
 
@@ -33,6 +34,15 @@ from ..pubsub import publish
 router = APIRouter(prefix="/workers", tags=["workers"], dependencies=[Depends(require_token)])
 
 LEASE_DURATION = timedelta(minutes=30)
+
+# Serialize lease claims process-wide so two concurrent /lease calls can't
+# both observe the same PENDING rows and overwrite each other's UPDATE. The
+# SELECT-then-UPDATE pattern in lease() is racy without this — SQLAlchemy's
+# attribute-based UPDATE issues a primary-key-only WHERE clause, so the
+# second writer wins blindly and the first worker ends up with a phantom
+# lease (its later report_state 409s, downloaded bytes wasted). SQLite
+# already serializes writers at commit time, so the perf cost is negligible.
+_LEASE_LOCK = asyncio.Lock()
 
 # Non-terminal states where the worker actually holds storage for the granule's
 # staged inputs (before upload). Post-upload the worker releases leased_by but
@@ -96,6 +106,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     w.queue_downloading = req.queue_downloading
     w.queue_processing = req.queue_processing
     w.queue_uploading = req.queue_uploading
+    w.paused = req.paused
     await s.commit()
     publish({"scope": "workers"})
     return WorkerHeartbeatResponse(desired_capacity=w.desired_capacity)
@@ -103,6 +114,11 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
 
 @router.post("/lease", response_model=LeaseResponse)
 async def lease(req: LeaseRequest, s: AsyncSession = Depends(session)) -> LeaseResponse:
+    async with _LEASE_LOCK:
+        return await _lease_locked(req, s)
+
+
+async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     w = await s.get(Worker, req.worker_id)
     if w is None or not w.enabled:
         raise HTTPException(403, "worker not registered or disabled")
@@ -273,7 +289,11 @@ async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> di
     g.error = req.error[:2000]
     g.leased_by = None
     g.lease_expires_at = None
-    g.state = GranuleState.BLACKLISTED.value if g.retry_count >= 3 else GranuleState.PENDING.value
+    g.state = (
+        GranuleState.BLACKLISTED.value
+        if g.retry_count >= settings.max_retries
+        else GranuleState.PENDING.value
+    )
     g.updated_at = utcnow()
     await log(
         s,
@@ -330,6 +350,73 @@ async def set_capacity(
     await s.commit()
     publish({"scope": "workers"})
     return {"ok": True, "desired_capacity": desired_capacity}
+
+
+@router.put("/{worker_id}/enabled")
+async def set_enabled(
+    worker_id: str,
+    enabled: bool = Body(embed=True),
+    s: AsyncSession = Depends(session),
+) -> dict:
+    """Runtime kill-switch. Disabled workers receive 403 on next lease call,
+    so in-flight work drains naturally before the worker goes idle."""
+    w = await s.get(Worker, worker_id)
+    if w is None:
+        raise HTTPException(404, "worker not found")
+    w.enabled = enabled
+    await log(s, worker_id, f"worker {'enabled' if enabled else 'disabled'}")
+    await s.commit()
+    publish({"scope": "workers"})
+    return {"ok": True, "enabled": enabled}
+
+
+@router.delete("/{worker_id}")
+async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> dict:
+    """Permanently remove a decommissioned worker row. Refuses if the worker is
+    still enabled or still holding any granule storage — operator must disable
+    and let it drain first."""
+    w = await s.get(Worker, worker_id)
+    if w is None:
+        raise HTTPException(404, "worker not found")
+    if w.enabled:
+        raise HTTPException(409, "worker is still enabled — disable it first")
+    inflight = await _count_inflight(s, worker_id)
+    if inflight > 0:
+        sample_pre = (
+            (
+                await s.execute(
+                    select(Granule.granule_id)
+                    .where(Granule.leased_by == worker_id)
+                    .where(Granule.state.in_(_HOLDING_STATES))
+                    .limit(5)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        sample_post = (
+            (
+                await s.execute(
+                    select(distinct(GranuleObject.granule_id))
+                    .where(GranuleObject.worker_id == worker_id)
+                    .where(GranuleObject.deleted_at.is_(None))
+                    .limit(5)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        sample = list({*sample_pre, *sample_post})[:5]
+        more = f" (+{inflight - len(sample)} more)" if inflight > len(sample) else ""
+        raise HTTPException(
+            409,
+            f"worker still holds {inflight} granule(s): {', '.join(sample)}{more}; wait for drain",
+        )
+    await s.delete(w)
+    await log(s, worker_id, "worker forgotten (row deleted)")
+    await s.commit()
+    publish({"scope": "workers"})
+    return {"ok": True}
 
 
 @router.post("/delete-confirmed")

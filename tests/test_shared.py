@@ -229,7 +229,11 @@ async def test_delete_refused_when_bundle_references_it(client):
 
     r = client.delete("/api/shared/mask.tif")
     assert r.status_code == 409
-    assert "demo@0.1" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert "referenced by 1 bundle(s)" in detail
+    assert "demo@0.1" in detail
+    # Format must be operator-readable, not Python list repr
+    assert "[" not in detail and "]" not in detail
 
     assert client.delete("/api/bundles/demo/0.1").status_code == 200
     assert client.delete("/api/shared/mask.tif").status_code == 200

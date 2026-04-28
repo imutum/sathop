@@ -193,10 +193,11 @@ async def delete(name: str, s: AsyncSession = Depends(session)) -> dict:
         f"{b.name}@{b.version}" for b in bundles if name in parse_shared_files(json.loads(b.manifest_json))
     ]
     if referrers:
+        sample = ", ".join(referrers[:5])
+        more = f" (+{len(referrers) - 5} more)" if len(referrers) > 5 else ""
         raise HTTPException(
             409,
-            f"shared file {name!r} is referenced by {len(referrers)} bundle(s): "
-            f"{referrers[:5]}{'...' if len(referrers) > 5 else ''}",
+            f"shared file {name!r} is referenced by {len(referrers)} bundle(s): {sample}{more}",
         )
 
     blob = settings.shared_storage / f.name

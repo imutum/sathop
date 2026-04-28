@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, type GranuleRow, type GranuleState } from "../api";
-import { fmtAge, levelLabel, stateLabel } from "../i18n";
+import { fmtAge, fmtDuration, levelLabel, stateLabel } from "../i18n";
 import { useToast } from "../composables/useToast";
 import ActionButton from "../ui/ActionButton.vue";
 import Badge from "../ui/Badge.vue";
@@ -318,7 +318,14 @@ function confirmDelete() {
         <Field label="创建时间">
           <span class="text-xs">{{ fmtAge(b.created_at) }}</span>
         </Field>
-        <Field label="状态">
+        <Field
+          v-if="b.eta_seconds != null"
+          label="预计剩余"
+          hint="按当前吞吐外推"
+        >
+          <span class="text-xs tabular-nums">≈ {{ fmtDuration(b.eta_seconds * 1000) }}</span>
+        </Field>
+        <Field v-else label="状态">
           <span class="text-xs">{{ b.status }}</span>
         </Field>
       </div>
@@ -439,7 +446,11 @@ function confirmDelete() {
       </div>
     </Card>
 
-    <BatchTimingCard :batch-id="batchId" :remaining="inflightCount" />
+    <BatchTimingCard
+      :batch-id="batchId"
+      :remaining="inflightCount"
+      :eta-seconds="b?.eta_seconds ?? null"
+    />
 
     <Card
       title="日志"

@@ -58,7 +58,7 @@ async def overview(s: AsyncSession = Depends(session)) -> dict:
     )
     stuck = dict((await s.execute(stuck_stmt)).all())
 
-    last_events = (await s.execute(select(Event).order_by(Event.id.desc()).limit(5))).scalars().all()
+    last_events = (await s.execute(select(Event).order_by(Event.id.desc()).limit(10))).scalars().all()
 
     return {
         "state_counts": state_counts,
@@ -128,6 +128,46 @@ async def list_stuck(state: str, s: AsyncSession = Depends(session)) -> list[dic
         {
             "granule_id": g.granule_id,
             "batch_id": g.batch_id,
+            "state": g.state,
+            "leased_by": g.leased_by,
+            "retry_count": g.retry_count,
+            "error": g.error,
+            "updated_at": g.updated_at.isoformat(),
+            "age_hours": (now - g.updated_at).total_seconds() / 3600,
+        }
+        for g in rows
+    ]
+
+
+@router.get("/stuck")
+async def list_stuck_all(
+    limit: int = 50,
+    s: AsyncSession = Depends(session),
+) -> list[dict]:
+    """Top-N oldest stuck granules across every non-terminal state. Powers the
+    Dashboard's drill-down — operator sees count → clicks → sees the actual
+    rows to investigate without paging through every state separately."""
+    limit = max(1, min(500, limit))
+    now = datetime.now(UTC)
+    threshold = now - timedelta(hours=STUCK_AGE_HOURS)
+    rows = (
+        (
+            await s.execute(
+                select(Granule)
+                .where(Granule.state.in_(list(NON_TERMINAL)))
+                .where(Granule.updated_at < threshold)
+                .order_by(Granule.updated_at.asc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "granule_id": g.granule_id,
+            "batch_id": g.batch_id,
+            "state": g.state,
             "leased_by": g.leased_by,
             "retry_count": g.retry_count,
             "error": g.error,
@@ -147,7 +187,11 @@ class OrchestratorInfo(BaseModel):
     retain_deleted_days: int
     retention_sweep_sec: int
     max_inflight_per_worker: int
+    max_retries: int
+    max_pull_failures: int
+    stuck_age_hours: int
     dev_mode: bool
+    auth_open: bool
 
 
 @router.get("/settings/info", response_model=OrchestratorInfo)
@@ -161,5 +205,9 @@ async def orchestrator_info() -> OrchestratorInfo:
         retain_deleted_days=settings.retain_deleted_days,
         retention_sweep_sec=settings.retention_sweep_sec,
         max_inflight_per_worker=settings.max_inflight_per_worker,
+        max_retries=settings.max_retries,
+        max_pull_failures=settings.max_pull_failures,
+        stuck_age_hours=STUCK_AGE_HOURS,
         dev_mode=settings.dev,
+        auth_open=not settings.token,
     )

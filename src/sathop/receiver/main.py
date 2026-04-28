@@ -8,6 +8,8 @@ import logging
 import os
 import shutil
 import sys
+import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -50,6 +52,35 @@ class OrchestratorClient:
 log = logging.getLogger("sathop.receiver")
 
 _CHUNK = 256 * 1024
+_THROUGHPUT_WINDOW_SEC = 60.0
+
+
+class _PullStats:
+    """In-process counters surfaced via heartbeat. `in_flight` is incremented
+    for the duration of each `_fetch_one`; bytes from successful pulls land
+    in a (ts, bytes) deque and `recent_bps()` returns the current window
+    rate so the operator can see pull throughput in the UI."""
+
+    def __init__(self, window_sec: float = _THROUGHPUT_WINDOW_SEC) -> None:
+        self.window = window_sec
+        self.in_flight = 0
+        self._events: deque[tuple[float, int]] = deque()
+
+    def begin(self) -> None:
+        self.in_flight += 1
+
+    def end(self, bytes_pulled: int) -> None:
+        self.in_flight -= 1
+        if bytes_pulled > 0:
+            self._events.append((time.monotonic(), bytes_pulled))
+
+    def recent_bps(self) -> int:
+        cutoff = time.monotonic() - self.window
+        while self._events and self._events[0][0] < cutoff:
+            self._events.popleft()
+        if not self._events:
+            return 0
+        return int(sum(b for _, b in self._events) / self.window)
 
 
 @dataclass(frozen=True)
@@ -81,15 +112,22 @@ async def _pull_http(url: str, dest: Path) -> tuple[str, int]:
     tmp = dest.with_suffix(dest.suffix + ".part")
     h = hashlib.sha256()
     size = 0
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=600.0), follow_redirects=True) as c:
-        async with c.stream("GET", url) as r:
-            r.raise_for_status()
-            with tmp.open("wb") as f:
-                async for chunk in r.aiter_bytes(_CHUNK):
-                    f.write(chunk)
-                    h.update(chunk)
-                    size += len(chunk)
-    tmp.replace(dest)
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=600.0), follow_redirects=True) as c:
+            async with c.stream("GET", url) as r:
+                r.raise_for_status()
+                with tmp.open("wb") as f:
+                    async for chunk in r.aiter_bytes(_CHUNK):
+                        f.write(chunk)
+                        h.update(chunk)
+                        size += len(chunk)
+        tmp.replace(dest)
+    except BaseException:
+        # Mid-stream failure (network, cancel, disk full): drop the partial.
+        # Otherwise an orphan `<dest>.part` lingers if the orchestrator stops
+        # offering this object before the next pull attempt overwrites it.
+        tmp.unlink(missing_ok=True)
+        raise
     return h.hexdigest(), size
 
 
@@ -97,6 +135,7 @@ class Receiver:
     def __init__(self, s: Settings) -> None:
         self.s = s
         self.client = OrchestratorClient(s.orchestrator_url, s.token)
+        self.stats = _PullStats()
         s.storage_dir.mkdir(parents=True, exist_ok=True)
 
     async def run(self) -> None:
@@ -121,6 +160,8 @@ class Receiver:
                     ReceiverHeartbeat(
                         receiver_id=self.s.receiver_id,
                         disk_free_gb=free,
+                        queue_pulling=self.stats.in_flight,
+                        recent_pull_bps=self.stats.recent_bps(),
                     )
                 )
             except Exception as e:
@@ -150,39 +191,48 @@ class Receiver:
 
     async def _fetch_one(self, sem: asyncio.Semaphore, item) -> None:
         async with sem:
-            dest = self.s.storage_dir / item.object_key
+            self.stats.begin()
+            pulled_bytes = 0
             try:
-                sha, size = await _pull_http(item.presigned_url, dest)
-                ok = sha == item.sha256 and size == item.size
-                if not ok:
-                    dest.unlink(missing_ok=True)
-                await self.client.ack(
-                    AckReport(
-                        receiver_id=self.s.receiver_id,
-                        object_id=item.object_id,
-                        sha256=sha,
-                        success=ok,
-                        error=None if ok else f"sha/size mismatch {sha}/{size} vs {item.sha256}/{item.size}",
-                    )
-                )
-                if ok:
-                    log.info("pulled %s (%d bytes)", item.object_key, size)
-                else:
-                    log.error("verify failed %s", item.object_key)
-            except Exception as e:
-                log.warning("pull %s failed: %s", item.object_key, e)
+                dest = self.s.storage_dir / item.object_key
                 try:
+                    sha, size = await _pull_http(item.presigned_url, dest)
+                    ok = sha == item.sha256 and size == item.size
+                    if ok:
+                        pulled_bytes = size
+                    else:
+                        dest.unlink(missing_ok=True)
                     await self.client.ack(
                         AckReport(
                             receiver_id=self.s.receiver_id,
                             object_id=item.object_id,
-                            sha256="",
-                            success=False,
-                            error=str(e),
+                            sha256=sha,
+                            success=ok,
+                            error=None
+                            if ok
+                            else f"sha/size mismatch {sha}/{size} vs {item.sha256}/{item.size}",
                         )
                     )
-                except Exception:
-                    pass
+                    if ok:
+                        log.info("pulled %s (%d bytes)", item.object_key, size)
+                    else:
+                        log.error("verify failed %s", item.object_key)
+                except Exception as e:
+                    log.warning("pull %s failed: %s", item.object_key, e)
+                    try:
+                        await self.client.ack(
+                            AckReport(
+                                receiver_id=self.s.receiver_id,
+                                object_id=item.object_id,
+                                sha256="",
+                                success=False,
+                                error=str(e),
+                            )
+                        )
+                    except Exception:
+                        pass
+            finally:
+                self.stats.end(pulled_bytes)
 
 
 async def main() -> None:

@@ -256,17 +256,42 @@ async def test_delete_removes_row_and_blob(client):
     assert not (settings.bundle_storage / f"{sha}.zip").exists()
 
 
+async def test_in_use_count_surfaces_in_list_and_detail(client):
+    """List + detail must include in_use_count so the UI can flag bundles still in use."""
+    blob = _make_zip("inuse", "1.0")
+    blob2 = _make_zip("free", "1.0")
+    client.post("/api/bundles", files={"file": ("a.zip", blob, "application/zip")})
+    client.post("/api/bundles", files={"file": ("b.zip", blob2, "application/zip")})
+
+    async with orch_db._session_maker() as s:
+        s.add(Batch(batch_id="b1", name="t", bundle_ref="orch:inuse@1.0"))
+        s.add(Batch(batch_id="b2", name="t2", bundle_ref="orch:inuse@1.0"))
+        await s.commit()
+
+    rows = client.get("/api/bundles").json()
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["inuse"]["in_use_count"] == 2
+    assert by_name["free"]["in_use_count"] == 0
+
+    d = client.get("/api/bundles/inuse/1.0").json()
+    assert d["in_use_count"] == 2
+
+
 async def test_delete_blocked_by_batch_reference(client):
     blob = _make_zip("demo", "4.0")
     client.post("/api/bundles", files={"file": ("b.zip", blob, "application/zip")})
 
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id="b1", name="t", bundle_ref="orch:demo@4.0"))
+        s.add(Batch(batch_id="b2", name="t2", bundle_ref="orch:demo@4.0"))
         await s.commit()
 
     r = client.delete("/api/bundles/demo/4.0")
     assert r.status_code == 409
-    assert "referenced" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert "referenced by 2 batch" in detail
+    # Operator needs to know which batches — IDs surface in the error.
+    assert "b1" in detail and "b2" in detail
 
 
 # ─── files listing / content ─────────────────────────────────────────────

@@ -6,7 +6,7 @@ import { TIMING_STAGE_ZH, fmtDuration, fmtMs, fmtPerMinute } from "../i18n";
 import Card from "../ui/Card.vue";
 import Field from "../ui/Field.vue";
 
-const props = defineProps<{ batchId: string; remaining: number }>();
+const props = defineProps<{ batchId: string; remaining: number; etaSeconds: number | null }>();
 
 const STAGE_ORDER: TimingStage[] = ["download", "process", "upload"];
 
@@ -18,16 +18,6 @@ const q = useQuery({
 
 const data = computed(() => q.data.value);
 const doneCount = computed(() => data.value?.stages.upload.count ?? 0);
-const showEta = computed(
-  () =>
-    !!data.value &&
-    data.value.wall_ms > 0 &&
-    doneCount.value >= 3 &&
-    props.remaining > 0,
-);
-const etaMs = computed(() =>
-  showEta.value ? Math.round((data.value!.wall_ms / doneCount.value) * props.remaining) : 0,
-);
 </script>
 
 <template>
@@ -52,11 +42,11 @@ const etaMs = computed(() =>
           <span class="tabular-nums">{{ fmtPerMinute(doneCount, data.wall_ms) }}</span>
         </Field>
         <Field
-          v-if="showEta"
+          v-if="etaSeconds != null"
           :label="`预计剩余 (${remaining} 条)`"
           hint="按当前吞吐外推"
         >
-          <span class="tabular-nums">≈ {{ fmtDuration(etaMs) }}</span>
+          <span class="tabular-nums">≈ {{ fmtDuration(etaSeconds * 1000) }}</span>
         </Field>
       </div>
       <div class="overflow-x-auto">

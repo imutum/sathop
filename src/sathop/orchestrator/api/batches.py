@@ -5,14 +5,32 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import BatchCreate, BatchSummary, GranuleBulkAdd, GranuleRow, GranuleState
+from sathop.shared.protocol import (
+    IN_FLIGHT_STATES,
+    BatchCreate,
+    BatchSummary,
+    GranuleBulkAdd,
+    GranuleRow,
+    GranuleState,
+)
 
 from ..bundle_schema import InputsSchema, parse_shared_files, validate_granule
-from ..config import require_token
-from ..db import Batch, Bundle, Granule, SharedFile, session, utcnow
+from ..config import require_token, settings
+from ..db import (
+    Batch,
+    Bundle,
+    Event,
+    Granule,
+    GranuleObject,
+    GranuleProgress,
+    GranuleStageTiming,
+    SharedFile,
+    session,
+    utcnow,
+)
 from ..pubsub import log_event as log
 from ..pubsub import publish
 
@@ -42,13 +60,92 @@ def _compose_gid(batch_id: str, user_gid: str) -> str:
 
 
 async def _counts(s: AsyncSession, batch_id: str) -> dict[str, int]:
+    return (await _counts_bulk(s, [batch_id]))[batch_id]
+
+
+async def _counts_bulk(s: AsyncSession, batch_ids: list[str]) -> dict[str, dict[str, int]]:
+    if not batch_ids:
+        return {}
     stmt = (
-        select(Granule.state, func.count(Granule.granule_id))
-        .where(Granule.batch_id == batch_id)
-        .group_by(Granule.state)
+        select(Granule.batch_id, Granule.state, func.count(Granule.granule_id))
+        .where(Granule.batch_id.in_(batch_ids))
+        .group_by(Granule.batch_id, Granule.state)
     )
-    rows = (await s.execute(stmt)).all()
-    return {state: n for state, n in rows}
+    out: dict[str, dict[str, int]] = {bid: {} for bid in batch_ids}
+    for batch_id, state, n in (await s.execute(stmt)).all():
+        out[batch_id][state] = n
+    return out
+
+
+async def _exhausted_objects(s: AsyncSession, batch_id: str) -> int:
+    """Number of still-pending objects in the batch that hit the pull-failure
+    cap — i.e., delivery has effectively given up. Mirrors the predicate in
+    the receiver pull endpoint and the per-batch reset action."""
+    return int(
+        await s.scalar(
+            select(func.count(GranuleObject.id))
+            .join(Granule, GranuleObject.granule_id == Granule.granule_id)
+            .where(Granule.batch_id == batch_id)
+            .where(GranuleObject.acked_at.is_(None))
+            .where(GranuleObject.deleted_at.is_(None))
+            .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
+        )
+        or 0
+    )
+
+
+async def _eta_seconds_bulk(
+    s: AsyncSession,
+    counts_map: dict[str, dict[str, int]],
+) -> dict[str, int | None]:
+    """ETA = remaining_in_flight * (wall_seconds / closed_upload_stages).
+    None when sample <3 uploads, wall <=0, or no in-flight granules."""
+    if not counts_map:
+        return {}
+    batch_ids = list(counts_map)
+    rows = (
+        await s.execute(
+            select(
+                GranuleStageTiming.batch_id,
+                func.min(GranuleStageTiming.started_at),
+                func.max(GranuleStageTiming.finished_at),
+                func.sum(case((GranuleStageTiming.stage == "upload", 1), else_=0)),
+            )
+            .where(GranuleStageTiming.batch_id.in_(batch_ids))
+            .group_by(GranuleStageTiming.batch_id)
+        )
+    ).all()
+
+    out: dict[str, int | None] = dict.fromkeys(batch_ids, None)
+    for batch_id, first, last, done in rows:
+        done_n = int(done or 0)
+        if done_n < 3 or first is None or last is None:
+            continue
+        wall_sec = (last - first).total_seconds()
+        if wall_sec <= 0:
+            continue
+        remaining = sum(counts_map[batch_id].get(st, 0) for st in IN_FLIGHT_STATES)
+        if remaining <= 0:
+            continue
+        out[batch_id] = int(remaining * wall_sec / done_n)
+    return out
+
+
+async def _exhausted_objects_bulk(s: AsyncSession, batch_ids: list[str]) -> dict[str, int]:
+    """One grouped query for the batch list — keeps list_batches at O(1) DB
+    round-trips instead of O(N)."""
+    if not batch_ids:
+        return {}
+    stmt = (
+        select(Granule.batch_id, func.count(GranuleObject.id))
+        .join(Granule, GranuleObject.granule_id == Granule.granule_id)
+        .where(Granule.batch_id.in_(batch_ids))
+        .where(GranuleObject.acked_at.is_(None))
+        .where(GranuleObject.deleted_at.is_(None))
+        .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
+        .group_by(Granule.batch_id)
+    )
+    return dict((await s.execute(stmt)).all())
 
 
 @router.post("", response_model=BatchSummary)
@@ -132,26 +229,32 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
         status=b.status,
         created_at=b.created_at,
         counts=await _counts(s, b.batch_id),
+        objects_exhausted=0,
+        eta_seconds=None,
     )
 
 
 @router.get("", response_model=list[BatchSummary])
 async def list_batches(s: AsyncSession = Depends(session)) -> list[BatchSummary]:
     rows = (await s.execute(select(Batch).order_by(Batch.created_at.desc()))).scalars().all()
-    out: list[BatchSummary] = []
-    for b in rows:
-        out.append(
-            BatchSummary(
-                batch_id=b.batch_id,
-                name=b.name,
-                bundle_ref=b.bundle_ref,
-                target_receiver_id=b.target_receiver_id,
-                status=b.status,
-                created_at=b.created_at,
-                counts=await _counts(s, b.batch_id),
-            )
+    ids = [b.batch_id for b in rows]
+    counts_map = await _counts_bulk(s, ids)
+    exh_map = await _exhausted_objects_bulk(s, ids)
+    eta_map = await _eta_seconds_bulk(s, counts_map)
+    return [
+        BatchSummary(
+            batch_id=b.batch_id,
+            name=b.name,
+            bundle_ref=b.bundle_ref,
+            target_receiver_id=b.target_receiver_id,
+            status=b.status,
+            created_at=b.created_at,
+            counts=counts_map[b.batch_id],
+            objects_exhausted=exh_map.get(b.batch_id, 0),
+            eta_seconds=eta_map.get(b.batch_id),
         )
-    return out
+        for b in rows
+    ]
 
 
 @router.get("/{batch_id}", response_model=BatchSummary)
@@ -159,6 +262,8 @@ async def detail(batch_id: str, s: AsyncSession = Depends(session)) -> BatchSumm
     b = await s.get(Batch, batch_id)
     if b is None:
         raise HTTPException(404, "batch not found")
+    counts = await _counts(s, batch_id)
+    eta_map = await _eta_seconds_bulk(s, {batch_id: counts})
     return BatchSummary(
         batch_id=b.batch_id,
         name=b.name,
@@ -166,7 +271,9 @@ async def detail(batch_id: str, s: AsyncSession = Depends(session)) -> BatchSumm
         target_receiver_id=b.target_receiver_id,
         status=b.status,
         created_at=b.created_at,
-        counts=await _counts(s, b.batch_id),
+        counts=counts,
+        objects_exhausted=await _exhausted_objects(s, batch_id),
+        eta_seconds=eta_map.get(batch_id),
     )
 
 
@@ -220,6 +327,22 @@ async def list_granules(
         stmt = stmt.where(Granule.state.in_(wanted))
     stmt = stmt.order_by(Granule.updated_at.desc()).limit(limit).offset(offset)
     rows = (await s.execute(stmt)).scalars().all()
+
+    # One grouped query for exhausted-object counts → avoid N+1. Only granules
+    # that actually have any exhausted objects appear in the dict; others map
+    # to the default 0 below.
+    gids = [g.granule_id for g in rows]
+    exh_map: dict[str, int] = {}
+    if gids:
+        exh_stmt = (
+            select(GranuleObject.granule_id, func.count(GranuleObject.id))
+            .where(GranuleObject.granule_id.in_(gids))
+            .where(GranuleObject.acked_at.is_(None))
+            .where(GranuleObject.deleted_at.is_(None))
+            .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
+            .group_by(GranuleObject.granule_id)
+        )
+        exh_map = dict((await s.execute(exh_stmt)).all())
     return [
         GranuleRow(
             granule_id=g.granule_id,
@@ -229,9 +352,36 @@ async def list_granules(
             leased_by=g.leased_by,
             error=g.error,
             updated_at=g.updated_at,
+            objects_exhausted=exh_map.get(g.granule_id, 0),
         )
         for g in rows
     ]
+
+
+@router.post("/{batch_id}/reset-exhausted-objects")
+async def reset_exhausted_objects(batch_id: str, s: AsyncSession = Depends(session)) -> dict:
+    """Zero `failed_pulls` on all of this batch's still-pending objects that
+    hit the pull-failure cap. Use after fixing the upstream cause (worker
+    restored, network healed). Already-acked or already-deleted objects are
+    untouched."""
+    if await s.get(Batch, batch_id) is None:
+        raise HTTPException(404, "batch not found")
+    granule_ids_subq = select(Granule.granule_id).where(Granule.batch_id == batch_id).scalar_subquery()
+    result = await s.execute(
+        update(GranuleObject)
+        .where(GranuleObject.granule_id.in_(granule_ids_subq))
+        .where(GranuleObject.acked_at.is_(None))
+        .where(GranuleObject.deleted_at.is_(None))
+        .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
+        .values(failed_pulls=0)
+    )
+    reset = getattr(result, "rowcount", 0) or 0
+    if reset:
+        await log(s, "orchestrator", f"reset {reset} exhausted-pull objects in batch {batch_id}")
+    await s.commit()
+    if reset:
+        publish({"scope": "batches"})
+    return {"ok": True, "reset": reset}
 
 
 @router.post("/{batch_id}/retry-failed")
@@ -266,7 +416,7 @@ _CANCELLABLE = {
     GranuleState.PROCESSED.value,
 }
 
-# retry_count resets to 0 so auto-blacklist-after-3 starts fresh for the retry.
+# retry_count resets to 0 so the auto-blacklist counter starts fresh for the retry.
 _RETRYABLE = {
     GranuleState.FAILED.value,
     GranuleState.BLACKLISTED.value,
@@ -347,3 +497,81 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
     if rows:
         publish({"scope": "batches"})
     return {"ok": True, "cancelled": len(rows)}
+
+
+# Worker actively holds these on lease; deleting under them produces 404s on
+# the next state report and orphans staged inputs. Cancel first, or pass
+# `?force=true` to override.
+_INFLIGHT_FOR_DELETE = (
+    GranuleState.DOWNLOADING.value,
+    GranuleState.DOWNLOADED.value,
+    GranuleState.PROCESSING.value,
+    GranuleState.PROCESSED.value,
+)
+
+
+@router.delete("/{batch_id}")
+async def delete_batch(
+    batch_id: str,
+    force: bool = Query(False, description="delete even if granules are mid-flight"),
+    s: AsyncSession = Depends(session),
+) -> dict:
+    """Hard-delete a batch and every row that references it (granules,
+    objects, progress checkpoints, stage timings, scoped events).
+
+    Refuses by default if any granule is mid-flight on a worker — cancel the
+    batch first so the worker drops the lease cleanly, or pass `?force=true`
+    to delete anyway (workers will get 404s on their next state report).
+
+    Already-uploaded objects on worker storage are not cleaned up here; the
+    operator drops them via the worker's own retention or by hand. This
+    endpoint only removes orchestrator state."""
+    b = await s.get(Batch, batch_id)
+    if b is None:
+        raise HTTPException(404, "batch not found")
+
+    if not force:
+        active = (
+            await s.execute(
+                select(func.count(Granule.granule_id))
+                .where(Granule.batch_id == batch_id)
+                .where(Granule.state.in_(_INFLIGHT_FOR_DELETE))
+            )
+        ).scalar_one()
+        if active:
+            raise HTTPException(
+                409,
+                f"{active} granules are mid-flight on workers; cancel the batch first or pass ?force=true",
+            )
+
+    granule_ids = (
+        (await s.execute(select(Granule.granule_id).where(Granule.batch_id == batch_id))).scalars().all()
+    )
+
+    counts = {"granules": 0, "objects": 0, "progress": 0, "stage_timings": 0, "events": 0}
+    if granule_ids:
+        # Children before parent to keep FK refs consistent (SQLite doesn't
+        # enforce them, but the retention sweeper relies on the same order).
+        for table, key in (
+            (GranuleObject, "objects"),
+            (GranuleProgress, "progress"),
+            (GranuleStageTiming, "stage_timings"),
+            (Event, "events"),
+        ):
+            r = await s.execute(delete(table).where(table.granule_id.in_(granule_ids)))
+            counts[key] = getattr(r, "rowcount", 0) or 0
+        r = await s.execute(delete(Granule).where(Granule.batch_id == batch_id))
+        counts["granules"] = getattr(r, "rowcount", 0) or 0
+
+    await s.delete(b)
+    await log(
+        s,
+        "admin",
+        f"deleted batch {batch_id} (force={force}, {counts})",
+        level="warn",
+    )
+    await s.commit()
+    publish({"scope": "batches"})
+    if counts["events"]:
+        publish({"scope": "events"})
+    return {"ok": True, **counts}

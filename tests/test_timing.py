@@ -176,11 +176,49 @@ async def test_batch_timing_aggregates(client):
     r = client.get("/api/batches/b/timing")
     assert r.status_code == 200
     data = r.json()
+    stages = data["stages"]
 
-    assert data["download"] == {"count": 5, "avg_ms": 300, "p50_ms": 300, "p95_ms": 500, "max_ms": 500}
+    assert stages["download"] == {"count": 5, "avg_ms": 300, "p50_ms": 300, "p95_ms": 500, "max_ms": 500}
     # nearest-rank percentiles on [50,150]: index = n*p/100 → p50=index 1 →150, p95=index 1 →150
-    assert data["process"] == {"count": 2, "avg_ms": 100, "p50_ms": 150, "p95_ms": 150, "max_ms": 150}
-    assert data["upload"] == {"count": 0, "avg_ms": 0, "p50_ms": 0, "p95_ms": 0, "max_ms": 0}
+    assert stages["process"] == {"count": 2, "avg_ms": 100, "p50_ms": 150, "p95_ms": 150, "max_ms": 150}
+    assert stages["upload"] == {"count": 0, "avg_ms": 0, "p50_ms": 0, "p95_ms": 0, "max_ms": 0}
+
+
+async def test_batch_timing_wall_clock_spans_all_rows(client):
+    """wall_ms = max(finished_at) − min(started_at), independent of per-row durations."""
+    now = utcnow()
+    async with orch_db._session_maker() as s:
+        s.add(Batch(batch_id="b", name="t", bundle_ref="local:x"))
+        s.add(Granule(granule_id="g1", batch_id="b", state="acked", inputs_json="[]"))
+        # Two overlapping download attempts on different workers; wall is the
+        # outer envelope, not the sum.
+        s.add(
+            GranuleStageTiming(
+                granule_id="g1",
+                batch_id="b",
+                stage="download",
+                started_at=now,
+                finished_at=now + timedelta(seconds=10),
+                duration_ms=10_000,
+            )
+        )
+        s.add(
+            GranuleStageTiming(
+                granule_id="g1",
+                batch_id="b",
+                stage="upload",
+                started_at=now + timedelta(seconds=20),
+                finished_at=now + timedelta(seconds=30),
+                duration_ms=10_000,
+            )
+        )
+        await s.commit()
+    r = client.get("/api/batches/b/timing")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["wall_ms"] == 30_000
+    assert data["first_started_at"] is not None
+    assert data["last_finished_at"] is not None
 
 
 async def test_batch_timing_404_for_unknown(client):
@@ -194,5 +232,9 @@ async def test_batch_timing_empty_batch(client):
         await s.commit()
     r = client.get("/api/batches/b/timing")
     assert r.status_code == 200
+    data = r.json()
     for st in ("download", "process", "upload"):
-        assert r.json()[st]["count"] == 0
+        assert data["stages"][st]["count"] == 0
+    assert data["wall_ms"] == 0
+    assert data["first_started_at"] is None
+    assert data["last_finished_at"] is None

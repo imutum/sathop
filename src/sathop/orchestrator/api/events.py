@@ -16,8 +16,14 @@ router = APIRouter(tags=["observability"], dependencies=[Depends(require_token)]
 async def recent_events(
     limit: int = Query(100, ge=1, le=1000),
     since_id: int = 0,
+    before_id: int | None = Query(default=None, description="Page backward: only events with id < before_id"),
     batch_id: str | None = Query(default=None, description="Filter to events tied to this batch"),
     granule_id: str | None = Query(default=None),
+    source: str | None = Query(
+        default=None,
+        description="Exact match on Event.source — typically a worker_id / receiver_id, "
+        "or 'orchestrator'/'scheduler'/'admin'. Powers the per-node event drill-down.",
+    ),
     level: str | None = Query(default=None, description="'warn' or 'error' to narrow"),
     s: AsyncSession = Depends(session),
 ) -> list[dict]:
@@ -29,6 +35,8 @@ async def recent_events(
         .join(Granule, Event.granule_id == Granule.granule_id, isouter=True)
         .where(Event.id > since_id)
     )
+    if before_id is not None:
+        stmt = stmt.where(Event.id < before_id)
     if batch_id is not None:
         # Events tie to a batch via their granule's batch_id. Batch-level
         # events without a granule (create/bulk-cancel) live on the global
@@ -36,6 +44,8 @@ async def recent_events(
         stmt = stmt.where(Granule.batch_id == batch_id)
     if granule_id is not None:
         stmt = stmt.where(Event.granule_id == granule_id)
+    if source is not None:
+        stmt = stmt.where(Event.source == source)
     if level is not None:
         stmt = stmt.where(Event.level == level)
     stmt = stmt.order_by(Event.id.desc()).limit(limit)
@@ -73,6 +83,7 @@ async def list_workers(s: AsyncSession = Depends(session)) -> list[dict]:
             "queue_processing": w.queue_processing,
             "queue_uploading": w.queue_uploading,
             "enabled": w.enabled,
+            "paused": w.paused,
             "desired_capacity": w.desired_capacity,
         }
         for w in rows
@@ -90,6 +101,8 @@ async def list_receivers(s: AsyncSession = Depends(session)) -> list[dict]:
             "last_seen": r.last_seen.isoformat(),
             "disk_free_gb": r.disk_free_gb,
             "enabled": r.enabled,
+            "queue_pulling": r.queue_pulling or 0,
+            "recent_pull_bps": r.recent_pull_bps or 0,
         }
         for r in rows
     ]

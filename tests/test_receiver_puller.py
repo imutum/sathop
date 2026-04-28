@@ -69,3 +69,38 @@ async def test_pull_404_raises(tmp_path):
             await pull(f"http://127.0.0.1:{port}/nope", tmp_path / "x.bin")
     finally:
         srv.shutdown()
+
+
+async def test_pull_cleans_up_part_on_mid_stream_failure(tmp_path):
+    """If the server hangs up mid-stream, the partial `.part` file must be
+    removed — otherwise it lingers on disk after permanent download failures
+    (e.g. orchestrator stops offering the object before retry overwrites it)."""
+
+    class HangUp(BaseHTTPRequestHandler):
+        def log_message(self, *a, **kw):
+            pass
+
+        def do_GET(self):
+            # Lie about size so the client expects more bytes than we send,
+            # then drop the connection partway through.
+            self.send_response(200)
+            self.send_header("Content-Length", "1000000")
+            self.end_headers()
+            self.wfile.write(b"x" * 4096)
+            self.wfile.flush()
+            # Forcibly close — client will hit a transport error mid-stream.
+            self.connection.close()
+
+    srv = HTTPServer(("127.0.0.1", 0), HangUp)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    dest = tmp_path / "out.bin"
+    part = dest.with_suffix(dest.suffix + ".part")
+    try:
+        with pytest.raises(Exception):
+            await pull(f"http://127.0.0.1:{port}/f", dest)
+    finally:
+        srv.shutdown()
+    assert not dest.exists(), "dest should not exist on failure"
+    assert not part.exists(), ".part should be cleaned up on mid-stream failure"

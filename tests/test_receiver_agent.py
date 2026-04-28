@@ -84,7 +84,15 @@ async def test_heartbeat_posts_disk_free(captured_client):
         await c.aclose()
 
     assert captured[0].url.path == "/api/receivers/heartbeat"
-    assert json.loads(captured[0].content) == {"receiver_id": "r1", "disk_free_gb": 512.5}
+    assert json.loads(captured[0].content) == {
+        "receiver_id": "r1",
+        "disk_free_gb": 512.5,
+        # Defaulted to 0 when caller doesn't supply them — exercised here so a
+        # silent rename of the field would surface in this test, not just in
+        # the heartbeat-stats suite.
+        "queue_pulling": 0,
+        "recent_pull_bps": 0,
+    }
 
 
 async def test_pull_parses_response_into_pullresponse(captured_client):

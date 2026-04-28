@@ -68,13 +68,32 @@ async def batch_timing(batch_id: str, s: AsyncSession = Depends(session)) -> dic
         raise HTTPException(404, "batch not found")
     rows = (
         await s.execute(
-            select(GranuleStageTiming.stage, GranuleStageTiming.duration_ms).where(
-                GranuleStageTiming.batch_id == batch_id
-            )
+            select(
+                GranuleStageTiming.stage,
+                GranuleStageTiming.duration_ms,
+                GranuleStageTiming.started_at,
+                GranuleStageTiming.finished_at,
+            ).where(GranuleStageTiming.batch_id == batch_id)
         )
     ).all()
     by_stage: dict[str, list[int]] = {st: [] for st in _STAGES}
-    for stage, dur in rows:
+    first_started = None
+    last_finished = None
+    for stage, dur, started, finished in rows:
         if stage in by_stage:
             by_stage[stage].append(int(dur))
-    return {st: _stats(by_stage[st]) for st in _STAGES}
+        if first_started is None or started < first_started:
+            first_started = started
+        if last_finished is None or finished > last_finished:
+            last_finished = finished
+    wall_ms = (
+        int((last_finished - first_started).total_seconds() * 1000)
+        if first_started is not None and last_finished is not None
+        else 0
+    )
+    return {
+        "stages": {st: _stats(by_stage[st]) for st in _STAGES},
+        "wall_ms": wall_ms,
+        "first_started_at": first_started.isoformat() if first_started else None,
+        "last_finished_at": last_finished.isoformat() if last_finished else None,
+    }

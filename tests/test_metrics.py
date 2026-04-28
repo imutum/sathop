@@ -50,7 +50,15 @@ async def test_metrics_exposes_expected_series(client):
                 queue_processing=2,
             )
         )
-        s.add(Receiver(receiver_id="r1", last_seen=now - timedelta(seconds=5), disk_free_gb=500.0))
+        s.add(
+            Receiver(
+                receiver_id="r1",
+                last_seen=now - timedelta(seconds=5),
+                disk_free_gb=500.0,
+                queue_pulling=4,
+                recent_pull_bps=4096,
+            )
+        )
         s.add(Event(ts=now - timedelta(minutes=5), source="t", level="warn", message="recent"))
         s.add(Event(ts=now - timedelta(days=2), source="t", level="info", message="old"))  # outside 24h
         await s.commit()
@@ -77,6 +85,8 @@ async def test_metrics_exposes_expected_series(client):
     # Receivers
     assert 'sathop_receivers{enabled="true"} 1.0' in body
     assert 'sathop_receiver_heartbeat_age_seconds{receiver_id="r1"}' in body
+    assert 'sathop_receiver_queue_pulling{receiver_id="r1"} 4.0' in body
+    assert 'sathop_receiver_throughput_bytes_per_second{receiver_id="r1"} 4096.0' in body
 
     # Events last 24h: warn=1, info=0 (the old one is outside window)
     assert 'sathop_events_24h{level="warn"} 1.0' in body

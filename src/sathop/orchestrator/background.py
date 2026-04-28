@@ -43,15 +43,26 @@ async def sweep_expired_leases() -> int:
         if not expired:
             return 0
         ids = [g.granule_id for g in expired]
-        await s.execute(
+        # Re-assert the expiry predicate on the UPDATE: between our SELECT and
+        # this write, lease() may have refreshed the lease for some of these
+        # IDs. Without this guard the sweeper would clobber a freshly-acquired
+        # lease, and the worker that just got it would see its state report
+        # 409 a few seconds later.
+        result = await s.execute(
             update(Granule)
             .where(Granule.granule_id.in_(ids))
+            .where(Granule.state.in_(_RECLAIMABLE_STATES))
+            .where(Granule.lease_expires_at.is_not(None))
+            .where(Granule.lease_expires_at < now)
             .values(state=GranuleState.PENDING.value, leased_by=None, lease_expires_at=None, updated_at=now)
         )
-        await log_event(s, "scheduler", f"reclaimed {len(ids)} expired leases", level="warn")
+        actually_reclaimed = getattr(result, "rowcount", 0) or 0
+        if actually_reclaimed == 0:
+            return 0
+        await log_event(s, "scheduler", f"reclaimed {actually_reclaimed} expired leases", level="warn")
         await s.commit()
         publish({"scope": "batches"})
-        return len(ids)
+        return actually_reclaimed
 
 
 async def run_lease_sweeper() -> None:

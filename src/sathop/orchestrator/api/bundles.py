@@ -79,7 +79,7 @@ def _parse_zip(data: bytes) -> dict:
     return manifest
 
 
-def _detail(b: Bundle) -> BundleDetail:
+def _detail(b: Bundle, in_use_count: int = 0) -> BundleDetail:
     return BundleDetail(
         name=b.name,
         version=b.version,
@@ -88,10 +88,11 @@ def _detail(b: Bundle) -> BundleDetail:
         description=b.description,
         uploaded_at=b.uploaded_at,
         manifest=json.loads(b.manifest_json),
+        in_use_count=in_use_count,
     )
 
 
-def _summary(b: Bundle) -> BundleSummary:
+def _summary(b: Bundle, in_use_count: int = 0) -> BundleSummary:
     return BundleSummary(
         name=b.name,
         version=b.version,
@@ -99,6 +100,7 @@ def _summary(b: Bundle) -> BundleSummary:
         size=b.size,
         description=b.description,
         uploaded_at=b.uploaded_at,
+        in_use_count=in_use_count,
     )
 
 
@@ -156,7 +158,10 @@ async def upload(
 @router.get("", response_model=list[BundleSummary])
 async def list_bundles(s: AsyncSession = Depends(session)) -> list[BundleSummary]:
     rows = (await s.execute(select(Bundle).order_by(Bundle.uploaded_at.desc()))).scalars().all()
-    return [_summary(b) for b in rows]
+    # One extra query → grouped counts by bundle_ref. Avoids N+1.
+    counts_stmt = select(Batch.bundle_ref, func.count(Batch.batch_id)).group_by(Batch.bundle_ref)
+    counts = {ref: n for ref, n in (await s.execute(counts_stmt)).all()}
+    return [_summary(b, in_use_count=counts.get(f"orch:{b.name}@{b.version}", 0)) for b in rows]
 
 
 @router.get("/{name}/{version}", response_model=BundleDetail)
@@ -164,7 +169,10 @@ async def detail(name: str, version: str, s: AsyncSession = Depends(session)) ->
     b = await s.get(Bundle, (name, version))
     if b is None:
         raise HTTPException(404, f"bundle {name}@{version} not found")
-    return _detail(b)
+    in_use = await s.scalar(
+        select(func.count(Batch.batch_id)).where(Batch.bundle_ref == f"orch:{name}@{version}")
+    )
+    return _detail(b, in_use_count=int(in_use or 0))
 
 
 # File-inspection endpoints. Let the UI see *what's actually inside* a bundle
@@ -299,9 +307,16 @@ async def delete(name: str, version: str, s: AsyncSession = Depends(session)) ->
         raise HTTPException(404, f"bundle {name}@{version} not found")
 
     ref = f"orch:{name}@{version}"
-    in_use = await s.scalar(select(func.count(Batch.batch_id)).where(Batch.bundle_ref == ref))
-    if in_use:
-        raise HTTPException(409, f"bundle is referenced by {in_use} batch(es); remove them first")
+    total = await s.scalar(select(func.count(Batch.batch_id)).where(Batch.bundle_ref == ref))
+    if total:
+        sample = (
+            (await s.execute(select(Batch.batch_id).where(Batch.bundle_ref == ref).limit(5))).scalars().all()
+        )
+        more = f" (+{total - len(sample)} more)" if total > len(sample) else ""
+        raise HTTPException(
+            409,
+            f"bundle is referenced by {total} batch(es): {', '.join(sample)}{more}; remove them first",
+        )
 
     sha = b.sha256
     await s.delete(b)

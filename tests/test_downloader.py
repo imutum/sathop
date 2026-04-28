@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
 from sathop.shared.protocol import Credential
-from sathop.worker.downloader import HttpDownloader
+from sathop.worker.downloader import ChecksumMismatch, HttpDownloader, verify_sha256
 
 
 def _start(handler_cls: type[BaseHTTPRequestHandler]) -> tuple[HTTPServer, int]:
@@ -136,6 +137,23 @@ async def test_progress_cb_no_content_length(tmp_path):
 
     assert len(calls) >= 1
     assert calls[-1][0] == len(payload)
+
+
+async def test_verify_sha256_passes_on_match(tmp_path):
+    payload = b"hello world"
+    p = tmp_path / "f.bin"
+    p.write_bytes(payload)
+    expected = hashlib.sha256(payload).hexdigest()
+    await verify_sha256(p, expected)
+    # Upper-case digest must also pass — vendors sometimes ship them that way.
+    await verify_sha256(p, expected.upper())
+
+
+async def test_verify_sha256_raises_on_mismatch(tmp_path):
+    p = tmp_path / "f.bin"
+    p.write_bytes(b"actual content")
+    with pytest.raises(ChecksumMismatch):
+        await verify_sha256(p, "0" * 64)
 
 
 async def test_no_auth_passes_nothing(tmp_path):

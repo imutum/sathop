@@ -72,3 +72,48 @@ async def test_since_id_and_limit_still_work(client):
 
     r2 = client.get("/api/events?since_id=3")
     assert [e["message"] for e in r2.json()] == ["e4", "e3"]
+
+
+async def test_granule_id_filter_isolates_one_granule(client):
+    """BatchDetail's expanded-row events panel relies on granule_id= filter."""
+    async with orch_db._session_maker() as s:
+        s.add(Batch(batch_id="b1", name="n", bundle_ref="local:x"))
+        s.add(Granule(granule_id="b1:g-a", batch_id="b1", state=GranuleState.FAILED.value, inputs_json="[]"))
+        s.add(Granule(granule_id="b1:g-b", batch_id="b1", state=GranuleState.ACKED.value, inputs_json="[]"))
+        for i in range(3):
+            s.add(Event(source="w", level="error", granule_id="b1:g-a", message=f"a-err-{i}"))
+        s.add(Event(source="w", level="info", granule_id="b1:g-b", message="b-ok"))
+        s.add(Event(source="o", level="info", granule_id=None, message="orchestrator-noise"))
+        await s.commit()
+
+    r = client.get("/api/events?granule_id=b1:g-a")
+    msgs = sorted(e["message"] for e in r.json())
+    assert msgs == ["a-err-0", "a-err-1", "a-err-2"]
+    # All carry the parent batch_id via the outer join
+    assert all(e["batch_id"] == "b1" for e in r.json())
+
+
+async def test_before_id_pages_backward(client):
+    """before_id lets the UI load older events past the rolling 500-row window."""
+    async with orch_db._session_maker() as s:
+        for i in range(10):
+            s.add(Event(source="t", level="info", granule_id=None, message=f"e{i}"))
+        await s.commit()
+
+    # First page: latest 3 → ids 10,9,8 (1-indexed)
+    page1 = client.get("/api/events?limit=3").json()
+    assert [e["message"] for e in page1] == ["e9", "e8", "e7"]
+
+    # Page backward from the oldest of page1 (id=8) → next 3 older
+    oldest = page1[-1]["id"]
+    page2 = client.get(f"/api/events?limit=3&before_id={oldest}").json()
+    assert all(e["id"] < oldest for e in page2)
+    assert [e["message"] for e in page2] == ["e6", "e5", "e4"]
+
+    # before_id combines with level filter
+    async with orch_db._session_maker() as s:
+        s.add(Event(source="t", level="error", granule_id=None, message="boom"))
+        await s.commit()
+    boom_id = client.get("/api/events?level=error&limit=1").json()[0]["id"]
+    older_errs = client.get(f"/api/events?level=error&before_id={boom_id}").json()
+    assert older_errs == []
