@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { API, BundleDetail, Credential } from "../api";
+import { clearCred, hasCred, loadCred, saveCred } from "../credCache";
 import { ActionButton, Modal } from "../ui";
 import { useToast } from "../toast";
 
@@ -128,6 +129,7 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
   const [envText, setEnvText] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [creds, setCreds] = useState<Record<string, CredDraft>>({});
+  const [remember, setRemember] = useState<Record<string, boolean>>({});
   const [err, setErr] = useState<string | null>(null);
   const [showCsv, setShowCsv] = useState(false);
 
@@ -163,9 +165,25 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
   }, [bundleSel, schema?.slots.length, schema?.metaFields.length]);
 
   useEffect(() => {
-    const next: Record<string, CredDraft> = {};
-    for (const n of requiredCreds) next[n] = creds[n] ?? emptyCred();
-    setCreds(next);
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, CredDraft> = {};
+      const nextRemember: Record<string, boolean> = {};
+      for (const n of requiredCreds) {
+        const stored = await loadCred(n);
+        next[n] = creds[n] ?? stored ?? emptyCred();
+        // Default the toggle to "on" when a cache entry exists, so the next
+        // submit re-saves (handles secret-rotation in place).
+        nextRemember[n] = remember[n] ?? hasCred(n);
+      }
+      if (!cancelled) {
+        setCreds(next);
+        setRemember(nextRemember);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requiredCreds.join("|")]);
 
@@ -221,6 +239,18 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
       }),
     onSuccess: (b) => {
       setErr(null);
+      // Persist (or evict) cached credentials only after the batch was actually
+      // accepted — guarantees we never cache a secret that the orchestrator
+      // refused. Fire-and-forget: a failed cache write only affects future
+      // autofill, not the current submission.
+      for (const n of requiredCreds) {
+        const d = creds[n];
+        if (remember[n] && d) {
+          void saveCred(n, { scheme: d.scheme, username: d.username, secret: d.secret });
+        } else if (hasCred(n)) {
+          clearCred(n);
+        }
+      }
       toast.success(`已创建批次 "${b.name}"，共 ${rows.length} 条数据粒`);
       onCreated();
     },
@@ -350,9 +380,18 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
             <CredentialsBlock
               names={requiredCreds}
               drafts={creds}
+              remember={remember}
               onChange={(name, draft) =>
                 setCreds((c) => ({ ...c, [name]: draft }))
               }
+              onRememberChange={(name, v) =>
+                setRemember((r) => ({ ...r, [name]: v }))
+              }
+              onForget={(name) => {
+                clearCred(name);
+                setCreds((c) => ({ ...c, [name]: emptyCred() }));
+                setRemember((r) => ({ ...r, [name]: false }));
+              }}
             />
           )}
 
@@ -720,11 +759,17 @@ function CsvPasteModal({
 function CredentialsBlock({
   names,
   drafts,
+  remember,
   onChange,
+  onRememberChange,
+  onForget,
 }: {
   names: string[];
   drafts: Record<string, CredDraft>;
+  remember: Record<string, boolean>;
   onChange: (name: string, d: CredDraft) => void;
+  onRememberChange: (name: string, v: boolean) => void;
+  onForget: (name: string) => void;
 }) {
   return (
     <fieldset className="space-y-2">
@@ -735,8 +780,13 @@ function CredentialsBlock({
           const schemeId = `cred-${name}-scheme`;
           const userId = `cred-${name}-user`;
           const secretId = `cred-${name}-secret`;
+          const rememberId = `cred-${name}-remember`;
+          const cached = hasCred(name);
           return (
-            <div key={name} className="grid grid-cols-[160px_110px_1fr_2fr] gap-2 items-center text-xs">
+            <div
+              key={name}
+              className="grid grid-cols-[140px_100px_1fr_2fr_auto] gap-2 items-center text-xs"
+            >
               <label htmlFor={secretId} className="font-mono" title="凭证名">
                 {name}
               </label>
@@ -775,12 +825,39 @@ function CredentialsBlock({
                 placeholder={d.scheme === "basic" ? "密码" : "Token"}
                 className="rounded border border-border bg-bg px-2 py-1 font-mono outline-none focus:border-accent"
               />
+              <div className="flex items-center gap-2 whitespace-nowrap">
+                <label
+                  htmlFor={rememberId}
+                  className="flex items-center gap-1 text-[11px] text-muted"
+                  title="勾选后，提交成功时把该凭证保存到本浏览器；下次新建任务自动填入。"
+                >
+                  <input
+                    id={rememberId}
+                    type="checkbox"
+                    checked={remember[name] ?? false}
+                    onChange={(e) => onRememberChange(name, e.target.checked)}
+                    className="accent-accent"
+                  />
+                  记住
+                </label>
+                {cached && (
+                  <button
+                    type="button"
+                    onClick={() => onForget(name)}
+                    className="text-[11px] text-muted hover:text-rose-400"
+                    title="从本浏览器删除已保存的凭证"
+                  >
+                    清除
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
       <div className="text-[11px] text-muted">
         凭证仅保存于本批次数据库行；worker 在 lease 时一次性取用。轮换 = 创建新批次。
+        勾选"记住"后，凭证会被保存在本浏览器的 localStorage（明文，与登录 token 同等级别），下次新建任务自动填入。
       </div>
     </fieldset>
   );

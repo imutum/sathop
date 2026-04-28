@@ -180,6 +180,16 @@ class ProcessFailure(BaseModel):
     exit_code: int | None = None
 
 
+class StateUpdate(BaseModel):
+    """Worker-reported phase boundary for a leased granule. The endpoint accepts
+    only forward transitions through `downloaded → processing → processed`;
+    `downloading` and `uploaded` are written by lease/upload directly."""
+
+    granule_id: str
+    worker_id: str
+    state: GranuleState
+
+
 class PullItem(BaseModel):
     granule_id: str
     batch_id: str

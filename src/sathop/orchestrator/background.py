@@ -12,12 +12,21 @@ from sathop.shared.protocol import GranuleState
 
 from . import db
 from .config import settings
-from .db import Event, Granule, GranuleObject, utcnow
+from .db import Event, Granule, GranuleObject, GranuleStageTiming, utcnow
 from .pubsub import log_event, publish
 
 _log = logging.getLogger("sathop.orch.background")
 
 SWEEP_INTERVAL_SEC = 60
+
+# All states where a worker holds the lease. UPLOADED already clears
+# leased_by, so it doesn't need reclaiming.
+_RECLAIMABLE_STATES = (
+    GranuleState.DOWNLOADING.value,
+    GranuleState.DOWNLOADED.value,
+    GranuleState.PROCESSING.value,
+    GranuleState.PROCESSED.value,
+)
 
 
 async def sweep_expired_leases() -> int:
@@ -26,7 +35,7 @@ async def sweep_expired_leases() -> int:
     async with db._session_maker() as s:
         stmt = (
             select(Granule)
-            .where(Granule.state == GranuleState.DOWNLOADING.value)
+            .where(Granule.state.in_(_RECLAIMABLE_STATES))
             .where(Granule.lease_expires_at.is_not(None))
             .where(Granule.lease_expires_at < now)
         )
@@ -65,7 +74,7 @@ async def sweep_retention(
     ev_days = settings.retain_events_days if events_days is None else events_days
     del_days = settings.retain_deleted_days if deleted_days is None else deleted_days
     now = utcnow()
-    out = {"events": 0, "granule_objects": 0, "granules": 0}
+    out = {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0}
 
     async with db._session_maker() as s:
         if ev_days > 0:
@@ -81,12 +90,26 @@ async def sweep_retention(
                 .where(GranuleObject.deleted_at < cutoff)
             )
             out["granule_objects"] = getattr(r, "rowcount", 0) or 0
-            r = await s.execute(
-                delete(Granule)
-                .where(Granule.state == GranuleState.DELETED.value)
-                .where(Granule.updated_at < cutoff)
+            # Children before parent: stage timings reference granules; SQLite FKs
+            # aren't enforced but staying consistent keeps the table bounded.
+            doomed = (
+                (
+                    await s.execute(
+                        select(Granule.granule_id)
+                        .where(Granule.state == GranuleState.DELETED.value)
+                        .where(Granule.updated_at < cutoff)
+                    )
+                )
+                .scalars()
+                .all()
             )
-            out["granules"] = getattr(r, "rowcount", 0) or 0
+            if doomed:
+                r = await s.execute(
+                    delete(GranuleStageTiming).where(GranuleStageTiming.granule_id.in_(doomed))
+                )
+                out["stage_timings"] = getattr(r, "rowcount", 0) or 0
+                r = await s.execute(delete(Granule).where(Granule.granule_id.in_(doomed)))
+                out["granules"] = getattr(r, "rowcount", 0) or 0
 
         await s.commit()
 

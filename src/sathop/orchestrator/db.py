@@ -171,6 +171,26 @@ class GranuleProgress(Base):
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class GranuleStageTiming(Base):
+    """Closed-stage durations: one row per granule per (download, process,
+    upload) attempt. Inserted at the transition that closes each stage; failed
+    attempts are not recorded (no incomplete rows). A retried granule produces
+    multiple rows for the same stage — aggregations count attempts, not
+    granules."""
+
+    __tablename__ = "granule_stage_timing"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    granule_id: Mapped[str] = mapped_column(String, ForeignKey("granules.granule_id"), index=True)
+    batch_id: Mapped[str] = mapped_column(String, index=True)
+    stage: Mapped[str] = mapped_column(String)
+    started_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    finished_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    duration_ms: Mapped[int] = mapped_column(Integer)
+
+
+Index("idx_stage_timing_batch_stage", GranuleStageTiming.batch_id, GranuleStageTiming.stage)
+
+
 _engine = None
 _session_maker: async_sessionmaker[AsyncSession] | None = None
 

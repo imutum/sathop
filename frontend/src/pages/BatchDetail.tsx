@@ -1,9 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { API, EventRow, GranuleRow, GranuleState, ProgressRow } from "../api";
+import {
+  API,
+  EventRow,
+  GranuleRow,
+  GranuleState,
+  ProgressRow,
+  StageStats,
+  TimingRow,
+  TimingStage,
+} from "../api";
 import { ActionButton, Badge, Card, CopyButton } from "../ui";
-import { fmtAge, levelLabel, stateLabel } from "../i18n";
+import { TIMING_STAGE_ZH, fmtAge, fmtMs, levelLabel, stateLabel } from "../i18n";
 import { useToast } from "../toast";
 
 const STATE_FILTERS: { key: GranuleState | "all"; label: string }[] = [
@@ -26,6 +35,14 @@ const RETRYABLE = new Set<GranuleState>(["failed", "blacklisted"]);
 // Worker emits `download:<filename>`; bundles emit anything else verbatim.
 const formatStep = (step: string): string =>
   step.startsWith("download:") ? `下载 ${step.slice(9)}` : step;
+
+// Server stores granule_id as `<batch_id>:<user_gid>` so user-supplied IDs only
+// have to be unique per batch. In this batch-scoped view we strip the prefix
+// for display; comparisons/mutations keep the full form.
+const stripBatchPrefix = (gid: string, batchId: string): string =>
+  gid.startsWith(`${batchId}:`) ? gid.slice(batchId.length + 1) : gid;
+
+const STAGE_ORDER: TimingStage[] = ["download", "process", "upload"];
 
 export function BatchDetail() {
   const { batchId = "" } = useParams();
@@ -204,7 +221,7 @@ export function BatchDetail() {
                       >
                         {isOpen ? "▾" : "▸"}
                       </button>
-                      {g.granule_id}
+                      {stripBatchPrefix(g.granule_id, batchId)}
                       {latest && (
                         <div className="mt-0.5 ml-4 text-[11px] text-muted">
                           ▸ {formatStep(latest.step)}
@@ -227,7 +244,7 @@ export function BatchDetail() {
                         <ActionButton
                           tone="danger"
                           onClick={() => {
-                            if (confirm(`取消数据粒 ${g.granule_id}？`)) {
+                            if (confirm(`取消数据粒 ${stripBatchPrefix(g.granule_id, batchId)}？`)) {
                               cancel.mutate(g.granule_id);
                             }
                           }}
@@ -252,7 +269,8 @@ export function BatchDetail() {
                   </tr>
                   {isOpen && (
                     <tr className="border-t-0 bg-bg/50">
-                      <td colSpan={7} className="px-4 py-3">
+                      <td colSpan={7} className="px-4 py-3 space-y-3">
+                        <StageTimingStrip granuleId={g.granule_id} />
                         <ProgressTimeline granuleId={g.granule_id} />
                       </td>
                     </tr>
@@ -270,6 +288,8 @@ export function BatchDetail() {
           </tbody>
         </table>
       </Card>
+
+      <BatchTimingCard batchId={batchId} />
 
       <Card
         title="日志"
@@ -310,7 +330,7 @@ export function BatchDetail() {
               <span className="w-24 shrink-0 truncate text-muted">{e.source}</span>
               {e.granule_id ? (
                 <span className="w-40 shrink-0 truncate text-muted" title={e.granule_id}>
-                  {e.granule_id}
+                  {stripBatchPrefix(e.granule_id, batchId)}
                 </span>
               ) : (
                 <span className="w-40 shrink-0 text-muted">—</span>
@@ -363,6 +383,72 @@ function ErrorCell({ error }: { error: string | null }) {
         收起
       </button>
     </span>
+  );
+}
+
+function BatchTimingCard({ batchId }: { batchId: string }) {
+  const q = useQuery({
+    queryKey: ["batch-timing", batchId],
+    queryFn: () => API.batchTiming(batchId),
+    enabled: !!batchId,
+  });
+  const data = q.data;
+  return (
+    <Card title="耗时统计">
+      {q.isLoading && <div className="text-xs text-muted">加载中…</div>}
+      {data && (
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs uppercase tracking-wide text-muted">
+            <tr>
+              <th className="pb-2">阶段</th>
+              <th className="pb-2 text-right">样本数</th>
+              <th className="pb-2 text-right">平均</th>
+              <th className="pb-2 text-right">P50</th>
+              <th className="pb-2 text-right">P95</th>
+              <th className="pb-2 text-right">最大</th>
+            </tr>
+          </thead>
+          <tbody>
+            {STAGE_ORDER.map((st) => {
+              const s: StageStats = data[st];
+              const dim = s.count === 0;
+              return (
+                <tr key={st} className={`border-t border-border ${dim ? "text-muted" : ""}`}>
+                  <td className="py-2">{TIMING_STAGE_ZH[st]}</td>
+                  <td className="py-2 text-right tabular-nums">{s.count}</td>
+                  <td className="py-2 text-right tabular-nums">{dim ? "—" : fmtMs(s.avg_ms)}</td>
+                  <td className="py-2 text-right tabular-nums">{dim ? "—" : fmtMs(s.p50_ms)}</td>
+                  <td className="py-2 text-right tabular-nums">{dim ? "—" : fmtMs(s.p95_ms)}</td>
+                  <td className="py-2 text-right tabular-nums">{dim ? "—" : fmtMs(s.max_ms)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      <div className="mt-2 text-[11px] text-muted">
+        样本数 = 闭合阶段次数（同一数据粒重试会计入多次）。失败未闭合的阶段不计入。
+      </div>
+    </Card>
+  );
+}
+
+function StageTimingStrip({ granuleId }: { granuleId: string }) {
+  const q = useQuery({
+    queryKey: ["granule-timing", granuleId],
+    queryFn: () => API.granuleTiming(granuleId),
+  });
+  const rows = q.data ?? [];
+  if (rows.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-3 text-xs text-muted">
+      {rows.map((r: TimingRow, i: number) => (
+        <span key={r.id} className="font-mono">
+          {TIMING_STAGE_ZH[r.stage]} <span className="text-text">{fmtMs(r.duration_ms)}</span>
+          {i < rows.length - 1 && <span className="ml-3 text-border">·</span>}
+        </span>
+      ))}
+    </div>
   );
 }
 

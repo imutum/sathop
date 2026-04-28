@@ -145,6 +145,26 @@ export type ProgressRow = {
   detail: string | null;
 };
 
+export type TimingStage = "download" | "process" | "upload";
+
+export type TimingRow = {
+  id: number;
+  stage: TimingStage;
+  started_at: string;
+  finished_at: string;
+  duration_ms: number;
+};
+
+export type StageStats = {
+  count: number;
+  avg_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  max_ms: number;
+};
+
+export type BatchTiming = Record<TimingStage, StageStats>;
+
 export type OrchestratorInfo = {
   version: string;
   python_version: string;
@@ -287,4 +307,8 @@ export const API = {
     ),
   batchProgressLatest: (batchId: string) =>
     api<Record<string, ProgressRow>>(`/api/batches/${batchId}/progress/latest`),
+  granuleTiming: (granuleId: string) =>
+    api<TimingRow[]>(`/api/granules/${encodeURIComponent(granuleId)}/timing`),
+  batchTiming: (batchId: string) =>
+    api<BatchTiming>(`/api/batches/${encodeURIComponent(batchId)}/timing`),
 };

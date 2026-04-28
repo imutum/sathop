@@ -10,7 +10,7 @@ import pytest
 from sathop.orchestrator import background as retention
 from sathop.orchestrator import db as orch_db
 from sathop.orchestrator.config import settings
-from sathop.orchestrator.db import Batch, Event, Granule, GranuleObject, utcnow
+from sathop.orchestrator.db import Batch, Event, Granule, GranuleObject, GranuleStageTiming, utcnow
 from sathop.shared.protocol import GranuleState
 
 
@@ -104,13 +104,70 @@ async def test_prunes_aged_deleted_granules_and_objects(orch_session):
         assert len((await s.execute(GranuleObject.__table__.select())).all()) == 0
 
 
+async def test_prunes_stage_timing_with_granule(orch_session):
+    """Stage-timing rows are children of granules; pruning the granule must
+    also prune them, otherwise the table grows unbounded."""
+    now = utcnow()
+    old = now - timedelta(days=30)
+    async with orch_session() as s:
+        s.add(Batch(batch_id="b1", name="n", bundle_ref="local:x"))
+        s.add(
+            Granule(
+                granule_id="g_old",
+                batch_id="b1",
+                state=GranuleState.DELETED.value,
+                inputs_json="[]",
+                updated_at=old,
+            )
+        )
+        s.add(
+            Granule(
+                granule_id="g_recent",
+                batch_id="b1",
+                state=GranuleState.DELETED.value,
+                inputs_json="[]",
+                updated_at=now - timedelta(days=1),
+            )
+        )
+        for stage in ("download", "process", "upload"):
+            s.add(
+                GranuleStageTiming(
+                    granule_id="g_old",
+                    batch_id="b1",
+                    stage=stage,
+                    started_at=old,
+                    finished_at=old,
+                    duration_ms=1,
+                )
+            )
+            s.add(
+                GranuleStageTiming(
+                    granule_id="g_recent",
+                    batch_id="b1",
+                    stage=stage,
+                    started_at=now,
+                    finished_at=now,
+                    duration_ms=1,
+                )
+            )
+        await s.commit()
+
+    counts = await retention.sweep_retention(events_days=0, deleted_days=7)
+    assert counts["granules"] == 1
+    assert counts["stage_timings"] == 3
+
+    async with orch_session() as s:
+        rows = (await s.execute(GranuleStageTiming.__table__.select())).all()
+        assert {r.granule_id for r in rows} == {"g_recent"}
+
+
 async def test_zero_retention_days_skips_prune(orch_session):
     async with orch_session() as s:
         s.add(Event(ts=utcnow() - timedelta(days=365), source="t", message="ancient"))
         await s.commit()
 
     counts = await retention.sweep_retention(events_days=0, deleted_days=0)
-    assert counts == {"events": 0, "granule_objects": 0, "granules": 0}
+    assert counts == {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0}
 
     async with orch_session() as s:
         assert len((await s.execute(Event.__table__.select())).all()) == 1

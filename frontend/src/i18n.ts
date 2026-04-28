@@ -1,7 +1,7 @@
 // 集中的中文文案映射。后端 protocol 字段保持英文 enum（wire format 稳定），
 // 仅在 UI 展示层做翻译。
 
-import type { GranuleState } from "./api";
+import type { GranuleState, TimingStage } from "./api";
 
 export const GRANULE_STATE_ZH: Record<GranuleState, string> = {
   pending: "待处理",
@@ -27,6 +27,12 @@ export const PLATFORM_ZH: Record<string, string> = {
   windows: "Windows",
 };
 
+export const TIMING_STAGE_ZH: Record<TimingStage, string> = {
+  download: "下载",
+  process: "处理",
+  upload: "上传",
+};
+
 export function stateLabel(s: GranuleState): string {
   return GRANULE_STATE_ZH[s] ?? s;
 }
@@ -42,4 +48,14 @@ export function fmtAge(iso: string): string {
   if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
   if (s < 86400) return `${(s / 3600).toFixed(1)} 小时前`;
   return `${(s / 86400).toFixed(1)} 天前`;
+}
+
+export function fmtMs(ms: number): string {
+  if (!ms) return "0";
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(s < 10 ? 1 : 0)}s`;
+  const m = Math.floor(s / 60);
+  const rs = Math.round(s - m * 60);
+  return `${m}m${rs.toString().padStart(2, "0")}s`;
 }

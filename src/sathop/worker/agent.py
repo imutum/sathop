@@ -5,10 +5,12 @@ from __future__ import annotations
 from sathop.shared.http import make_orch_client
 from sathop.shared.protocol import (
     DeletableGranule,
+    GranuleState,
     LeaseRequest,
     LeaseResponse,
     ProcessFailure,
     ProgressEvent,
+    StateUpdate,
     UploadedObject,
     UploadReport,
     WorkerHeartbeat,
@@ -47,6 +49,11 @@ class OrchestratorClient:
 
     async def report_failure(self, req: ProcessFailure) -> None:
         r = await self._client.post("/api/workers/failure", json=req.model_dump())
+        r.raise_for_status()
+
+    async def report_state(self, granule_id: str, worker_id: str, state: GranuleState) -> None:
+        req = StateUpdate(granule_id=granule_id, worker_id=worker_id, state=state)
+        r = await self._client.post("/api/workers/state", json=req.model_dump(mode="json"))
         r.raise_for_status()
 
     async def get_deletable(self, worker_id: str) -> list[DeletableGranule]:

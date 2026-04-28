@@ -21,6 +21,7 @@ class Settings:
     progress_port: int
     heartbeat_interval: int
     lease_poll_interval: int
+    download_concurrency: int
 
     # Production-mode toggles. Empty = MVP fallback (httpx / local FS static server).
     aria2_rpc: str
@@ -60,6 +61,7 @@ def load() -> Settings:
         progress_port=int(os.getenv("SATHOP_PROGRESS_PORT", "9002")),
         heartbeat_interval=int(os.getenv("SATHOP_HEARTBEAT", "15")),
         lease_poll_interval=int(os.getenv("SATHOP_LEASE_POLL", "10")),
+        download_concurrency=max(1, int(os.getenv("SATHOP_DOWNLOAD_CONCURRENCY", "1"))),
         aria2_rpc=os.getenv("SATHOP_ARIA2_RPC", ""),
         aria2_secret=os.getenv("SATHOP_ARIA2_SECRET", ""),
         minio_access_key=os.getenv("SATHOP_MINIO_ACCESS_KEY", ""),

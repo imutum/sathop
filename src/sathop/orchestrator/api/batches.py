@@ -33,6 +33,14 @@ def _parse_orch_ref(ref: str) -> tuple[str, str]:
 router = APIRouter(prefix="/batches", tags=["batches"], dependencies=[Depends(require_token)])
 
 
+def _compose_gid(batch_id: str, user_gid: str) -> str:
+    """Internal granule_id is `<batch_id>:<user_gid>` so user-supplied IDs only
+    have to be unique within their batch. The prefix is the same `batch_id` PK
+    that already enforces global uniqueness, so collisions are impossible
+    across batches and the UI can strip it for display."""
+    return f"{batch_id}:{user_gid}"
+
+
 async def _counts(s: AsyncSession, batch_id: str) -> dict[str, int]:
     stmt = (
         select(Granule.state, func.count(Granule.granule_id))
@@ -67,12 +75,19 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
         )
 
     schema = InputsSchema.parse(manifest)
+    seen: set[str] = set()
+    dups: set[str] = set()
     all_errors: list[str] = []
     all_warnings: list[str] = []
     for g in req.granules:
+        if g.granule_id in seen:
+            dups.add(g.granule_id)
+        seen.add(g.granule_id)
         r = validate_granule(schema, g.granule_id, [i.model_dump() for i in g.inputs], g.meta)
         all_errors.extend(r.errors)
         all_warnings.extend(r.warnings)
+    if dups:
+        raise HTTPException(422, f"duplicate granule_id(s) within batch: {sorted(dups)[:20]}")
     if all_errors:
         raise HTTPException(
             422,
@@ -96,7 +111,7 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
     for g in req.granules:
         s.add(
             Granule(
-                granule_id=g.granule_id,
+                granule_id=_compose_gid(req.batch_id, g.granule_id),
                 batch_id=req.batch_id,
                 state=GranuleState.PENDING.value,
                 inputs_json=json.dumps([i.model_dump() for i in g.inputs]),
@@ -168,12 +183,13 @@ async def add_granules(batch_id: str, req: GranuleBulkAdd, s: AsyncSession = Dep
     added = 0
     skipped = 0
     for g in req.granules:
-        if g.granule_id in existing:
+        gid = _compose_gid(batch_id, g.granule_id)
+        if gid in existing:
             skipped += 1
             continue
         s.add(
             Granule(
-                granule_id=g.granule_id,
+                granule_id=gid,
                 batch_id=batch_id,
                 state=GranuleState.PENDING.value,
                 inputs_json=json.dumps([i.model_dump() for i in g.inputs]),

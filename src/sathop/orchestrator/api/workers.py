@@ -17,6 +17,7 @@ from sathop.shared.protocol import (
     LeaseRequest,
     LeaseResponse,
     ProcessFailure,
+    StateUpdate,
     UploadReport,
     WorkerHeartbeat,
     WorkerHeartbeatResponse,
@@ -25,7 +26,7 @@ from sathop.shared.protocol import (
 )
 
 from ..config import require_token, settings
-from ..db import Batch, Granule, GranuleObject, Worker, session, utcnow
+from ..db import Batch, Granule, GranuleObject, GranuleStageTiming, Worker, session, utcnow
 from ..pubsub import log_event as log
 from ..pubsub import publish
 
@@ -172,6 +173,61 @@ async def lease(req: LeaseRequest, s: AsyncSession = Depends(session)) -> LeaseR
     return LeaseResponse(items=items, lease_expires_at=expires)
 
 
+# Forward-only transitions reported by a leased worker. lease() writes
+# DOWNLOADING and upload() writes UPLOADED, so neither appears here.
+_STATE_PREDECESSOR = {
+    GranuleState.DOWNLOADED.value: GranuleState.DOWNLOADING.value,
+    GranuleState.PROCESSING.value: GranuleState.DOWNLOADED.value,
+    GranuleState.PROCESSED.value: GranuleState.PROCESSING.value,
+}
+
+# Map "transition that closes the stage" → stage name. Idle DOWNLOADED→PROCESSING
+# isn't recorded (worker calls bundle.ensure() back-to-back; near-zero).
+_STAGE_BY_CLOSER = {
+    GranuleState.DOWNLOADED.value: "download",
+    GranuleState.PROCESSED.value: "process",
+    GranuleState.UPLOADED.value: "upload",
+}
+
+
+def _record_stage(s: AsyncSession, g: Granule, stage: str, started_at, finished_at) -> None:
+    duration_ms = max(0, int((finished_at - started_at).total_seconds() * 1000))
+    s.add(
+        GranuleStageTiming(
+            granule_id=g.granule_id,
+            batch_id=g.batch_id,
+            stage=stage,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_ms=duration_ms,
+        )
+    )
+
+
+@router.post("/state")
+async def report_state(req: StateUpdate, s: AsyncSession = Depends(session)) -> dict:
+    expected = _STATE_PREDECESSOR.get(req.state.value)
+    if expected is None:
+        raise HTTPException(422, f"state {req.state.value!r} is not worker-reportable")
+    g = await s.get(Granule, req.granule_id)
+    if g is None:
+        raise HTTPException(404, "granule not found")
+    if g.leased_by != req.worker_id:
+        raise HTTPException(409, "granule not leased by this worker")
+    if g.state != expected:
+        raise HTTPException(409, f"cannot transition {g.state!r} → {req.state.value!r}")
+    prev_at = g.updated_at
+    now = utcnow()
+    g.state = req.state.value
+    g.updated_at = now
+    stage = _STAGE_BY_CLOSER.get(req.state.value)
+    if stage is not None:
+        _record_stage(s, g, stage, prev_at, now)
+    await s.commit()
+    publish({"scope": "batches"})
+    return {"ok": True, "state": g.state}
+
+
 @router.post("/upload")
 async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
     g = await s.get(Granule, req.granule_id)
@@ -191,11 +247,14 @@ async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
                 size=o.size,
             )
         )
+    prev_at = g.updated_at
+    now = utcnow()
     g.state = GranuleState.UPLOADED.value
     g.leased_by = None
     g.lease_expires_at = None
     g.error = None
-    g.updated_at = utcnow()
+    g.updated_at = now
+    _record_stage(s, g, "upload", prev_at, now)
     await log(s, req.worker_id, f"uploaded {len(req.objects)} objects", granule_id=g.granule_id)
     await s.commit()
     publish({"scope": "batches"})

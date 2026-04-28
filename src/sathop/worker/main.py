@@ -21,6 +21,7 @@ import psutil
 
 from sathop.shared.protocol import (
     Credential,
+    GranuleState,
     LeaseItem,
     LeaseRequest,
     ProcessFailure,
@@ -54,6 +55,7 @@ class Worker:
         )
         self.stage: Counter[str] = Counter()
         self._pause_lease = False
+        self._download_sem = asyncio.Semaphore(s.download_concurrency)
         # Updated from heartbeat replies; orchestrator may clamp below s.capacity.
         self._effective_capacity = s.capacity
         self.progress = ProgressServer(self.client, port=s.progress_port)
@@ -149,15 +151,18 @@ class Worker:
             self.stage["downloading"] += 1
             log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
             paths: list[Path] = []
-            for spec in item.inputs:
-                dst = input_dir / spec.filename
-                auth = _auth_for(item.credentials, spec.credential, gid)
-                cb = self._make_download_progress_cb(gid, spec.filename)
-                await self.downloader.fetch(spec.url, dst, auth=auth, progress_cb=cb)
-                paths.append(dst)
+            async with self._download_sem:
+                for spec in item.inputs:
+                    dst = input_dir / spec.filename
+                    auth = _auth_for(item.credentials, spec.credential, gid)
+                    cb = self._make_download_progress_cb(gid, spec.filename)
+                    await self.downloader.fetch(spec.url, dst, auth=auth, progress_cb=cb)
+                    paths.append(dst)
             self.stage["downloading"] -= 1
+            await self._report_state(gid, GranuleState.DOWNLOADED)
 
             self.stage["processing"] += 1
+            await self._report_state(gid, GranuleState.PROCESSING)
             handle = await asyncio.to_thread(
                 bundle.ensure,
                 item.bundle_ref,
@@ -192,6 +197,7 @@ class Worker:
                 log.warning("[%s] processing failed exit=%s", gid, result.exit_code)
                 return
 
+            await self._report_state(gid, GranuleState.PROCESSED)
             self.stage["uploading"] += 1
             uploaded: list[UploadedObject] = []
             key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
@@ -221,6 +227,15 @@ class Worker:
         finally:
             self.progress.revoke(nonce)
             shutil.rmtree(work_dir, ignore_errors=True)
+
+    async def _report_state(self, gid: str, state: GranuleState) -> None:
+        """Best-effort phase report. A failure here only delays UI state until
+        the next successful report (or upload), so we log and continue rather
+        than aborting the granule."""
+        try:
+            await self.client.report_state(gid, self.s.worker_id, state)
+        except Exception as e:
+            log.warning("[%s] state report %s failed: %s", gid, state.value, e)
 
     def _make_download_progress_cb(self, gid: str, filename: str) -> downloader.ProgressCb:
         """Per-input progress reporter: emit on ≥5% delta or ≥2s elapsed, plus a
