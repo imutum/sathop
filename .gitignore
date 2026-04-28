@@ -26,7 +26,7 @@ logs/
 
 # Node
 node_modules/
-frontend-vue/dist/
+frontend/dist/
 
 # IDE
 .vscode/
@@ -43,6 +43,6 @@ CLAUDE.md
 vendor/
 
 # TypeScript / Vite build caches
-frontend-vue/*.tsbuildinfo
-frontend-vue/vite.config.d.ts
-frontend-vue/vite.config.js
+frontend/*.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js

@@ -25,9 +25,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --extra orchestrator
 
 # Prebuilt Vue UI (produced by the release workflow's npm-build step or a
-# local `cd frontend-vue && npm run build`). The image still works without
+# local `cd frontend && npm run build`). The image still works without
 # it — orchestrator just won't serve "/" routes.
-COPY frontend-vue/dist ./frontend-vue/dist
+COPY frontend/dist ./frontend/dist
 
 # --- runtime --------------------------------------------------------------
 ENV PATH="/app/.venv/bin:$PATH" \

@@ -27,9 +27,9 @@ logs/
 *.key
 *.pem
 
-# Frontend build artifacts (orchestrator copies frontend-vue/dist only when
+# Frontend build artifacts (orchestrator copies frontend/dist only when
 # needed). node_modules is huge and never used at runtime.
-frontend-vue/node_modules/
+frontend/node_modules/
 
 # Vendored native binaries (aria2c, minio) — provided by their own images in prod
 vendor/

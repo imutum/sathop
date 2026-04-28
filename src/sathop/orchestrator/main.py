@@ -14,7 +14,7 @@ from .config import settings
 from .db import init_db, shutdown_db
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-WEB_DIST = PROJECT_ROOT / "frontend-vue" / "dist"
+WEB_DIST = PROJECT_ROOT / "frontend" / "dist"
 VERSION = "0.1.0"
 
 
@@ -24,7 +24,7 @@ def _print_banner() -> None:
     if WEB_DIST.is_dir():
         web = "mounted"
     else:
-        web = "missing (run `cd frontend-vue && npm run build`)"
+        web = "missing (run `cd frontend && npm run build`)"
     token = "set ✓" if settings.token else "OPEN — anyone on the network can call /api/*"
     lines = [
         "",

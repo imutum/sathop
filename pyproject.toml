@@ -66,7 +66,7 @@ asyncio_mode = "auto"
 [tool.ruff]
 line-length = 110
 target-version = "py311"
-extend-exclude = ["legacy", "frontend-vue", "vendor", "data"]
+extend-exclude = ["frontend", "vendor", "data"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
