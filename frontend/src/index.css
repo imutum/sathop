@@ -2,35 +2,130 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: dark;
+@layer base {
+  /* Light theme — refined neutrals leaning warm-cool zinc */
+  :root {
+    --bg: 220 20% 98%;
+    --surface: 0 0% 100%;
+    --elevated: 0 0% 100%;
+    --subtle: 220 14% 96%;
+    --border: 220 13% 90%;
+    --ring: 224 71% 56%;
+    --muted: 220 9% 46%;
+    --text: 224 71% 6%;
+    --accent: 224 76% 56%;
+    --accent-fg: 0 0% 100%;
+    --accent-soft: 224 76% 95%;
+    --success: 152 61% 38%;
+    --warning: 32 92% 48%;
+    --danger: 0 72% 50%;
+    --shadow: 220 40% 12%;
+    --surface-edge: 0 0% 100%;
+    color-scheme: light;
+  }
+
+  /* Dark theme — deep slate with cool undertone, refined contrast */
+  .dark {
+    --bg: 224 22% 5%;
+    --surface: 224 19% 8%;
+    --elevated: 224 18% 11%;
+    --subtle: 224 18% 11%;
+    --border: 220 14% 17%;
+    --ring: 217 91% 62%;
+    --muted: 215 14% 60%;
+    --text: 210 20% 96%;
+    --accent: 217 91% 62%;
+    --accent-fg: 0 0% 100%;
+    --accent-soft: 217 91% 16%;
+    --success: 152 70% 48%;
+    --warning: 38 92% 58%;
+    --danger: 0 84% 64%;
+    --shadow: 0 0% 0%;
+    --surface-edge: 220 14% 14%;
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+    font-feature-settings: "ss01", "cv11", "cv01";
+    font-size: 14px;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Native form selection */
+  ::selection {
+    background: hsl(var(--accent) / 0.30);
+    color: hsl(var(--text));
+  }
+
+  /* Refined focus ring used on interactive controls */
+  :where(button, a, input, select, textarea, [role="button"]):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px hsl(var(--bg)), 0 0 0 4px hsl(var(--ring) / 0.55);
+    border-radius: 0.5rem;
+  }
 }
 
-html,
-body,
-#root {
-  height: 100%;
+@layer utilities {
+  .font-display {
+    font-family:
+      "Geist", "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    letter-spacing: -0.02em;
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  /* Subtle dotted/grid background for hero-ish regions */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.6) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.6) 1px, transparent 1px);
+    background-size: 32px 32px;
+    background-position: -1px -1px;
+  }
+  .bg-dotgrid {
+    background-image: radial-gradient(
+      hsl(var(--border) / 0.85) 1px,
+      transparent 1px
+    );
+    background-size: 18px 18px;
+  }
+  /* Decorative glow blob used by the login screen */
+  .bg-radial-fade {
+    background: radial-gradient(
+      circle at 30% 20%,
+      hsl(var(--accent) / 0.18),
+      transparent 55%
+    ),
+    radial-gradient(circle at 80% 90%, hsl(var(--accent) / 0.10), transparent 50%);
+  }
 }
 
-body {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 14px;
-  -webkit-font-smoothing: antialiased;
-}
-
+/* Scrollbars: slim, theme-aware */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1f2937;
-  border-radius: 4px;
+  background: hsl(var(--border));
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: hsl(var(--muted) / 0.6);
+  background-clip: content-box;
+}
+* {
+  scrollbar-color: hsl(var(--border)) transparent;
+  scrollbar-width: thin;
 }

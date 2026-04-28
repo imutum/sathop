@@ -2,12 +2,13 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { API, BundleDetail, Credential } from "../api";
 import { clearCred, hasCred, loadCred, saveCred } from "../credCache";
-import { ActionButton, Modal } from "../ui";
+import { ActionButton, Alert, FieldLabel, Modal } from "../ui";
 import { useToast } from "../toast";
 
 type Props = {
   onClose: () => void;
   onCreated: () => void;
+  initialBundle?: string;  // "<name>@<version>" — preselects the bundle dropdown
 };
 
 type SlotSpec = {
@@ -121,10 +122,10 @@ function credDraftToApi(name: string, d: CredDraft): Credential {
   return { name, scheme: "bearer", token: d.secret || null };
 }
 
-export function CreateBatchModal({ onClose, onCreated }: Props) {
+export function CreateBatchModal({ onClose, onCreated, initialBundle }: Props) {
   const [batchId, setBatchId] = useState("");
   const [name, setName] = useState("");
-  const [bundleSel, setBundleSel] = useState<string>("");
+  const [bundleSel, setBundleSel] = useState<string>(initialBundle ?? "");
   const [targetReceiver, setTargetReceiver] = useState<string>("");
   const [envText, setEnvText] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
@@ -291,14 +292,16 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
 
   return (
     <Modal onClose={onClose} widthClass="w-[min(1200px,95vw)]" dirty={dirty}>
-      <h2 className="mb-1 text-base font-semibold">新建任务</h2>
-      <div className="mb-3 text-[11px] text-muted">
-        提示：<kbd className="rounded border border-border bg-bg px-1 py-px font-mono">Ctrl</kbd>
-        <span className="mx-0.5">+</span>
-        <kbd className="rounded border border-border bg-bg px-1 py-px font-mono">Enter</kbd>
-        <span> 提交，</span>
-        <kbd className="rounded border border-border bg-bg px-1 py-px font-mono">Esc</kbd>
-        <span> 关闭</span>
+      <h2 className="font-display mb-1 text-lg font-semibold tracking-tight">新建任务</h2>
+      <div className="mb-4 flex items-center gap-1.5 text-[11px] text-muted">
+        <span>提示：</span>
+        <kbd className="rounded-md border border-border bg-subtle px-1.5 py-0.5 font-mono text-[10.5px]">Ctrl</kbd>
+        <span>+</span>
+        <kbd className="rounded-md border border-border bg-subtle px-1.5 py-0.5 font-mono text-[10.5px]">Enter</kbd>
+        <span>提交</span>
+        <span className="text-border">·</span>
+        <kbd className="rounded-md border border-border bg-subtle px-1.5 py-0.5 font-mono text-[10.5px]">Esc</kbd>
+        <span>关闭</span>
       </div>
         <form
           onSubmit={(e) => {
@@ -315,31 +318,31 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
         >
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <label className="block">
-              <span className="text-xs text-muted">批次 ID（唯一）</span>
+              <FieldLabel>批次 ID</FieldLabel>
               <input
                 required
                 value={batchId}
                 onChange={(e) => setBatchId(e.target.value)}
                 placeholder="如 mod09a1-2024001"
-                className="mt-1 w-full rounded border border-border bg-bg px-3 py-2 font-mono text-xs outline-none focus:border-accent"
+                className="mt-1.5 w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs outline-none transition hover:border-accent/40 focus:border-accent"
               />
             </label>
             <label className="block">
-              <span className="text-xs text-muted">展示名称</span>
+              <FieldLabel>展示名称</FieldLabel>
               <input
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="MOD09A1 2024 第 1 天"
-                className="mt-1 w-full rounded border border-border bg-bg px-3 py-2 outline-none focus:border-accent"
+                className="mt-1.5 w-full rounded-lg border border-border bg-bg px-3 py-2 outline-none transition hover:border-accent/40 focus:border-accent"
               />
             </label>
             <label className="block">
-              <span className="text-xs text-muted">目标接收端</span>
+              <FieldLabel>目标接收端</FieldLabel>
               <select
                 value={targetReceiver}
                 onChange={(e) => setTargetReceiver(e.target.value)}
-                className="mt-1 w-full rounded border border-border bg-bg px-3 py-2 outline-none focus:border-accent"
+                className="mt-1.5 w-full rounded-lg border border-border bg-bg px-3 py-2 outline-none transition hover:border-accent/40 focus:border-accent"
               >
                 <option value="">任意（由调度器决定）</option>
                 {(receivers.data ?? []).map((r) => (
@@ -352,12 +355,12 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
           </div>
 
           <label className="block">
-            <span className="text-xs text-muted">任务包</span>
+            <FieldLabel>任务包</FieldLabel>
             <select
               required
               value={bundleSel}
               onChange={(e) => setBundleSel(e.target.value)}
-              className="mt-1 w-full rounded border border-border bg-bg px-3 py-2 font-mono text-xs outline-none focus:border-accent"
+              className="mt-1.5 w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs outline-none transition hover:border-accent/40 focus:border-accent"
             >
               <option value="">-- 选择任务包 --</option>
               {(bundles.data ?? []).map((b) => (
@@ -368,7 +371,7 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
               ))}
             </select>
             {(bundles.data ?? []).length === 0 && (
-              <div className="mt-1 text-[11px] text-amber-400">
+              <div className="mt-1 text-[11px] text-warning">
                 尚无已注册任务包。先到"任务包"页上传一个 ZIP。
               </div>
             )}
@@ -405,8 +408,8 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
             />
           )}
 
-          <details className="rounded border border-border bg-bg/50 px-3 py-2">
-            <summary className="cursor-pointer text-xs text-muted hover:text-text">
+          <details className="rounded-xl border border-border bg-subtle/40 px-3 py-2.5">
+            <summary className="cursor-pointer text-xs font-medium text-muted transition hover:text-text">
               高级：环境变量覆盖（可选，JSON 对象）
             </summary>
             <textarea
@@ -414,19 +417,19 @@ export function CreateBatchModal({ onClose, onCreated }: Props) {
               onChange={(e) => setEnvText(e.target.value)}
               placeholder={'{\n  "SATHOP_FACTOR": "4"\n}'}
               rows={3}
-              className="mt-2 w-full rounded border border-border bg-bg px-3 py-2 font-mono text-xs outline-none focus:border-accent"
+              className="mt-2 w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs outline-none transition hover:border-accent/40 focus:border-accent"
             />
             {!parsedEnv.ok && (
-              <div className="mt-1 text-[11px] text-rose-400">
+              <div className="mt-1 text-[11px] text-danger">
                 JSON 错误：{"error" in parsedEnv ? parsedEnv.error : ""}
               </div>
             )}
           </details>
 
           {err && (
-            <div className="rounded border border-rose-900 bg-rose-950/50 px-3 py-2 text-xs text-rose-400 whitespace-pre-wrap">
-              {err}
-            </div>
+            <Alert>
+              <span className="whitespace-pre-wrap">{err}</span>
+            </Alert>
           )}
 
           <div className="flex justify-end gap-2 pt-2">
@@ -468,7 +471,7 @@ function SchemaHint({ d }: { d: BundleDetail }) {
   const pipCount = m.requirements?.pip?.length ?? 0;
   const aptCount = m.requirements?.apt?.length ?? 0;
   return (
-    <div className="rounded border border-border bg-bg/50 px-2 py-1.5 text-[11px] text-muted">
+    <div className="rounded-lg border border-border bg-subtle/40 px-3 py-2 text-[11px] text-muted">
       <div>
         入口：<span className="font-mono text-text">{m.execution.entrypoint}</span>
       </div>
@@ -511,18 +514,18 @@ function GranuleTable({
         <span className="text-xs text-muted">数据粒 · {rows.length} 条</span>
         <div className="flex gap-1.5 text-xs">
           <button type="button" onClick={onOpenCsv}
-            className="rounded border border-border bg-bg px-2 py-1 text-muted hover:text-text">
+            className="rounded-md border border-border bg-surface px-2 py-1 text-muted transition hover:border-accent/40 hover:text-text">
             粘贴 CSV
           </button>
           <button type="button" onClick={addRow}
-            className="rounded border border-border bg-bg px-2 py-1 text-muted hover:text-text">
+            className="rounded-md border border-border bg-surface px-2 py-1 text-muted transition hover:border-accent/40 hover:text-text">
             + 添加行
           </button>
         </div>
       </div>
-      <div className="overflow-x-auto rounded border border-border">
+      <div className="overflow-x-auto rounded-xl border border-border">
         <table className="w-full text-xs">
-          <thead className="bg-bg/50 text-left uppercase tracking-wide text-muted">
+          <thead className="bg-subtle/60 text-left text-[10.5px] font-semibold uppercase tracking-[0.10em] text-muted">
             <tr>
               <th className="px-2 py-1.5">granule_id</th>
               {schema.slots.map((s) => (
@@ -626,7 +629,7 @@ function GranuleTable({
                   ))}
                   <td className="px-2 py-1 text-right">
                     <button type="button" onClick={() => removeRow(idx)}
-                      className="text-muted hover:text-rose-400">×</button>
+                      className="text-muted hover:text-danger">×</button>
                   </td>
                 </tr>
               );
@@ -661,11 +664,11 @@ function Cell({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         title={error}
-        className={`w-full rounded border bg-bg px-2 py-1 outline-none ${
-          error ? "border-rose-700" : "border-border focus:border-accent"
+        className={`w-full rounded-md border bg-bg px-2 py-1 outline-none transition ${
+          error ? "border-danger/60" : "border-border focus:border-accent"
         } ${mono ? "font-mono text-[11px]" : "text-xs"}`}
       />
-      {error && <div className="mt-0.5 text-[10px] text-rose-400">{error}</div>}
+      {error && <div className="mt-0.5 text-[10px] text-danger">{error}</div>}
     </div>
   );
 }
@@ -733,19 +736,19 @@ function CsvPasteModal({
 
   return (
     <Modal onClose={onClose} widthClass="w-[720px]" zIndex={60} dirty={text.split(/\r?\n/).length > 2}>
-      <h3 className="mb-2 text-sm font-semibold">粘贴 CSV / TSV</h3>
-      <div className="mb-2 text-[11px] text-muted">
+      <h3 className="font-display mb-2 text-base font-semibold tracking-tight">粘贴 CSV / TSV</h3>
+      <div className="mb-3 text-[11px] text-muted">
         第一行必须是表头，列顺序不限。自动识别逗号或 Tab 分隔。
       </div>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
         rows={14}
-        className="w-full rounded border border-border bg-bg px-3 py-2 font-mono text-[11px] outline-none focus:border-accent"
+        className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-[11px] outline-none transition hover:border-accent/40 focus:border-accent"
       />
       {parseErr && (
-        <div className="mt-2 rounded border border-rose-900 bg-rose-950/50 px-3 py-2 text-xs text-rose-400">
-          {parseErr}
+        <div className="mt-2">
+          <Alert>{parseErr}</Alert>
         </div>
       )}
       <div className="mt-3 flex justify-end gap-2">
@@ -773,8 +776,8 @@ function CredentialsBlock({
 }) {
   return (
     <fieldset className="space-y-2">
-      <legend className="text-xs text-muted">凭证 · 任务包需要 {names.length} 个</legend>
-      <div className="rounded border border-border bg-bg/50 p-3 space-y-3">
+      <legend><FieldLabel>凭证 · 任务包需要 {names.length} 个</FieldLabel></legend>
+      <div className="space-y-3 rounded-xl border border-border bg-subtle/40 p-3">
         {names.map((name) => {
           const d = drafts[name] ?? { scheme: "basic", username: "", secret: "" };
           const schemeId = `cred-${name}-scheme`;
@@ -797,7 +800,7 @@ function CredentialsBlock({
                 onChange={(e) =>
                   onChange(name, { ...d, scheme: e.target.value as "basic" | "bearer" })
                 }
-                className="rounded border border-border bg-bg px-2 py-1 outline-none focus:border-accent"
+                className="rounded-md border border-border bg-bg px-2 py-1 outline-none transition hover:border-accent/40 focus:border-accent"
               >
                 <option value="basic">Basic</option>
                 <option value="bearer">Bearer</option>
@@ -810,7 +813,7 @@ function CredentialsBlock({
                   value={d.username}
                   onChange={(e) => onChange(name, { ...d, username: e.target.value })}
                   placeholder="用户名"
-                  className="rounded border border-border bg-bg px-2 py-1 outline-none focus:border-accent"
+                  className="rounded-md border border-border bg-bg px-2 py-1 outline-none transition hover:border-accent/40 focus:border-accent"
                 />
               ) : (
                 <div className="text-muted">—</div>
@@ -823,7 +826,7 @@ function CredentialsBlock({
                 value={d.secret}
                 onChange={(e) => onChange(name, { ...d, secret: e.target.value })}
                 placeholder={d.scheme === "basic" ? "密码" : "Token"}
-                className="rounded border border-border bg-bg px-2 py-1 font-mono outline-none focus:border-accent"
+                className="rounded-md border border-border bg-bg px-2 py-1 font-mono outline-none transition hover:border-accent/40 focus:border-accent"
               />
               <div className="flex items-center gap-2 whitespace-nowrap">
                 <label
@@ -844,7 +847,7 @@ function CredentialsBlock({
                   <button
                     type="button"
                     onClick={() => onForget(name)}
-                    className="text-[11px] text-muted hover:text-rose-400"
+                    className="text-[11px] text-muted hover:text-danger"
                     title="从本浏览器删除已保存的凭证"
                   >
                     清除

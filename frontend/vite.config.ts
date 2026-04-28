@@ -14,5 +14,17 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    rollupOptions: {
+      output: {
+        // Split heavy vendors so the initial bundle stays small and the
+        // browser can fetch chunks in parallel. Cache stays warm across
+        // app updates because vendors rarely change.
+        manualChunks: {
+          echarts: ["echarts", "echarts-for-react", "zrender"],
+          react: ["react", "react-dom", "react-router-dom"],
+          query: ["@tanstack/react-query"],
+        },
+      },
+    },
   },
 });

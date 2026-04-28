@@ -1,24 +1,41 @@
 import { Route, Routes, Link, useLocation } from "react-router-dom";
-import type { ReactNode } from "react";
+import { Suspense, lazy, type ReactNode } from "react";
 import { useAuthGate } from "./auth";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Layout } from "./Layout";
 import { Dashboard } from "./pages/Dashboard";
-import { Batches } from "./pages/Batches";
-import { BatchDetail } from "./pages/BatchDetail";
-import { Workers } from "./pages/Workers";
-import { Receivers } from "./pages/Receivers";
-import { Events } from "./pages/Events";
-import { Settings } from "./pages/Settings";
-import { Bundles } from "./pages/Bundles";
-import { SharedFiles } from "./pages/SharedFiles";
+import { ActionButton, Spinner } from "./ui";
+
+// Dashboard loads eagerly because it's the landing route. Everything else
+// is split into separate chunks so the initial bundle stays small.
+const Batches = lazy(() => import("./pages/Batches").then((m) => ({ default: m.Batches })));
+const BatchDetail = lazy(() => import("./pages/BatchDetail").then((m) => ({ default: m.BatchDetail })));
+const Workers = lazy(() => import("./pages/Workers").then((m) => ({ default: m.Workers })));
+const Receivers = lazy(() => import("./pages/Receivers").then((m) => ({ default: m.Receivers })));
+const Events = lazy(() => import("./pages/Events").then((m) => ({ default: m.Events })));
+const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const Bundles = lazy(() => import("./pages/Bundles").then((m) => ({ default: m.Bundles })));
+const SharedFiles = lazy(() => import("./pages/SharedFiles").then((m) => ({ default: m.SharedFiles })));
 
 // Fresh ErrorBoundary per route. Keying by pathname resets the boundary on
 // navigation so a crashed page doesn't stay crashed after the user navigates
-// away and back.
+// away and back. Suspense covers async chunk loading.
 function RouteBoundary({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
-  return <ErrorBoundary key={pathname}>{children}</ErrorBoundary>;
+  return (
+    <ErrorBoundary key={pathname}>
+      <Suspense fallback={<RouteFallback />}>{children}</Suspense>
+    </ErrorBoundary>
+  );
+}
+
+function RouteFallback() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center text-xs text-muted">
+      <Spinner />
+      <span className="ml-2">加载中…</span>
+    </div>
+  );
 }
 
 export function App() {
@@ -45,16 +62,15 @@ export function App() {
 function NotFound() {
   const { pathname } = useLocation();
   return (
-    <div className="flex h-full items-center justify-center p-6">
-      <div className="w-[420px] rounded-lg border border-border bg-surface p-6 text-center">
-        <div className="text-4xl font-semibold text-muted">404</div>
-        <div className="mt-2 text-sm">页面不存在</div>
-        <div className="mt-1 break-all font-mono text-xs text-muted">{pathname}</div>
-        <Link
-          to="/"
-          className="mt-4 inline-block rounded bg-accent px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-600"
-        >
-          返回总览
+    <div className="flex h-[60vh] items-center justify-center">
+      <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 text-center shadow-card">
+        <div className="font-display text-6xl font-semibold text-muted/40 tracking-tight">404</div>
+        <div className="mt-3 text-sm font-medium">页面不存在</div>
+        <div className="mt-2 break-all rounded-lg border border-border bg-subtle px-3 py-2 font-mono text-[11px] text-muted">
+          {pathname}
+        </div>
+        <Link to="/" className="mt-5 inline-block">
+          <ActionButton tone="primary">返回总览</ActionButton>
         </Link>
       </div>
     </div>

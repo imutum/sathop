@@ -1,4 +1,5 @@
 import { createContext, ReactNode, useCallback, useContext, useRef, useState } from "react";
+import { IconAlert, IconCheck, IconInfo, IconX } from "./icons";
 
 type ToastKind = "success" | "error" | "info";
 type ToastItem = {
@@ -51,7 +52,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div
         aria-live="polite"
         aria-atomic="false"
-        className="pointer-events-none fixed right-4 bottom-4 z-[100] flex w-80 flex-col gap-2"
+        className="pointer-events-none fixed right-5 bottom-5 z-[100] flex w-[340px] flex-col gap-2.5"
       >
         {items.map((it) => (
           <Toast key={it.id} item={it} onDismiss={() => dismiss(it.id)} />
@@ -62,25 +63,42 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 function Toast({ item, onDismiss }: { item: ToastItem; onDismiss: () => void }) {
-  const tones: Record<ToastKind, string> = {
-    success: "border-emerald-700/70 bg-emerald-950/90 text-emerald-200",
-    error: "border-rose-800/70 bg-rose-950/95 text-rose-100",
-    info: "border-border bg-surface/95 text-text",
+  const tones: Record<ToastKind, { wrap: string; icon: string }> = {
+    success: {
+      wrap: "border-success/30 bg-success/10 text-text",
+      icon: "text-success bg-success/15",
+    },
+    error: {
+      wrap: "border-danger/30 bg-danger/10 text-text",
+      icon: "text-danger bg-danger/15",
+    },
+    info: {
+      wrap: "border-border bg-surface/95 text-text",
+      icon: "text-accent bg-accent/15",
+    },
   };
-  const icons: Record<ToastKind, string> = { success: "✓", error: "⚠", info: "•" };
+  const Icon =
+    item.kind === "success" ? IconCheck : item.kind === "error" ? IconAlert : IconInfo;
   return (
     <div
       role={item.kind === "error" ? "alert" : "status"}
-      className={`pointer-events-auto flex items-start gap-2 rounded border px-3 py-2 text-xs shadow-lg backdrop-blur-sm ${tones[item.kind]}`}
+      className={`pointer-events-auto flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-xs shadow-pop backdrop-blur-md animate-slide-up ${tones[item.kind].wrap}`}
     >
-      <span className="select-none pt-0.5 font-bold">{icons[item.kind]}</span>
-      <span className="flex-1 break-words whitespace-pre-wrap">{item.text}</span>
+      <span
+        className={`grid h-6 w-6 shrink-0 place-items-center rounded-lg ${tones[item.kind].icon}`}
+        aria-hidden
+      >
+        <Icon width={13} height={13} />
+      </span>
+      <span className="flex-1 break-words whitespace-pre-wrap leading-relaxed text-text">
+        {item.text}
+      </span>
       <button
         onClick={onDismiss}
-        className="select-none text-muted hover:text-text"
+        className="grid h-5 w-5 place-items-center rounded text-muted transition hover:bg-subtle hover:text-text"
         aria-label="关闭通知"
       >
-        ×
+        <IconX width={12} height={12} />
       </button>
     </div>
   );

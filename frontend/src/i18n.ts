@@ -59,3 +59,19 @@ export function fmtMs(ms: number): string {
   const rs = Math.round(s - m * 60);
   return `${m}m${rs.toString().padStart(2, "0")}s`;
 }
+
+// Long-form wall clock for batch end-to-end times. Splits to h+m once over an
+// hour; uses fmtMs's m+s format below.
+export function fmtDuration(ms: number): string {
+  if (ms < 3_600_000) return fmtMs(ms);
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.round((ms - h * 3_600_000) / 60_000);
+  return `${h}h${m.toString().padStart(2, "0")}m`;
+}
+
+// Throughput per minute; rounds to the nearest 0.1 below 10/min, integer above.
+export function fmtPerMinute(count: number, ms: number): string {
+  if (ms <= 0 || count <= 0) return "—";
+  const perMin = (count * 60_000) / ms;
+  return perMin >= 10 ? `${perMin.toFixed(0)}/min` : `${perMin.toFixed(1)}/min`;
+}

@@ -37,6 +37,7 @@ export type WorkerInfo = {
   queue_processing: number;
   queue_uploading: number;
   enabled: boolean;
+  paused: boolean;
   desired_capacity: number | null;
 };
 
@@ -100,6 +101,7 @@ export type BundleSummary = {
   size: number;
   description: string | null;
   uploaded_at: string;
+  in_use_count: number;
 };
 
 export type BundleDetail = BundleSummary & {
@@ -163,7 +165,15 @@ export type StageStats = {
   max_ms: number;
 };
 
-export type BatchTiming = Record<TimingStage, StageStats>;
+export type BatchTiming = {
+  stages: Record<TimingStage, StageStats>;
+  // Outer envelope: max(finished_at) - min(started_at) across every stage row
+  // in the batch. Independent of per-row durations (workers run granules in
+  // parallel, so sum >> wall on a healthy cluster).
+  wall_ms: number;
+  first_started_at: string | null;
+  last_finished_at: string | null;
+};
 
 export type OrchestratorInfo = {
   version: string;
@@ -175,6 +185,7 @@ export type OrchestratorInfo = {
   retention_sweep_sec: number;
   max_inflight_per_worker: number;
   dev_mode: boolean;
+  auth_open: boolean;
 };
 
 function getToken(): string {
@@ -183,6 +194,29 @@ function getToken(): string {
 
 export function setToken(t: string): void {
   localStorage.setItem("sathop.token", t);
+}
+
+// Recover from a stale token (e.g. admin set SATHOP_TOKEN after the user
+// auto-skipped login in OPEN mode). All /api/* share require_token, so a 401
+// on any endpoint means the cached token is no longer good — drop it and
+// reload so the auth gate can probe again or prompt for a new one.
+// Disabled during login probes so a wrong-typed token shows an inline error
+// instead of looping the page.
+let recoverOn401 = true;
+export function suspendAuthRecovery<T>(fn: () => Promise<T>): Promise<T> {
+  recoverOn401 = false;
+  return fn().finally(() => {
+    recoverOn401 = true;
+  });
+}
+
+function handleAuthFailure(): void {
+  if (!recoverOn401) return;
+  if (!localStorage.getItem("sathop.token")) return;
+  // Latch off so parallel queries that all 401 don't each trigger reload().
+  recoverOn401 = false;
+  localStorage.removeItem("sathop.token");
+  window.location.reload();
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -195,6 +229,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
   });
   if (!r.ok) {
+    if (r.status === 401) handleAuthFailure();
     const body = await r.text();
     throw new Error(`${r.status} ${r.statusText}: ${body.slice(0, 200)}`);
   }
@@ -210,7 +245,27 @@ export const API = {
       `/api/workers/${encodeURIComponent(workerId)}/capacity`,
       { method: "PUT", body: JSON.stringify({ desired_capacity: desiredCapacity }) },
     ),
+  setWorkerEnabled: (workerId: string, enabled: boolean) =>
+    api<{ ok: boolean; enabled: boolean }>(
+      `/api/workers/${encodeURIComponent(workerId)}/enabled`,
+      { method: "PUT", body: JSON.stringify({ enabled }) },
+    ),
+  forgetWorker: (workerId: string) =>
+    api<{ ok: boolean }>(
+      `/api/workers/${encodeURIComponent(workerId)}`,
+      { method: "DELETE" },
+    ),
   receivers: () => api<ReceiverInfo[]>("/api/receivers"),
+  setReceiverEnabled: (receiverId: string, enabled: boolean) =>
+    api<{ ok: boolean; enabled: boolean }>(
+      `/api/receivers/${encodeURIComponent(receiverId)}/enabled`,
+      { method: "PUT", body: JSON.stringify({ enabled }) },
+    ),
+  forgetReceiver: (receiverId: string) =>
+    api<{ ok: boolean }>(
+      `/api/receivers/${encodeURIComponent(receiverId)}`,
+      { method: "DELETE" },
+    ),
   batches: () => api<BatchSummary[]>("/api/batches"),
   createBatch: (body: unknown) =>
     api<BatchSummary>("/api/batches", { method: "POST", body: JSON.stringify(body) }),
@@ -220,11 +275,18 @@ export const API = {
     if (state) qs.set("state", state);
     return api<GranuleRow[]>(`/api/batches/${batchId}/granules?${qs}`);
   },
-  events: (sinceId = 0, limit = 100) =>
-    api<EventRow[]>(`/api/events?since_id=${sinceId}&limit=${limit}`),
+  events: (sinceId = 0, limit = 100, beforeId?: number) => {
+    const qs = new URLSearchParams({ since_id: String(sinceId), limit: String(limit) });
+    if (beforeId !== undefined) qs.set("before_id", String(beforeId));
+    return api<EventRow[]>(`/api/events?${qs}`);
+  },
   batchEvents: (batchId: string, level?: "warn" | "error", limit = 200) => {
     const qs = new URLSearchParams({ batch_id: batchId, limit: String(limit) });
     if (level) qs.set("level", level);
+    return api<EventRow[]>(`/api/events?${qs}`);
+  },
+  granuleEvents: (granuleId: string, limit = 50) => {
+    const qs = new URLSearchParams({ granule_id: granuleId, limit: String(limit) });
     return api<EventRow[]>(`/api/events?${qs}`);
   },
   retryFailed: (batchId: string) =>
@@ -264,13 +326,30 @@ export const API = {
         path.split("/").map(encodeURIComponent).join("/")
       }`,
     ),
-  deleteBundle: (name: string, version: string) =>
-    fetch(`/api/bundles/${encodeURIComponent(name)}/${encodeURIComponent(version)}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${getToken()}` },
-    }).then((r) => {
-      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-    }),
+  downloadBundle: async (name: string, version: string): Promise<void> => {
+    const url = `/api/bundles/${encodeURIComponent(name)}/${encodeURIComponent(version)}/download`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    const blob = await r.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = `${name}-${version}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  },
+  deleteBundle: async (name: string, version: string): Promise<void> => {
+    const r = await fetch(
+      `/api/bundles/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
+      { method: "DELETE", headers: { Authorization: `Bearer ${getToken()}` } },
+    );
+    if (!r.ok) {
+      const body = await r.text();
+      throw new Error(`${r.status} ${r.statusText}: ${body.slice(0, 400)}`);
+    }
+  },
   sharedFiles: () => api<SharedFileInfo[]>("/api/shared"),
   uploadSharedFile: async (
     name: string,

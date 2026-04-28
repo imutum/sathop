@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { ActionButton } from "./ui";
 
 type Props = { children: ReactNode };
 type State = { err: Error | null };
@@ -21,29 +22,22 @@ export class ErrorBoundary extends Component<Props, State> {
     const msg = this.state.err.message || String(this.state.err);
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <div className="w-[520px] rounded-lg border border-rose-900/60 bg-rose-950/30 p-6 text-sm">
-          <h2 className="mb-2 text-base font-semibold text-rose-300">页面渲染出错</h2>
-          <p className="mb-3 text-xs text-muted">
-            该页面遇到未处理的异常。其他页面可能仍可正常访问；如需恢复当前页面请点击重试。
+        <div className="w-full max-w-lg rounded-2xl border border-danger/30 bg-danger/5 p-6 shadow-card">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-danger">
+            页面崩溃
+          </div>
+          <h2 className="font-display mt-2 text-lg font-semibold tracking-tight">
+            渲染时抛出未捕获异常
+          </h2>
+          <p className="mt-2 text-xs text-muted">
+            其他页面可能仍可访问；点击下方按钮重试或重新加载。
           </p>
-          <pre className="mb-3 max-h-48 overflow-auto rounded border border-border bg-bg p-3 font-mono text-[11px] text-rose-300 whitespace-pre-wrap">
+          <pre className="mt-3 max-h-48 overflow-auto rounded-lg border border-border bg-bg p-3 font-mono text-[11px] text-danger whitespace-pre-wrap">
             {msg}
           </pre>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="rounded border border-border bg-bg px-3 py-1.5 text-xs text-muted hover:text-text"
-            >
-              重新加载
-            </button>
-            <button
-              type="button"
-              onClick={this.reset}
-              className="rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-600"
-            >
-              重试
-            </button>
+          <div className="mt-4 flex justify-end gap-2">
+            <ActionButton onClick={() => window.location.reload()}>重新加载</ActionButton>
+            <ActionButton tone="primary" onClick={this.reset}>重试当前页</ActionButton>
           </div>
         </div>
       </div>
