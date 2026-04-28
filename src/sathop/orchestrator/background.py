@@ -8,7 +8,7 @@ from datetime import timedelta
 
 from sqlalchemy import delete, select, update
 
-from sathop.shared.protocol import GranuleState
+from sathop.shared.protocol import LEASED_STATES, GranuleState
 
 from . import db
 from .config import settings
@@ -19,16 +19,6 @@ _log = logging.getLogger("sathop.orch.background")
 
 SWEEP_INTERVAL_SEC = 60
 
-# All states where a worker holds the lease. UPLOADED already clears
-# leased_by, so it doesn't need reclaiming.
-_RECLAIMABLE_STATES = (
-    GranuleState.QUEUED.value,
-    GranuleState.DOWNLOADING.value,
-    GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSING.value,
-    GranuleState.PROCESSED.value,
-)
-
 
 async def sweep_expired_leases() -> int:
     assert db._session_maker is not None
@@ -36,7 +26,7 @@ async def sweep_expired_leases() -> int:
     async with db._session_maker() as s:
         stmt = (
             select(Granule)
-            .where(Granule.state.in_(_RECLAIMABLE_STATES))
+            .where(Granule.state.in_(LEASED_STATES))
             .where(Granule.lease_expires_at.is_not(None))
             .where(Granule.lease_expires_at < now)
         )
@@ -52,7 +42,7 @@ async def sweep_expired_leases() -> int:
         result = await s.execute(
             update(Granule)
             .where(Granule.granule_id.in_(ids))
-            .where(Granule.state.in_(_RECLAIMABLE_STATES))
+            .where(Granule.state.in_(LEASED_STATES))
             .where(Granule.lease_expires_at.is_not(None))
             .where(Granule.lease_expires_at < now)
             .values(state=GranuleState.PENDING.value, leased_by=None, lease_expires_at=None, updated_at=now)

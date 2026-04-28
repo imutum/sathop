@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
-import { API, type BatchSummary, type GranuleState } from "../api";
+import { API, IN_FLIGHT_STATES, type BatchSummary, type GranuleState } from "../api";
 import { fmtAge, fmtDuration } from "../i18n";
 import { useToast } from "../composables/useToast";
 import ActionButton from "../ui/ActionButton.vue";
@@ -19,14 +19,6 @@ import { Icon } from "../ui/Icon";
 
 const TERMINAL: GranuleState[] = ["acked", "deleted"];
 const ERRORED: GranuleState[] = ["failed", "blacklisted"];
-const IN_FLIGHT: GranuleState[] = [
-  "pending",
-  "queued",
-  "downloading",
-  "downloaded",
-  "processing",
-  "processed",
-];
 
 const total = (b: BatchSummary) =>
   Object.values(b.counts).reduce((a, c) => a + (c ?? 0), 0);
@@ -34,7 +26,7 @@ const done = (b: BatchSummary) => TERMINAL.reduce((s, k) => s + (b.counts[k] ?? 
 const errors = (b: BatchSummary) =>
   ERRORED.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
 const inFlight = (b: BatchSummary) =>
-  IN_FLIGHT.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
+  IN_FLIGHT_STATES.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
 const isClosed = (b: BatchSummary) => {
   const t = total(b);
   const d = done(b);

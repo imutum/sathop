@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
-import { API, type GranuleRow, type GranuleState } from "../api";
+import { API, IN_FLIGHT_STATES, type GranuleRow, type GranuleState } from "../api";
 import { fmtAge, fmtDuration, levelLabel, stateLabel } from "../i18n";
 import { useToast } from "../composables/useToast";
 import ActionButton from "../ui/ActionButton.vue";
@@ -34,23 +34,8 @@ const STATE_FILTERS: { value: GranuleState | "all"; label: string }[] = [
   { value: "blacklisted", label: "已拉黑" },
 ];
 
-const CANCELLABLE = new Set<GranuleState>([
-  "pending",
-  "queued",
-  "downloading",
-  "downloaded",
-  "processing",
-  "processed",
-]);
+const CANCELLABLE = new Set<GranuleState>(IN_FLIGHT_STATES);
 const RETRYABLE = new Set<GranuleState>(["failed", "blacklisted"]);
-const INFLIGHT_STATES: GranuleState[] = [
-  "pending",
-  "queued",
-  "downloading",
-  "downloaded",
-  "processing",
-  "processed",
-];
 
 function stripBatchPrefix(gid: string, batchId: string) {
   return gid.startsWith(`${batchId}:`) ? gid.slice(batchId.length + 1) : gid;
@@ -184,7 +169,7 @@ const failedCount = computed(
 // the granules query would underreport.
 const exhaustedCount = computed(() => b.value?.objects_exhausted ?? 0);
 const inflightCount = computed(() =>
-  INFLIGHT_STATES.reduce((s, k) => s + (b.value?.counts?.[k] ?? 0), 0),
+  IN_FLIGHT_STATES.reduce((s, k) => s + (b.value?.counts?.[k] ?? 0), 0),
 );
 
 const stateOptions = computed(() =>

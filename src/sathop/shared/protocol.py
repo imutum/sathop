@@ -24,16 +24,27 @@ class GranuleState(str, Enum):
     BLACKLISTED = "blacklisted"
 
 
-# States where the worker pipeline still has work to do. Excludes UPLOADED
-# (worker done, waiting on receiver) and the terminal/error states. Frontend
-# `IN_FLIGHT` constants in Batches.vue / BatchDetail.vue must mirror this.
-IN_FLIGHT_STATES: tuple[str, ...] = (
-    GranuleState.PENDING.value,
+# Worker holds an active lease in any of these — the row will be reclaimed by
+# the lease sweeper if the lease expires.
+LEASED_STATES: tuple[str, ...] = (
     GranuleState.QUEUED.value,
     GranuleState.DOWNLOADING.value,
     GranuleState.DOWNLOADED.value,
     GranuleState.PROCESSING.value,
     GranuleState.PROCESSED.value,
+)
+
+# Worker pipeline still has work to do (LEASED_STATES + PENDING). Excludes
+# UPLOADED (worker done, waiting on receiver) and terminal/error states.
+# Frontend mirrors this in `frontend/src/api.ts` (IN_FLIGHT_STATES).
+IN_FLIGHT_STATES: tuple[str, ...] = (GranuleState.PENDING.value, *LEASED_STATES)
+
+# Everything that isn't terminal (DELETED) or errored (FAILED, BLACKLISTED).
+# Used for stuck-granule queries and Prometheus non-terminal counts.
+NON_TERMINAL_STATES: tuple[str, ...] = (
+    *IN_FLIGHT_STATES,
+    GranuleState.UPLOADED.value,
+    GranuleState.ACKED.value,
 )
 
 

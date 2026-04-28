@@ -5,7 +5,7 @@ import { BarChart } from "echarts/charts";
 import { GridComponent, TooltipComponent } from "echarts/components";
 import { SVGRenderer } from "echarts/renderers";
 import VChart from "vue-echarts";
-import { type GranuleState } from "../api";
+import { STATE_ORDER, type GranuleState } from "../api";
 import { stateLabel } from "../i18n";
 import { useTheme } from "../composables/useTheme";
 
@@ -15,18 +15,6 @@ const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
 
 const { effective } = useTheme();
 const isDark = computed(() => effective.value === "dark");
-
-const ORDER: GranuleState[] = [
-  "pending",
-  "queued",
-  "downloading",
-  "downloaded",
-  "processing",
-  "processed",
-  "uploaded",
-  "acked",
-  "deleted",
-];
 
 const COLORS_DARK: Record<GranuleState, string> = {
   pending: "#64748b",
@@ -63,7 +51,7 @@ const option = computed(() => {
   const splitLine = isDark.value ? "#1e293b" : "#e2e8f0";
   const labelColor = isDark.value ? "#e2e8f0" : "#0f172a";
 
-  const visible = ORDER.filter((s) => (props.counts[s] ?? 0) > 0);
+  const visible = STATE_ORDER.filter((s) => (props.counts[s] ?? 0) > 0);
   const cats = [...visible].reverse().map((s) => stateLabel(s));
   const vals = [...visible].reverse().map((s) => ({
     value: props.counts[s]!,

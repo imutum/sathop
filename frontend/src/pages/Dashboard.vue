@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
-import { API, type GranuleState } from "../api";
+import { API, STATE_ORDER, type GranuleState } from "../api";
 import { fmtAge, levelLabel, stateLabel } from "../i18n";
 import Badge from "../ui/Badge.vue";
 import Card from "../ui/Card.vue";
@@ -22,18 +22,6 @@ const StateBarChart = defineAsyncComponent({
   },
   delay: 80,
 });
-
-const ORDER: GranuleState[] = [
-  "pending",
-  "queued",
-  "downloading",
-  "downloaded",
-  "processing",
-  "processed",
-  "uploaded",
-  "acked",
-  "deleted",
-];
 
 const router = useRouter();
 
@@ -57,8 +45,13 @@ const stuckTotal = computed(() =>
   Object.values(stuck.value).reduce((a, b) => a + (b ?? 0), 0),
 );
 const failed = computed(() => (counts.value.failed ?? 0) + (counts.value.blacklisted ?? 0));
+// Sum of every state except `deleted` — i.e. granules still occupying any
+// resource (worker disk, receiver mailbox).
 const inflightTotal = computed(() =>
-  ORDER.slice(0, 8).reduce((s, k) => s + (counts.value[k] ?? 0), 0),
+  STATE_ORDER.reduce(
+    (s, k) => (k === "deleted" ? s : s + (counts.value[k] ?? 0)),
+    0,
+  ),
 );
 const done = computed(() => counts.value.deleted ?? 0);
 
@@ -83,7 +76,7 @@ const activeReceivers = computed(
     ).length,
 );
 
-const hasChartData = computed(() => ORDER.some((s) => (counts.value[s] ?? 0) > 0));
+const hasChartData = computed(() => STATE_ORDER.some((s) => (counts.value[s] ?? 0) > 0));
 
 const active = computed(() => inflight.data.value ?? []);
 

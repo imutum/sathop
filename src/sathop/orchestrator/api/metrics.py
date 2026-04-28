@@ -25,7 +25,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, gen
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import GranuleState
+from sathop.shared.protocol import NON_TERMINAL_STATES, GranuleState
 
 from ..config import require_token_or_query
 from ..db import Batch, Event, Granule, Receiver, Worker, session
@@ -45,16 +45,7 @@ def _age_seconds(now: datetime, ts: datetime | None) -> float:
     return max(0.0, (now - ts).total_seconds())
 
 
-NON_TERMINAL = {
-    GranuleState.PENDING.value,
-    GranuleState.QUEUED.value,
-    GranuleState.DOWNLOADING.value,
-    GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSING.value,
-    GranuleState.PROCESSED.value,
-    GranuleState.UPLOADED.value,
-    GranuleState.ACKED.value,
-}
+NON_TERMINAL = set(NON_TERMINAL_STATES)
 STUCK_AGE_HOURS = 6
 
 

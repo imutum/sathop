@@ -13,6 +13,27 @@ export type GranuleState =
   | "failed"
   | "blacklisted";
 
+// Worker pipeline still has work to do — mirrors `IN_FLIGHT_STATES` in
+// shared/protocol.py. Used for batch progress, ETA, and the cancel/reset gate.
+export const IN_FLIGHT_STATES: GranuleState[] = [
+  "pending",
+  "queued",
+  "downloading",
+  "downloaded",
+  "processing",
+  "processed",
+];
+
+// Happy-path state sequence used for chart ordering and dashboard rollups.
+// Excludes terminal error states (failed/blacklisted) since they're rendered
+// separately as "errors".
+export const STATE_ORDER: GranuleState[] = [
+  ...IN_FLIGHT_STATES,
+  "uploaded",
+  "acked",
+  "deleted",
+];
+
 export type BatchSummary = {
   batch_id: string;
   name: string;

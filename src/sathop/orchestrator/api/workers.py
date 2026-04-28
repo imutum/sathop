@@ -11,6 +11,7 @@ from sqlalchemy import distinct, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
+    LEASED_STATES,
     Credential,
     DeletableGranule,
     GranuleState,
@@ -44,19 +45,6 @@ LEASE_DURATION = timedelta(minutes=30)
 # already serializes writers at commit time, so the perf cost is negligible.
 _LEASE_LOCK = asyncio.Lock()
 
-# Non-terminal states where the worker actually holds storage for the granule's
-# staged inputs (before upload). Post-upload the worker releases leased_by but
-# still holds output objects — counted separately via granule_objects. QUEUED
-# counts: the worker's handler is running and the work_dir is created, even if
-# the bytes haven't started moving yet.
-_HOLDING_STATES = (
-    GranuleState.QUEUED.value,
-    GranuleState.DOWNLOADING.value,
-    GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSING.value,
-    GranuleState.PROCESSED.value,
-)
-
 
 async def _count_inflight(s: AsyncSession, worker_id: str) -> int:
     """How many granules is this worker currently holding storage for?
@@ -66,7 +54,7 @@ async def _count_inflight(s: AsyncSession, worker_id: str) -> int:
         select(func.count())
         .select_from(Granule)
         .where(Granule.leased_by == worker_id)
-        .where(Granule.state.in_(_HOLDING_STATES))
+        .where(Granule.state.in_(LEASED_STATES))
     )
     post = await s.scalar(
         select(func.count(distinct(GranuleObject.granule_id)))
@@ -395,7 +383,7 @@ async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> d
                 await s.execute(
                     select(Granule.granule_id)
                     .where(Granule.leased_by == worker_id)
-                    .where(Granule.state.in_(_HOLDING_STATES))
+                    .where(Granule.state.in_(LEASED_STATES))
                     .limit(5)
                 )
             )

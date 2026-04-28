@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
     IN_FLIGHT_STATES,
+    LEASED_STATES,
     BatchCreate,
     BatchSummary,
     GranuleBulkAdd,
@@ -404,18 +405,10 @@ async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dic
     return {"ok": True, "reset": len(rows)}
 
 
-# States where "cancel" still makes sense — worker either hasn't started, or is
-# mid-flight but the result hasn't entered the storage pipeline. After UPLOADED
-# the data is already on worker storage (and soon on receiver), so cancel is
-# a no-op operationally.
-_CANCELLABLE = {
-    GranuleState.PENDING.value,
-    GranuleState.QUEUED.value,
-    GranuleState.DOWNLOADING.value,
-    GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSING.value,
-    GranuleState.PROCESSED.value,
-}
+# Cancel makes sense while the worker hasn't released the lease yet. After
+# UPLOADED the data is already on worker storage (and soon on receiver), so
+# cancel is a no-op operationally.
+_CANCELLABLE = set(IN_FLIGHT_STATES)
 
 # retry_count resets to 0 so the auto-blacklist counter starts fresh for the retry.
 _RETRYABLE = {
@@ -500,18 +493,6 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
     return {"ok": True, "cancelled": len(rows)}
 
 
-# Worker actively holds these on lease; deleting under them produces 404s on
-# the next state report and orphans staged inputs. Cancel first, or pass
-# `?force=true` to override.
-_INFLIGHT_FOR_DELETE = (
-    GranuleState.QUEUED.value,
-    GranuleState.DOWNLOADING.value,
-    GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSING.value,
-    GranuleState.PROCESSED.value,
-)
-
-
 @router.delete("/{batch_id}")
 async def delete_batch(
     batch_id: str,
@@ -537,7 +518,7 @@ async def delete_batch(
             await s.execute(
                 select(func.count(Granule.granule_id))
                 .where(Granule.batch_id == batch_id)
-                .where(Granule.state.in_(_INFLIGHT_FOR_DELETE))
+                .where(Granule.state.in_(LEASED_STATES))
             )
         ).scalar_one()
         if active:

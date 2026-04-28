@@ -11,23 +11,14 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import GranuleState
+from sathop.shared.protocol import NON_TERMINAL_STATES, GranuleState
 
 from ..config import require_token, settings
 from ..db import Event, Granule, session
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_token)])
 
-NON_TERMINAL = {
-    GranuleState.PENDING.value,
-    GranuleState.QUEUED.value,
-    GranuleState.DOWNLOADING.value,
-    GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSING.value,
-    GranuleState.PROCESSED.value,
-    GranuleState.UPLOADED.value,
-    GranuleState.ACKED.value,
-}
+NON_TERMINAL = set(NON_TERMINAL_STATES)
 
 # States where the worker is actively doing work (excluding pending — queued but
 # nothing is happening yet — and acked — receiver-side state). Powers the
