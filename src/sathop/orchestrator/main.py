@@ -15,7 +15,7 @@ from .db import init_db, shutdown_db
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WEB_DIST = PROJECT_ROOT / "frontend" / "dist"
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 
 def _print_banner() -> None:
