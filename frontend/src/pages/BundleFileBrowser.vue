@@ -34,7 +34,7 @@ function parts(path: string) {
     （包为空）
   </div>
   <div v-else class="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,280px)_1fr]">
-    <ul class="max-h-[420px] overflow-auto rounded-xl border border-border bg-subtle/40 py-1">
+    <ul class="max-h-[420px] overflow-auto rounded-lg border border-border bg-subtle/40 py-1">
       <li v-for="f in files.data.value ?? []" :key="f.path">
         <button
           @click="sel = f.path"
@@ -58,7 +58,7 @@ function parts(path: string) {
         </button>
       </li>
     </ul>
-    <div class="rounded-xl border border-border bg-subtle/30">
+    <div class="rounded-lg border border-border bg-subtle/30">
       <div v-if="content.isLoading.value" class="p-3 text-xs text-muted">加载 {{ sel }}…</div>
       <div v-else-if="content.isError.value" class="p-3 text-xs text-danger">
         读取失败：{{ (content.error.value as Error).message }}

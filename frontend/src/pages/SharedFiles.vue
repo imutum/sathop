@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { API, type SharedFileInfo } from "../api";
 import { fmtBytes } from "../ui/format";
 import { fmtAge } from "../i18n";
+import { requestConfirm } from "../composables/useConfirm";
 import { useToast } from "../composables/useToast";
 import ActionButton from "../ui/ActionButton.vue";
 import Card from "../ui/Card.vue";
@@ -29,14 +30,14 @@ const del = useMutation({
   onError: (e: Error) => toast.error(`删除失败：${e.message}`),
 });
 
-function confirmDelete(f: SharedFileInfo) {
-  if (
-    confirm(
-      `删除共享文件 ${f.name}？\n\n若仍被某个任务包的 shared_files 引用，将返回 409。`,
-    )
-  ) {
-    del.mutate(f.name);
-  }
+async function confirmDelete(f: SharedFileInfo) {
+  const ok = await requestConfirm({
+    title: `删除共享文件 ${f.name}？`,
+    description: "若仍被某个任务包的 shared_files 引用，服务端会拒绝删除。",
+    confirmText: "删除",
+    tone: "danger",
+  });
+  if (ok) del.mutate(f.name);
 }
 
 function onUploaded() {

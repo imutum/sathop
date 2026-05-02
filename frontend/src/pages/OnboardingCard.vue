@@ -25,7 +25,7 @@ const STEPS: Step[] = [
       <li
         v-for="(s, i) in STEPS"
         :key="s.title"
-        class="flex h-full flex-col rounded-xl border border-border bg-subtle/40 p-4"
+        class="flex h-full flex-col rounded-lg border border-border bg-subtle/40 p-4"
       >
         <div class="flex items-center gap-2.5">
           <span class="font-display grid h-7 w-7 place-items-center rounded-lg bg-accent/15 text-[12.5px] font-semibold text-accent tabular-nums">

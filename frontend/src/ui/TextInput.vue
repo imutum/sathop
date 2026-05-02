@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref } from "vue";
+
 defineProps<{
   modelValue: string;
   placeholder?: string;
@@ -7,6 +9,9 @@ defineProps<{
 
 defineEmits<{ "update:modelValue": [value: string] }>();
 defineOptions({ inheritAttrs: false });
+
+const inputEl = ref<HTMLInputElement | null>(null);
+defineExpose({ focus: () => inputEl.value?.focus() });
 </script>
 
 <template>
@@ -18,6 +23,7 @@ defineOptions({ inheritAttrs: false });
       <slot name="leftIcon" />
     </span>
     <input
+      ref="inputEl"
       v-bind="$attrs"
       :value="modelValue"
       @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"

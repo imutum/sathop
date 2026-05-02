@@ -1,255 +1,51 @@
-// Shared types (mirror sathop_shared.protocol) + fetch wrapper with Bearer auth.
+// Fetch wrapper with Bearer auth + typed API endpoints.
 
-export type GranuleState =
-  | "pending"
-  | "queued"
-  | "downloading"
-  | "downloaded"
-  | "processing"
-  | "processed"
-  | "uploaded"
-  | "acked"
-  | "deleted"
-  | "failed"
-  | "blacklisted";
+import type {
+  BatchSummary,
+  BatchTiming,
+  BundleDetail,
+  BundleFileContent,
+  BundleFileEntry,
+  BundleSummary,
+  EventRow,
+  GranuleRow,
+  InFlightRow,
+  OrchestratorInfo,
+  Overview,
+  ProgressRow,
+  ReceiverInfo,
+  SharedFileInfo,
+  StuckGranule,
+  TimingRow,
+  WorkerInfo,
+} from "./apiTypes";
 
-// Worker pipeline still has work to do — mirrors `IN_FLIGHT_STATES` in
-// shared/protocol.py. Used for batch progress, ETA, and the cancel/reset gate.
-export const IN_FLIGHT_STATES: GranuleState[] = [
-  "pending",
-  "queued",
-  "downloading",
-  "downloaded",
-  "processing",
-  "processed",
-];
-
-// Happy-path state sequence used for chart ordering and dashboard rollups.
-// Excludes terminal error states (failed/blacklisted) since they're rendered
-// separately as "errors".
-export const STATE_ORDER: GranuleState[] = [
-  ...IN_FLIGHT_STATES,
-  "uploaded",
-  "acked",
-  "deleted",
-];
-
-export type BatchSummary = {
-  batch_id: string;
-  name: string;
-  bundle_ref: string;
-  target_receiver_id: string | null;
-  status: string;
-  created_at: string;
-  counts: Partial<Record<GranuleState, number>>;
-  // Authoritative count of stuck-delivery objects in this batch (failed_pulls
-  // ≥ max). Surfaces in the listing without paging through granules.
-  objects_exhausted: number;
-  // Estimated seconds-to-completion for in-flight granules; null when too
-  // little data to extrapolate (need ≥3 closed upload stages + at least one
-  // in-flight granule).
-  eta_seconds: number | null;
-};
-
-export type WorkerInfo = {
-  worker_id: string;
-  version: string;
-  capacity: number;
-  public_url: string | null;
-  last_seen: string;
-  disk_used_gb: number;
-  disk_total_gb: number;
-  cpu_percent: number;
-  mem_percent: number;
-  monthly_egress_gb: number;
-  // queue_queued: leased granules whose handler is waiting on the worker's
-  // local download semaphore; queue_downloading: actively transferring bytes.
-  queue_queued: number;
-  queue_downloading: number;
-  queue_processing: number;
-  queue_uploading: number;
-  enabled: boolean;
-  paused: boolean;
-  desired_capacity: number | null;
-};
-
-export type ReceiverInfo = {
-  receiver_id: string;
-  version: string;
-  platform: "linux" | "windows";
-  last_seen: string;
-  disk_free_gb: number;
-  enabled: boolean;
-  // In-flight pulls + recent (~60s) pull throughput in bytes/sec, both
-  // reported by receiver heartbeat. Default 0 for receivers running an
-  // older protocol that don't send these fields yet.
-  queue_pulling: number;
-  recent_pull_bps: number;
-};
-
-export type EventRow = {
-  id: number;
-  ts: string;
-  level: "info" | "warn" | "error";
-  source: string;
-  granule_id: string | null;
-  batch_id: string | null;
-  message: string;
-};
-
-export type GranuleRow = {
-  granule_id: string;
-  batch_id: string;
-  state: GranuleState;
-  retry_count: number;
-  leased_by: string | null;
-  error: string | null;
-  updated_at: string;
-  // Number of this granule's objects whose receiver pulls hit max_pull_failures.
-  // > 0 means delivery is stuck — orchestrator stopped offering them.
-  objects_exhausted: number;
-};
-
-export type Overview = {
-  state_counts: Partial<Record<GranuleState, number>>;
-  stuck_over_hours: number;
-  stuck_by_state: Partial<Record<GranuleState, number>>;
-  last_events: EventRow[];
-};
-
-export type InFlightRow = {
-  granule_id: string;
-  batch_id: string;
-  state: GranuleState;
-  leased_by: string | null;
-  retry_count: number;
-  updated_at: string;
-};
-
-export type Credential = {
-  name: string;
-  scheme: "basic" | "bearer";
-  username?: string | null;
-  password?: string | null;
-  token?: string | null;
-};
-
-export type BundleSummary = {
-  name: string;
-  version: string;
-  sha256: string;
-  size: number;
-  description: string | null;
-  uploaded_at: string;
-  in_use_count: number;
-};
-
-export type BundleSlotSpec = {
-  name: string;
-  product: string;
-  filename_pattern?: string;
-  credential?: string;
-};
-export type BundleMetaSpec = { name: string; pattern?: string };
-
-export type BundleDetail = BundleSummary & {
-  manifest: {
-    name: string;
-    version: string;
-    inputs?: { slots?: BundleSlotSpec[]; meta?: BundleMetaSpec[] } & Record<string, unknown>;
-    execution: { entrypoint: string; timeout_sec?: number; env?: Record<string, string> };
-    outputs: { watch_dir: string; extensions?: string[]; object_key_template?: string };
-    requirements?: { python?: string; pip?: string[]; apt?: string[]; credentials?: string[] };
-    shared_files?: string[];
-    [k: string]: unknown;
-  };
-};
-
-export type BundleFileEntry = {
-  path: string;
-  size: number;
-};
-
-export type BundleFileContent = {
-  path: string;
-  size: number;
-  truncated: boolean;
-  binary: boolean;
-  content: string;
-};
-
-export type SharedFileInfo = {
-  name: string;
-  sha256: string;
-  size: number;
-  description: string | null;
-  uploaded_at: string;
-};
-
-export type ProgressRow = {
-  id: number;
-  granule_id: string;
-  batch_id: string;
-  ts: string;
-  step: string;
-  pct: number | null;
-  detail: string | null;
-};
-
-export type TimingStage = "download" | "process" | "upload";
-
-export type TimingRow = {
-  id: number;
-  stage: TimingStage;
-  started_at: string;
-  finished_at: string;
-  duration_ms: number;
-};
-
-export type StageStats = {
-  count: number;
-  avg_ms: number;
-  p50_ms: number;
-  p95_ms: number;
-  max_ms: number;
-};
-
-export type BatchTiming = {
-  stages: Record<TimingStage, StageStats>;
-  // Outer envelope: max(finished_at) - min(started_at) across every stage row
-  // in the batch. Independent of per-row durations (workers run granules in
-  // parallel, so sum >> wall on a healthy cluster).
-  wall_ms: number;
-  first_started_at: string | null;
-  last_finished_at: string | null;
-};
-
-export type OrchestratorInfo = {
-  version: string;
-  python_version: string;
-  platform: string;
-  db_path: string;
-  retain_events_days: number;
-  retain_deleted_days: number;
-  retention_sweep_sec: number;
-  max_inflight_per_worker: number;
-  max_retries: number;
-  max_pull_failures: number;
-  stuck_age_hours: number;
-  dev_mode: boolean;
-  auth_open: boolean;
-};
-
-export type StuckGranule = {
-  granule_id: string;
-  batch_id: string;
-  state: GranuleState;
-  leased_by: string | null;
-  retry_count: number;
-  error: string | null;
-  updated_at: string;
-  age_hours: number;
-};
+export { IN_FLIGHT_STATES, STATE_ORDER } from "./apiTypes";
+export type {
+  BatchSummary,
+  BatchTiming,
+  BundleDetail,
+  BundleFileContent,
+  BundleFileEntry,
+  BundleMetaSpec,
+  BundleSlotSpec,
+  BundleSummary,
+  Credential,
+  EventRow,
+  GranuleRow,
+  GranuleState,
+  InFlightRow,
+  OrchestratorInfo,
+  Overview,
+  ProgressRow,
+  ReceiverInfo,
+  SharedFileInfo,
+  StageStats,
+  StuckGranule,
+  TimingRow,
+  TimingStage,
+  WorkerInfo,
+} from "./apiTypes";
 
 function getToken(): string {
   return localStorage.getItem("sathop.token") ?? "";
@@ -282,6 +78,15 @@ function handleAuthFailure(): void {
   window.location.reload();
 }
 
+function authHeaders(init?: HeadersInit, jsonBody = false): Headers {
+  const headers = new Headers(init);
+  headers.set("Authorization", `Bearer ${getToken()}`);
+  if (jsonBody && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  return headers;
+}
+
 // Unwrap FastAPI's `{"detail": "..."}` envelope so toast messages stay clean
 // ("bundle is referenced by …" instead of `409 Conflict: {"detail":"…"}`).
 // Falls back to the raw body for non-JSON errors (HTML proxy pages, etc.).
@@ -303,11 +108,7 @@ export async function httpError(r: Response, bodyLimit = 400): Promise<Error> {
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const r = await fetch(path, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-      ...(init.headers ?? {}),
-    },
+    headers: authHeaders(init.headers, init.body !== undefined),
   });
   if (!r.ok) {
     if (r.status === 401) handleAuthFailure();
@@ -316,109 +117,123 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await r.json()) as T;
 }
 
-export const API = {
-  overview: () => api<Overview>("/api/admin/overview"),
-  inFlight: (limit = 50) => api<InFlightRow[]>(`/api/admin/in-flight?limit=${limit}`),
-  stuck: (limit = 50) => api<StuckGranule[]>(`/api/admin/stuck?limit=${limit}`),
-  workers: () => api<WorkerInfo[]>("/api/workers"),
+function jsonInit(method: string, body?: unknown): RequestInit {
+  return body === undefined
+    ? { method }
+    : { method, body: JSON.stringify(body) };
+}
+
+const getJson = <T>(path: string) => api<T>(path);
+const postJson = <T>(path: string, body?: unknown) => api<T>(path, jsonInit("POST", body));
+const putJson = <T>(path: string, body?: unknown) => api<T>(path, jsonInit("PUT", body));
+const deleteJson = <T>(path: string) => api<T>(path, { method: "DELETE" });
+
+const adminApi = {
+  overview: () => getJson<Overview>("/api/admin/overview"),
+  inFlight: (limit = 50) => getJson<InFlightRow[]>(`/api/admin/in-flight?limit=${limit}`),
+  stuck: (limit = 50) => getJson<StuckGranule[]>(`/api/admin/stuck?limit=${limit}`),
+  orchestratorInfo: () => getJson<OrchestratorInfo>("/api/admin/settings/info"),
+};
+
+const nodeApi = {
+  workers: () => getJson<WorkerInfo[]>("/api/workers"),
   setWorkerCapacity: (workerId: string, desiredCapacity: number | null) =>
-    api<{ ok: boolean; desired_capacity: number | null }>(
+    putJson<{ ok: boolean; desired_capacity: number | null }>(
       `/api/workers/${encodeURIComponent(workerId)}/capacity`,
-      { method: "PUT", body: JSON.stringify({ desired_capacity: desiredCapacity }) },
+      { desired_capacity: desiredCapacity },
     ),
   setWorkerEnabled: (workerId: string, enabled: boolean) =>
-    api<{ ok: boolean; enabled: boolean }>(
+    putJson<{ ok: boolean; enabled: boolean }>(
       `/api/workers/${encodeURIComponent(workerId)}/enabled`,
-      { method: "PUT", body: JSON.stringify({ enabled }) },
+      { enabled },
     ),
   forgetWorker: (workerId: string) =>
-    api<{ ok: boolean }>(
-      `/api/workers/${encodeURIComponent(workerId)}`,
-      { method: "DELETE" },
-    ),
-  receivers: () => api<ReceiverInfo[]>("/api/receivers"),
+    deleteJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}`),
+  receivers: () => getJson<ReceiverInfo[]>("/api/receivers"),
   setReceiverEnabled: (receiverId: string, enabled: boolean) =>
-    api<{ ok: boolean; enabled: boolean }>(
+    putJson<{ ok: boolean; enabled: boolean }>(
       `/api/receivers/${encodeURIComponent(receiverId)}/enabled`,
-      { method: "PUT", body: JSON.stringify({ enabled }) },
+      { enabled },
     ),
   forgetReceiver: (receiverId: string) =>
-    api<{ ok: boolean }>(
-      `/api/receivers/${encodeURIComponent(receiverId)}`,
-      { method: "DELETE" },
-    ),
-  batches: () => api<BatchSummary[]>("/api/batches"),
+    deleteJson<{ ok: boolean }>(`/api/receivers/${encodeURIComponent(receiverId)}`),
+};
+
+const batchApi = {
+  batches: () => getJson<BatchSummary[]>("/api/batches"),
   createBatch: (body: unknown) =>
-    api<BatchSummary>("/api/batches", { method: "POST", body: JSON.stringify(body) }),
-  batch: (id: string) => api<BatchSummary>(`/api/batches/${id}`),
+    postJson<BatchSummary>("/api/batches", body),
+  batch: (id: string) => getJson<BatchSummary>(`/api/batches/${id}`),
   granules: (batchId: string, state?: string, limit = 200) => {
     const qs = new URLSearchParams({ limit: String(limit) });
     if (state) qs.set("state", state);
-    return api<GranuleRow[]>(`/api/batches/${batchId}/granules?${qs}`);
+    return getJson<GranuleRow[]>(`/api/batches/${batchId}/granules?${qs}`);
   },
   events: (sinceId = 0, limit = 100, beforeId?: number, source?: string) => {
     const qs = new URLSearchParams({ since_id: String(sinceId), limit: String(limit) });
     if (beforeId !== undefined) qs.set("before_id", String(beforeId));
     if (source) qs.set("source", source);
-    return api<EventRow[]>(`/api/events?${qs}`);
+    return getJson<EventRow[]>(`/api/events?${qs}`);
   },
   batchEvents: (batchId: string, level?: "warn" | "error", limit = 200) => {
     const qs = new URLSearchParams({ batch_id: batchId, limit: String(limit) });
     if (level) qs.set("level", level);
-    return api<EventRow[]>(`/api/events?${qs}`);
+    return getJson<EventRow[]>(`/api/events?${qs}`);
   },
   granuleEvents: (granuleId: string, limit = 50) => {
     const qs = new URLSearchParams({ granule_id: granuleId, limit: String(limit) });
-    return api<EventRow[]>(`/api/events?${qs}`);
+    return getJson<EventRow[]>(`/api/events?${qs}`);
   },
   retryFailed: (batchId: string) =>
-    api<{ reset: number }>(`/api/batches/${batchId}/retry-failed`, { method: "POST" }),
+    postJson<{ reset: number }>(`/api/batches/${batchId}/retry-failed`),
   resetExhaustedObjects: (batchId: string) =>
-    api<{ reset: number }>(`/api/batches/${batchId}/reset-exhausted-objects`, { method: "POST" }),
+    postJson<{ reset: number }>(`/api/batches/${batchId}/reset-exhausted-objects`),
   cancelBatch: (batchId: string) =>
-    api<{ cancelled: number }>(`/api/batches/${batchId}/cancel`, { method: "POST" }),
+    postJson<{ cancelled: number }>(`/api/batches/${batchId}/cancel`),
   deleteBatch: (batchId: string, force = false) =>
-    api<{
+    deleteJson<{
       ok: boolean;
       granules: number;
       objects: number;
       progress: number;
       stage_timings: number;
       events: number;
-    }>(`/api/batches/${batchId}${force ? "?force=true" : ""}`, { method: "DELETE" }),
+    }>(`/api/batches/${batchId}${force ? "?force=true" : ""}`),
   cancelGranule: (batchId: string, granuleId: string) =>
-    api<{ state: string }>(`/api/batches/${batchId}/granules/${granuleId}/cancel`, { method: "POST" }),
+    postJson<{ state: string }>(`/api/batches/${batchId}/granules/${granuleId}/cancel`),
   retryGranule: (batchId: string, granuleId: string) =>
-    api<{ state: string }>(`/api/batches/${batchId}/granules/${granuleId}/retry`, { method: "POST" }),
-  orchestratorInfo: () => api<OrchestratorInfo>("/api/admin/settings/info"),
-  bundles: () => api<BundleSummary[]>("/api/bundles"),
+    postJson<{ state: string }>(`/api/batches/${batchId}/granules/${granuleId}/retry`),
+};
+
+const bundleApi = {
+  bundles: () => getJson<BundleSummary[]>("/api/bundles"),
   bundleDetail: (name: string, version: string) =>
-    api<BundleDetail>(`/api/bundles/${encodeURIComponent(name)}/${encodeURIComponent(version)}`),
+    getJson<BundleDetail>(`/api/bundles/${encodeURIComponent(name)}/${encodeURIComponent(version)}`),
   uploadBundle: async (zipFile: File, description?: string): Promise<BundleDetail> => {
     const fd = new FormData();
     fd.append("file", zipFile, zipFile.name);
     const qs = description ? `?description=${encodeURIComponent(description)}` : "";
     const r = await fetch(`/api/bundles${qs}`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${getToken()}` },  // no Content-Type: browser sets multipart boundary
+      headers: authHeaders(),
       body: fd,
     });
     if (!r.ok) throw await httpError(r);
     return (await r.json()) as BundleDetail;
   },
   bundleFiles: (name: string, version: string) =>
-    api<BundleFileEntry[]>(
+    getJson<BundleFileEntry[]>(
       `/api/bundles/${encodeURIComponent(name)}/${encodeURIComponent(version)}/files`,
     ),
   bundleFile: (name: string, version: string, path: string) =>
-    api<BundleFileContent>(
+    getJson<BundleFileContent>(
       `/api/bundles/${encodeURIComponent(name)}/${encodeURIComponent(version)}/files/${
         path.split("/").map(encodeURIComponent).join("/")
       }`,
     ),
   downloadBundle: async (name: string, version: string): Promise<void> => {
     const url = `/api/bundles/${encodeURIComponent(name)}/${encodeURIComponent(version)}/download`;
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const r = await fetch(url, { headers: authHeaders() });
     if (!r.ok) throw await httpError(r);
     const blob = await r.blob();
     const objectUrl = URL.createObjectURL(blob);
@@ -431,13 +246,14 @@ export const API = {
     URL.revokeObjectURL(objectUrl);
   },
   deleteBundle: async (name: string, version: string): Promise<void> => {
-    const r = await fetch(
+    await deleteJson<{ ok: boolean }>(
       `/api/bundles/${encodeURIComponent(name)}/${encodeURIComponent(version)}`,
-      { method: "DELETE", headers: { Authorization: `Bearer ${getToken()}` } },
     );
-    if (!r.ok) throw await httpError(r);
   },
-  sharedFiles: () => api<SharedFileInfo[]>("/api/shared"),
+};
+
+const sharedApi = {
+  sharedFiles: () => getJson<SharedFileInfo[]>("/api/shared"),
   uploadSharedFile: async (
     name: string,
     file: File,
@@ -448,27 +264,34 @@ export const API = {
     const qs = description ? `?description=${encodeURIComponent(description)}` : "";
     const r = await fetch(`/api/shared/${encodeURIComponent(name)}${qs}`, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${getToken()}` },
+      headers: authHeaders(),
       body: fd,
     });
     if (!r.ok) throw await httpError(r);
     return (await r.json()) as SharedFileInfo;
   },
   deleteSharedFile: (name: string) =>
-    fetch(`/api/shared/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${getToken()}` },
-    }).then(async (r) => {
-      if (!r.ok) throw await httpError(r);
-    }),
+    deleteJson<{ ok: boolean }>(`/api/shared/${encodeURIComponent(name)}`).then(() => undefined),
+};
+
+const progressApi = {
   granuleProgress: (granuleId: string, limit = 200) =>
-    api<ProgressRow[]>(
+    getJson<ProgressRow[]>(
       `/api/granules/${encodeURIComponent(granuleId)}/progress?limit=${limit}`,
     ),
   batchProgressLatest: (batchId: string) =>
-    api<Record<string, ProgressRow>>(`/api/batches/${batchId}/progress/latest`),
+    getJson<Record<string, ProgressRow>>(`/api/batches/${batchId}/progress/latest`),
   granuleTiming: (granuleId: string) =>
-    api<TimingRow[]>(`/api/granules/${encodeURIComponent(granuleId)}/timing`),
+    getJson<TimingRow[]>(`/api/granules/${encodeURIComponent(granuleId)}/timing`),
   batchTiming: (batchId: string) =>
-    api<BatchTiming>(`/api/batches/${encodeURIComponent(batchId)}/timing`),
+    getJson<BatchTiming>(`/api/batches/${encodeURIComponent(batchId)}/timing`),
+};
+
+export const API = {
+  ...adminApi,
+  ...nodeApi,
+  ...batchApi,
+  ...bundleApi,
+  ...sharedApi,
+  ...progressApi,
 };

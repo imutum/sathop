@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, IN_FLIGHT_STATES, type BatchSummary, type GranuleState } from "../api";
 import { fmtAge, fmtDuration } from "../i18n";
+import { requestConfirm } from "../composables/useConfirm";
 import { useToast } from "../composables/useToast";
 import ActionButton from "../ui/ActionButton.vue";
 import Badge from "../ui/Badge.vue";
@@ -20,17 +21,27 @@ import { Icon } from "../ui/Icon";
 const TERMINAL: GranuleState[] = ["acked", "deleted"];
 const ERRORED: GranuleState[] = ["failed", "blacklisted"];
 
-const total = (b: BatchSummary) =>
+type BatchListRow = {
+  b: BatchSummary;
+  total: number;
+  done: number;
+  errors: number;
+  inFlight: number;
+  pct: number;
+  bundleLink: { name: string; version: string } | null;
+};
+
+const batchTotal = (b: BatchSummary) =>
   Object.values(b.counts).reduce((a, c) => a + (c ?? 0), 0);
-const done = (b: BatchSummary) => TERMINAL.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
-const errors = (b: BatchSummary) =>
+const completedTotal = (b: BatchSummary) => TERMINAL.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
+const errorTotal = (b: BatchSummary) =>
   ERRORED.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
-const inFlight = (b: BatchSummary) =>
+const inFlightTotal = (b: BatchSummary) =>
   IN_FLIGHT_STATES.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
 const isClosed = (b: BatchSummary) => {
-  const t = total(b);
-  const d = done(b);
-  return t > 0 && d === t && errors(b) === 0;
+  const t = batchTotal(b);
+  const d = completedTotal(b);
+  return t > 0 && d === t && errorTotal(b) === 0;
 };
 
 const qc = useQueryClient();
@@ -64,29 +75,32 @@ const batches = useQuery({ queryKey: ["batches"], queryFn: API.batches });
 const all = computed(() => batches.data.value ?? []);
 const needle = computed(() => search.value.trim().toLowerCase());
 
+function matchesSearch(b: BatchSummary) {
+  if (!needle.value) return true;
+  return `${b.name} ${b.batch_id} ${b.bundle_ref}`.toLowerCase().includes(needle.value);
+}
+
+function toBatchListRow(b: BatchSummary): BatchListRow {
+  const t = batchTotal(b);
+  const d = completedTotal(b);
+  return {
+    b,
+    total: t,
+    done: d,
+    errors: errorTotal(b),
+    inFlight: inFlightTotal(b),
+    pct: t > 0 ? Math.round((d / t) * 100) : 0,
+    bundleLink: bundleLink(b.bundle_ref),
+  };
+}
+
 const visible = computed(() =>
   all.value
     .filter((b) => {
       if (scope.value === "active" && isClosed(b)) return false;
-      if (needle.value) {
-        const hay = `${b.name} ${b.batch_id} ${b.bundle_ref}`.toLowerCase();
-        if (!hay.includes(needle.value)) return false;
-      }
-      return true;
+      return matchesSearch(b);
     })
-    .map((b) => {
-      const t = total(b);
-      const d = done(b);
-      return {
-        b,
-        total: t,
-        done: d,
-        errors: errors(b),
-        inFlight: inFlight(b),
-        pct: t > 0 ? Math.round((d / t) * 100) : 0,
-        bundleLink: bundleLink(b.bundle_ref),
-      };
-    }),
+    .map(toBatchListRow),
 );
 
 const allCount = computed(() => all.value.length);
@@ -117,10 +131,15 @@ const remove = useMutation({
     qc.invalidateQueries({ queryKey: ["overview"] });
     toast.success(`已删除批次：${res.granules} 数据粒 / ${res.objects} 产物`);
   },
-  onError: (e: Error, vars) => {
+  onError: async (e: Error, vars) => {
     if (
       /mid-flight/.test(e.message) &&
-      confirm(`${e.message}\n\n强制删除会让正在处理的 worker 在下次状态汇报时收到 404。是否继续？`)
+      (await requestConfirm({
+        title: "强制删除批次？",
+        description: `${e.message}\n\n强制删除会让正在处理的 worker 在下次状态汇报时收到 404。`,
+        confirmText: "强制删除",
+        tone: "danger",
+      }))
     ) {
       remove.mutate({ id: vars.id, force: true });
       return;
@@ -135,26 +154,29 @@ function bundleLink(ref: string): { name: string; version: string } | null {
   return { name, version };
 }
 
-function confirmCancel(b: BatchSummary) {
-  if (
-    confirm(
-      `取消批次 "${b.name}" 中尚未完成的 ${inFlight(b)} 条数据粒？\n\n已上传/已确认的不会被取消。`,
-    )
-  ) {
-    cancel.mutate(b.batch_id);
-  }
+async function confirmCancel(b: BatchSummary) {
+  const ok = await requestConfirm({
+    title: `取消批次 "${b.name}"？`,
+    description: `将取消尚未完成的 ${inFlightTotal(b)} 条数据粒。\n\n已上传/已确认的不会被取消。`,
+    confirmText: "取消批次",
+    tone: "danger",
+  });
+  if (ok) cancel.mutate(b.batch_id);
 }
 
-function confirmDelete(b: BatchSummary) {
-  const t = total(b);
-  const typed = prompt(
-    `永久删除批次 "${b.name}" 及其 ${t} 条数据粒？\n\n` +
-      `不可恢复 — 将清除该批次的全部 orchestrator 记录\n` +
-      `（数据粒、产物、进度、阶段计时、事件）。\n\n` +
-      `请输入批次名称 "${b.name}" 确认：`,
-  );
-  if (typed === b.name) remove.mutate({ id: b.batch_id, force: false });
-  else if (typed !== null) toast.error("名称不匹配，未删除");
+async function confirmDelete(b: BatchSummary) {
+  const t = batchTotal(b);
+  const ok = await requestConfirm({
+    title: `永久删除批次 "${b.name}"？`,
+    description:
+      `将删除 ${t} 条数据粒，并清除该批次的全部 orchestrator 记录\n` +
+      `（数据粒、产物、进度、阶段计时、事件）。此操作不可恢复。`,
+    confirmText: "永久删除",
+    tone: "danger",
+    requireText: b.name,
+    inputLabel: `请输入批次名称 "${b.name}" 确认`,
+  });
+  if (ok) remove.mutate({ id: b.batch_id, force: false });
 }
 
 function closeCreate() {

@@ -20,6 +20,9 @@ import ActionButton from "../ui/ActionButton.vue";
 import Alert from "../ui/Alert.vue";
 import FieldLabel from "../ui/FieldLabel.vue";
 import Modal from "../ui/Modal.vue";
+import SelectInput from "../ui/SelectInput.vue";
+import TextareaInput from "../ui/TextareaInput.vue";
+import TextInput from "../ui/TextInput.vue";
 import CreateBatchCredentials from "./CreateBatchCredentials.vue";
 import CreateBatchCsvModal from "./CreateBatchCsvModal.vue";
 import CreateBatchGranuleTable from "./CreateBatchGranuleTable.vue";
@@ -37,7 +40,7 @@ const envText = ref("");
 const rows = ref<Row[]>([]);
 const creds = reactive<Record<string, CredDraft>>({});
 const remember = reactive<Record<string, boolean>>({});
-const err = ref<string | null>(null);
+const submitError = ref<string | null>(null);
 const showCsv = ref(false);
 
 const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
@@ -139,9 +142,9 @@ const create = useMutation({
       granules: rows.value.map((r) => rowToGranule(r, schema.value!.slots)),
       execution_env: parsedEnv.value.ok ? parsedEnv.value.value : {},
       credentials: credsPayload.value,
-    }),
+  }),
   onSuccess: (b) => {
-    err.value = null;
+    submitError.value = null;
     for (const n of requiredCreds.value) {
       const d = creds[n];
       if (remember[n] && d) {
@@ -154,7 +157,7 @@ const create = useMutation({
     emit("created");
   },
   onError: (e: Error) => {
-    err.value = e.message;
+    submitError.value = e.message;
     toast.error(`创建失败：${e.message}`);
   },
 });
@@ -172,29 +175,31 @@ const disabledReason = computed<string | null>(() => {
 
 const canSubmit = computed(() => disabledReason.value === null && !create.isPending.value);
 
+function rowHasDraftContent(row: Row) {
+  return (
+    row.granule_id.trim() !== "" ||
+    Object.values(row.inputs).some((i) => i.url.trim() !== "" || i.filename.trim() !== "") ||
+    Object.values(row.meta).some((v) => v.trim() !== "")
+  );
+}
+
+function credentialsHaveDraftContent(drafts: Record<string, CredDraft>) {
+  return Object.values(drafts).some((d) => d.username.trim() !== "" || d.secret.trim() !== "");
+}
+
 const dirty = computed(() => {
-  const rowsDirty = rows.value.some(
-    (r) =>
-      r.granule_id.trim() !== "" ||
-      Object.values(r.inputs).some((i) => i.url.trim() !== "" || i.filename.trim() !== "") ||
-      Object.values(r.meta).some((v) => v.trim() !== ""),
-  );
-  const credsDirty = Object.values(creds).some(
-    (d) => d.username.trim() !== "" || d.secret.trim() !== "",
-  );
   return (
     batchId.value.trim() !== "" ||
     name.value.trim() !== "" ||
     bundleSel.value !== "" ||
     targetReceiver.value !== "" ||
     envText.value.trim() !== "" ||
-    rowsDirty ||
-    credsDirty
+    rows.value.some(rowHasDraftContent) ||
+    credentialsHaveDraftContent(creds)
   );
 });
 
 function tryClose() {
-  if (dirty.value && !confirm("放弃未保存修改？")) return;
   emit("close");
 }
 
@@ -232,7 +237,7 @@ function onForget(n: string) {
 
 <template>
   <Modal width-class="w-[min(1200px,95vw)]" :dirty="dirty" @close="tryClose">
-    <h2 class="font-display mb-1 text-lg font-semibold tracking-tight">新建任务</h2>
+    <h2 class="font-display mb-1 text-lg font-semibold">新建任务</h2>
     <div class="mb-4 flex items-center gap-1.5 text-[11px] text-muted">
       <span>提示：</span>
       <kbd class="kbd">Ctrl</kbd>
@@ -247,29 +252,29 @@ function onForget(n: string) {
       <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
         <label class="block">
           <FieldLabel required>批次 ID</FieldLabel>
-          <input
+          <TextInput
             required
             v-model="batchId"
             placeholder="如 mod09a1-2024001"
-            class="input mt-1.5 font-mono text-xs"
+            class="mt-1.5 font-mono text-xs"
           />
         </label>
         <label class="block">
           <FieldLabel required>展示名称</FieldLabel>
-          <input
+          <TextInput
             required
             v-model="name"
             placeholder="MOD09A1 2024 第 1 天"
-            class="input mt-1.5"
+            class="mt-1.5"
           />
         </label>
         <label class="block">
           <FieldLabel>目标接收端</FieldLabel>
-          <select
+          <SelectInput
             v-model="targetReceiver"
-            class="input mt-1.5"
+            class="mt-1.5"
           >
-            <option value="" :selected="!targetReceiver">任意（由调度器决定）</option>
+            <option value="">任意（由调度器决定）</option>
             <option
               v-for="r in receivers.data.value ?? []"
               :key="r.receiver_id"
@@ -277,18 +282,18 @@ function onForget(n: string) {
             >
               {{ r.receiver_id }}
             </option>
-          </select>
+          </SelectInput>
         </label>
       </div>
 
       <label class="block">
         <FieldLabel required>任务包</FieldLabel>
-        <select
+        <SelectInput
           required
           v-model="bundleSel"
-          class="input mt-1.5 font-mono text-xs"
+          class="mt-1.5 font-mono text-xs"
         >
-          <option value="" :selected="!bundleSel">-- 选择任务包 --</option>
+          <option value="">-- 选择任务包 --</option>
           <option
             v-for="b in bundles.data.value ?? []"
             :key="`${b.name}@${b.version}`"
@@ -296,7 +301,7 @@ function onForget(n: string) {
           >
             {{ b.name }}@{{ b.version }}{{ b.description ? ` — ${b.description}` : "" }}
           </option>
-        </select>
+        </SelectInput>
         <div v-if="(bundles.data.value ?? []).length === 0" class="mt-1 text-[11px] text-warning">
           尚无已注册任务包。先到"任务包"页上传一个 ZIP。
         </div>
@@ -339,23 +344,23 @@ function onForget(n: string) {
         @open-csv="showCsv = true"
       />
 
-      <details class="rounded-xl border border-border bg-subtle/40 px-3 py-2.5">
+      <details class="rounded-lg border border-border bg-subtle/40 px-3 py-2.5">
         <summary class="cursor-pointer text-xs font-medium text-muted transition hover:text-text">
           高级：环境变量覆盖（可选，JSON 对象）
         </summary>
-        <textarea
+        <TextareaInput
           v-model="envText"
           :placeholder="'{\n  &quot;SATHOP_FACTOR&quot;: &quot;4&quot;\n}'"
           rows="3"
-          class="input mt-2 font-mono text-xs"
+          class="mt-2 font-mono text-xs"
         />
         <div v-if="!parsedEnv.ok" class="mt-1 text-[11px] text-danger">
           JSON 错误：{{ parsedEnv.error }}
         </div>
       </details>
 
-      <Alert v-if="err">
-        <span class="whitespace-pre-wrap">{{ err }}</span>
+      <Alert v-if="submitError">
+        <span class="whitespace-pre-wrap">{{ submitError }}</span>
       </Alert>
 
       <div class="flex justify-end gap-2 pt-2">

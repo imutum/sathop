@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
 
-// Lazy chunks: only Dashboard is eager (landing page). Each subsequent page
-// migration will register itself here.
+// Route-level code splitting keeps the initial page small while the default
+// dashboard stays at the root path.
 const routes: RouteRecordRaw[] = [
   {
     path: "/",
@@ -16,7 +16,6 @@ const routes: RouteRecordRaw[] = [
       { path: "events", name: "events", component: () => import("./pages/Events.vue") },
       { path: "batches", name: "batches", component: () => import("./pages/Batches.vue") },
       { path: "batches/:batchId", name: "batch-detail", component: () => import("./pages/BatchDetail.vue") },
-      // Pending: real Dashboard, CreateBatchModal.
       { path: ":pathMatch(.*)*", name: "not-found", component: () => import("./pages/NotFound.vue") },
     ],
   },

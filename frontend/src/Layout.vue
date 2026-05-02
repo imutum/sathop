@@ -40,15 +40,14 @@ const isDark = computed(() => effective.value === "dark");
       aria-label="主导航"
     >
       <div class="flex h-16 items-center gap-3 border-b border-border px-4">
-        <div class="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-accent to-accent/60 text-accent-fg shadow-glow">
+        <div class="relative grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-surface text-text shadow-soft">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
             <path d="M21 12.79A9 9 0 1 1 11.21 3" />
             <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
           </svg>
-          <span class="absolute -inset-px rounded-xl ring-1 ring-inset ring-white/15" aria-hidden />
         </div>
         <div v-if="!collapsed" class="min-w-0">
-          <div class="font-display text-[15px] font-semibold leading-none tracking-tight">SatHop</div>
+          <div class="font-display text-[15px] font-semibold leading-none">SatHop</div>
           <div class="mt-1 text-[10.5px] uppercase tracking-[0.18em] text-muted">Mission Console</div>
         </div>
       </div>
@@ -69,9 +68,9 @@ const isDark = computed(() => effective.value === "dark");
                 @click="navigate"
                 :title="collapsed ? n.label : undefined"
                 :class="[
-                  'group relative flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm transition outline-none',
+                  'group relative flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition outline-none',
                   (n.end ? isExactActive : isActive)
-                    ? 'bg-accent-soft text-accent shadow-soft'
+                    ? 'bg-subtle text-text shadow-soft'
                     : 'text-muted hover:bg-subtle hover:text-text',
                   collapsed ? 'justify-center' : '',
                 ]"
@@ -79,7 +78,7 @@ const isDark = computed(() => effective.value === "dark");
                 <span
                   :class="[
                     'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full transition',
-                    (n.end ? isExactActive : isActive) ? 'bg-accent' : 'bg-transparent',
+                    (n.end ? isExactActive : isActive) ? 'bg-text' : 'bg-transparent',
                   ]"
                   aria-hidden
                 />
@@ -87,7 +86,7 @@ const isDark = computed(() => effective.value === "dark");
                   :name="n.icon"
                   :class="[
                     'shrink-0 transition',
-                    (n.end ? isExactActive : isActive) ? 'text-accent' : 'text-muted group-hover:text-text',
+                    (n.end ? isExactActive : isActive) ? 'text-text' : 'text-muted group-hover:text-text',
                   ]"
                 />
                 <span v-if="!collapsed" class="truncate">{{ n.label }}</span>
@@ -103,7 +102,7 @@ const isDark = computed(() => effective.value === "dark");
           @click="logout"
           :title="collapsed ? '退出登录' : undefined"
           :class="[
-            'flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-muted transition hover:bg-subtle hover:text-text',
+            'flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted transition hover:bg-subtle hover:text-text',
             collapsed ? 'justify-center' : '',
           ]"
         >
@@ -152,7 +151,7 @@ const isDark = computed(() => effective.value === "dark");
             @click="toggleTheme"
             :aria-label="isDark ? '切换到亮色模式' : '切换到暗色模式'"
             :title="isDark ? '切换到亮色模式' : '切换到暗色模式'"
-            class="grid h-9 w-9 place-items-center rounded-lg border border-border bg-surface text-muted transition hover:text-text hover:shadow-soft"
+            class="grid h-9 w-9 place-items-center rounded-md border border-border bg-surface text-muted transition hover:text-text hover:shadow-soft"
           >
             <Icon :name="isDark ? 'sun' : 'moon'" :stroke-width="2" />
           </button>

@@ -6,7 +6,7 @@ defineProps<{ title: string; description?: string }>();
   <div class="flex flex-col items-center justify-center gap-3 py-12 text-center">
     <div
       v-if="$slots.icon"
-      class="grid h-12 w-12 place-items-center rounded-2xl border border-border bg-subtle text-muted"
+      class="grid h-12 w-12 place-items-center rounded-lg border border-border bg-subtle text-muted"
     >
       <slot name="icon" />
     </div>

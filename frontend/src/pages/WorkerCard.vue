@@ -10,6 +10,7 @@ import Card from "../ui/Card.vue";
 import CopyButton from "../ui/CopyButton.vue";
 import NodeLifecycleActions from "../ui/NodeLifecycleActions.vue";
 import ProgressBar from "../ui/ProgressBar.vue";
+import TextInput from "../ui/TextInput.vue";
 import { Icon } from "../ui/Icon";
 
 const props = defineProps<{ worker: WorkerInfo; focused?: boolean }>();
@@ -55,7 +56,7 @@ const diskTone = computed<"bad" | "warn" | "accent">(() => {
 
 // Capacity editor: draft=null ⇒ display mode; draft=string ⇒ editing.
 const draft = ref<string | null>(null);
-const draftInput = ref<HTMLInputElement | null>(null);
+const draftInput = ref<InstanceType<typeof TextInput> | null>(null);
 watch(draft, (v) => {
   if (v !== null) void nextTick(() => draftInput.value?.focus());
 });
@@ -102,7 +103,7 @@ function onKey(e: KeyboardEvent) {
   <div
     :class="
       focused
-        ? 'rounded-2xl ring-2 ring-accent/60 ring-offset-2 ring-offset-bg'
+        ? 'rounded-lg ring-2 ring-accent/60 ring-offset-2 ring-offset-bg'
         : undefined
     "
   >
@@ -158,7 +159,7 @@ function onKey(e: KeyboardEvent) {
           <ProgressBar :value="worker.disk_used_gb" :max="worker.disk_total_gb" :tone="diskTone" />
         </div>
 
-        <div class="grid grid-cols-4 gap-3 rounded-xl border border-border bg-subtle/60 p-3 text-center">
+        <div class="grid grid-cols-4 gap-3 rounded-lg border border-border bg-subtle/60 p-3 text-center">
           <div>
             <div class="stat-label">排队</div>
             <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-text">
@@ -189,17 +190,17 @@ function onKey(e: KeyboardEvent) {
           <span class="flex items-center gap-1.5">
             <span>容量 {{ effective }}/{{ worker.capacity }}</span>
             <template v-if="draft !== null">
-              <input
+              <TextInput
                 ref="draftInput"
                 type="number"
                 :min="1"
                 :max="worker.capacity"
-                :value="draft"
-                @input="draft = ($event.target as HTMLInputElement).value"
+                :model-value="draft"
+                @update:model-value="draft = $event"
                 @keydown="onKey"
                 :disabled="setCap.isPending.value"
                 placeholder="env"
-                class="w-14 rounded-md border border-border bg-bg px-1.5 py-0.5 text-[11px] tabular-nums outline-none focus:border-accent"
+                class="w-14 text-[11px] tabular-nums"
               />
               <button
                 @click="submitDraft"

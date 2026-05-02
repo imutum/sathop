@@ -3,22 +3,19 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, IN_FLIGHT_STATES, type GranuleRow, type GranuleState } from "../api";
-import { fmtAge, fmtDuration, levelLabel, stateLabel } from "../i18n";
+import { fmtAge, fmtDuration, stateLabel } from "../i18n";
+import { requestConfirm } from "../composables/useConfirm";
 import { useToast } from "../composables/useToast";
 import ActionButton from "../ui/ActionButton.vue";
 import Badge from "../ui/Badge.vue";
 import Card from "../ui/Card.vue";
 import CopyButton from "../ui/CopyButton.vue";
-import EmptyState from "../ui/EmptyState.vue";
 import Field from "../ui/Field.vue";
 import PageHeader from "../ui/PageHeader.vue";
 import Segmented from "../ui/Segmented.vue";
+import BatchEventLog from "./BatchEventLog.vue";
+import BatchGranuleTable from "./BatchGranuleTable.vue";
 import BatchTimingCard from "./BatchTimingCard.vue";
-import ErrorCell from "./ErrorCell.vue";
-import GranuleEvents from "./GranuleEvents.vue";
-import LatestProgressLine from "./LatestProgressLine.vue";
-import ProgressTimeline from "./ProgressTimeline.vue";
-import StageTimingStrip from "./StageTimingStrip.vue";
 import { Icon } from "../ui/Icon";
 
 const STATE_FILTERS: { value: GranuleState | "all"; label: string }[] = [
@@ -36,9 +33,18 @@ const STATE_FILTERS: { value: GranuleState | "all"; label: string }[] = [
 
 const CANCELLABLE = new Set<GranuleState>(IN_FLIGHT_STATES);
 const RETRYABLE = new Set<GranuleState>(["failed", "blacklisted"]);
+const LOG_LEVEL_OPTIONS = [
+  { value: "all", label: "全部" },
+  { value: "warn", label: "警告" },
+  { value: "error", label: "错误" },
+];
 
 function stripBatchPrefix(gid: string, batchId: string) {
   return gid.startsWith(`${batchId}:`) ? gid.slice(batchId.length + 1) : gid;
+}
+
+function sumCounts(counts: Record<string, number | undefined>): number {
+  return Object.values(counts).reduce<number>((sum, n) => sum + (n ?? 0), 0);
 }
 
 const route = useRoute();
@@ -146,12 +152,17 @@ const deleteBatch = useMutation({
     );
     void router.push("/batches");
   },
-  onError: (e: Error) => {
+  onError: async (e: Error) => {
     if (
       /mid-flight/.test(e.message) &&
-      confirm(
-        `批次仍有 worker 在处理。\n\n${e.message}\n\n强制删除会让正在处理的 worker 在下次状态汇报时收到 404。是否继续？`,
-      )
+      (await requestConfirm({
+        title: "强制删除批次？",
+        description:
+          `批次仍有 worker 在处理。\n\n${e.message}\n\n` +
+          "强制删除会让正在处理的 worker 在下次状态汇报时收到 404。",
+        confirmText: "强制删除",
+        tone: "danger",
+      }))
     ) {
       deleteBatch.mutate(true);
       return;
@@ -162,6 +173,8 @@ const deleteBatch = useMutation({
 
 const b = computed(() => batch.data.value);
 const rows = computed(() => granules.data.value ?? []);
+const batchEvents = computed(() => events.data.value ?? []);
+const progressByGranule = computed(() => latestProgress.data.value ?? {});
 const failedCount = computed(
   () => (b.value?.counts?.failed ?? 0) + (b.value?.counts?.blacklisted ?? 0),
 );
@@ -171,12 +184,15 @@ const exhaustedCount = computed(() => b.value?.objects_exhausted ?? 0);
 const inflightCount = computed(() =>
   IN_FLIGHT_STATES.reduce((s, k) => s + (b.value?.counts?.[k] ?? 0), 0),
 );
+const eventCountLabel = computed(() =>
+  events.data.value ? `${events.data.value.length} 条` : "加载中",
+);
 
 const stateOptions = computed(() =>
   STATE_FILTERS.map((f) => {
     const count =
       f.value === "all"
-        ? Object.values(b.value?.counts ?? {}).reduce((s, n) => s + (n ?? 0), 0)
+        ? sumCounts(b.value?.counts ?? {})
         : (b.value?.counts?.[f.value as GranuleState] ?? 0);
     return {
       value: f.value,
@@ -202,35 +218,42 @@ function toggleRow(id: string) {
   expanded.value = expanded.value === id ? null : id;
 }
 
-function confirmCancel(g: GranuleRow) {
-  if (confirm(`取消数据粒 ${stripBatchPrefix(g.granule_id, batchId.value)}？`)) {
-    cancel.mutate(g.granule_id);
-  }
+async function confirmCancel(g: GranuleRow) {
+  const ok = await requestConfirm({
+    title: "取消数据粒？",
+    description: `将取消数据粒 ${stripBatchPrefix(g.granule_id, batchId.value)}。`,
+    confirmText: "取消数据粒",
+    tone: "danger",
+  });
+  if (ok) cancel.mutate(g.granule_id);
 }
 
-function confirmCancelAll() {
-  if (
-    b.value &&
-    confirm(
-      `取消批次 "${b.value.name}" 中尚未完成的 ${inflightCount.value} 条数据粒？\n\n已上传/已确认的不会被取消。`,
-    )
-  ) {
-    cancelAll.mutate();
-  }
+async function confirmCancelAll() {
+  if (!b.value) return;
+  const ok = await requestConfirm({
+    title: `取消批次 "${b.value.name}"？`,
+    description: `将取消尚未完成的 ${inflightCount.value} 条数据粒。\n\n已上传/已确认的不会被取消。`,
+    confirmText: "取消批次",
+    tone: "danger",
+  });
+  if (ok) cancelAll.mutate();
 }
 
-function confirmDelete() {
+async function confirmDelete() {
   if (!b.value) return;
   const name = b.value.name;
-  const total = Object.values(b.value.counts ?? {}).reduce((s, n) => s + (n ?? 0), 0);
-  const typed = prompt(
-    `永久删除批次 "${name}" 及其 ${total} 条数据粒？\n\n` +
-      `此操作不可恢复，将清除该批次在 orchestrator 上的全部记录\n` +
-      `（数据粒、产物、进度、阶段计时、事件）。worker 已上传的产物文件不在清理范围内。\n\n` +
-      `请输入批次名称 "${name}" 确认：`,
-  );
-  if (typed === name) deleteBatch.mutate(false);
-  else if (typed !== null) toast.error("名称不匹配，未删除");
+  const total = sumCounts(b.value.counts ?? {});
+  const ok = await requestConfirm({
+    title: `永久删除批次 "${name}"？`,
+    description:
+      `将删除 ${total} 条数据粒，并清除该批次在 orchestrator 上的全部记录\n` +
+      "（数据粒、产物、进度、阶段计时、事件）。worker 已上传的产物文件不在清理范围内。",
+    confirmText: "永久删除",
+    tone: "danger",
+    requireText: name,
+    inputLabel: `请输入批次名称 "${name}" 确认`,
+  });
+  if (ok) deleteBatch.mutate(false);
 }
 </script>
 
@@ -333,105 +356,21 @@ function confirmDelete() {
       <template #action>
         <Segmented v-model="filter" size="sm" :options="stateOptions" />
       </template>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-subtle/50 th-row">
-            <tr>
-              <th class="px-5 py-3">数据粒</th>
-              <th class="px-2 py-3">状态</th>
-              <th class="px-2 py-3">重试</th>
-              <th class="px-2 py-3">领取方</th>
-              <th class="px-2 py-3">更新</th>
-              <th class="px-2 py-3">错误</th>
-              <th class="px-5 py-3 text-right">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-for="g in rows" :key="g.granule_id">
-              <tr
-                :ref="(el) => setRowRef(g.granule_id, el as Element | null)"
-                :class="[
-                  'border-t border-border/60 align-top transition hover:bg-subtle/40',
-                  g.granule_id === highlight ? 'bg-accent-soft/40' : '',
-                ]"
-              >
-                <td class="px-5 py-2.5 font-mono text-[11.5px]">
-                  <button
-                    @click="toggleRow(g.granule_id)"
-                    class="mr-1 inline-block w-3 text-muted hover:text-text"
-                    :title="expanded === g.granule_id ? '收起进度' : '展开进度'"
-                  >
-                    {{ expanded === g.granule_id ? "▾" : "▸" }}
-                  </button>
-                  {{ stripBatchPrefix(g.granule_id, batchId) }}
-                  <LatestProgressLine
-                    v-if="latestProgress.data.value?.[g.granule_id]"
-                    :row="latestProgress.data.value[g.granule_id]"
-                  />
-                </td>
-                <td class="px-2 py-2.5">
-                  <div class="flex flex-wrap items-center gap-1">
-                    <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
-                    <span
-                      v-if="g.objects_exhausted > 0"
-                      :title="`${g.objects_exhausted} 个产物超出 receiver 拉取重试上限，已停止派发`"
-                    >
-                      <Badge tone="error">{{ g.objects_exhausted }} 已放弃</Badge>
-                    </span>
-                  </div>
-                </td>
-                <td class="px-2 py-2.5 text-[11.5px] tabular-nums">{{ g.retry_count }}</td>
-                <td class="px-2 py-2.5 font-mono text-[11.5px] text-muted">
-                  <RouterLink
-                    v-if="g.leased_by"
-                    :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                    class="transition hover:text-accent"
-                    title="跳转到该 worker 卡片"
-                  >
-                    {{ g.leased_by }}
-                  </RouterLink>
-                  <template v-else>—</template>
-                </td>
-                <td class="px-2 py-2.5 text-[11.5px] text-muted">{{ fmtAge(g.updated_at) }}</td>
-                <td class="max-w-[320px] px-2 py-2.5 font-mono text-[11.5px] text-danger">
-                  <ErrorCell :error="g.error" />
-                </td>
-                <td class="space-x-1 whitespace-nowrap px-5 py-2.5 text-right">
-                  <ActionButton
-                    v-if="CANCELLABLE.has(g.state)"
-                    tone="danger"
-                    size="sm"
-                    :pending="cancel.isPending.value && cancel.variables.value === g.granule_id"
-                    pending-label="取消"
-                    @click="confirmCancel(g)"
-                  >
-                    取消
-                  </ActionButton>
-                  <ActionButton
-                    v-if="RETRYABLE.has(g.state)"
-                    size="sm"
-                    :pending="retry.isPending.value && retry.variables.value === g.granule_id"
-                    pending-label="重试"
-                    @click="retry.mutate(g.granule_id)"
-                  >
-                    重试
-                  </ActionButton>
-                </td>
-              </tr>
-              <tr v-if="expanded === g.granule_id" class="bg-subtle/40">
-                <td colspan="7" class="space-y-3 px-5 py-3">
-                  <StageTimingStrip :granule-id="g.granule_id" />
-                  <ProgressTimeline :granule-id="g.granule_id" />
-                  <GranuleEvents :granule-id="g.granule_id" :batch-id="batchId" />
-                </td>
-              </tr>
-            </template>
-            <tr v-if="rows.length === 0">
-              <td colspan="7"><EmptyState title="该筛选条件下没有数据粒" /></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <BatchGranuleTable
+        :rows="rows"
+        :batch-id="batchId"
+        :highlight="highlight"
+        :expanded="expanded"
+        :latest-progress="progressByGranule"
+        :cancellable="CANCELLABLE"
+        :retryable="RETRYABLE"
+        :cancelling-id="cancel.variables.value"
+        :retrying-id="retry.variables.value"
+        @row-ref="setRowRef"
+        @toggle="toggleRow"
+        @cancel="confirmCancel"
+        @retry="(id) => retry.mutate(id)"
+      />
     </Card>
 
     <BatchTimingCard
@@ -448,42 +387,16 @@ function confirmDelete() {
       <template #action>
         <div class="flex items-center gap-3">
           <span class="text-[11px] text-muted tabular-nums">
-            {{ events.data.value ? `${events.data.value.length} 条` : "加载中" }}
+            {{ eventCountLabel }}
           </span>
           <Segmented
             v-model="logLevel"
             size="sm"
-            :options="[
-              { value: 'all', label: '全部' },
-              { value: 'warn', label: '警告' },
-              { value: 'error', label: '错误' },
-            ]"
+            :options="LOG_LEVEL_OPTIONS"
           />
         </div>
       </template>
-      <div class="max-h-[50vh] overflow-auto font-mono">
-        <EmptyState v-if="(events.data.value ?? []).length === 0" title="暂无该批次的事件" />
-        <ul v-else class="divide-y divide-border/50">
-          <li
-            v-for="e in events.data.value ?? []"
-            :key="e.id"
-            class="flex items-start gap-3 px-5 py-2 text-[11.5px] transition hover:bg-subtle/40"
-          >
-            <span class="w-20 shrink-0 text-muted">{{ fmtAge(e.ts) }}</span>
-            <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>
-            <span class="w-24 shrink-0 truncate text-muted">{{ e.source }}</span>
-            <span
-              v-if="e.granule_id"
-              class="w-40 shrink-0 truncate text-muted"
-              :title="e.granule_id"
-            >
-              {{ stripBatchPrefix(e.granule_id, batchId) }}
-            </span>
-            <span v-else class="w-40 shrink-0 text-muted">—</span>
-            <span class="flex-1 break-all">{{ e.message }}</span>
-          </li>
-        </ul>
-      </div>
+      <BatchEventLog :events="batchEvents" :batch-id="batchId" />
     </Card>
   </div>
 </template>

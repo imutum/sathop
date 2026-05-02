@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { requestConfirm } from "../composables/useConfirm";
+
 const props = defineProps<{
   enabled: boolean;
   pending: boolean;
@@ -13,13 +15,29 @@ const emit = defineEmits<{
   forget: [];
 }>();
 
-function toggle() {
-  if (props.enabled && !confirm(props.disableConfirm)) return;
+async function toggle() {
+  if (
+    props.enabled &&
+    !(await requestConfirm({
+      title: "禁用节点？",
+      description: props.disableConfirm,
+      confirmText: "禁用",
+      tone: "danger",
+    }))
+  ) {
+    return;
+  }
   emit("setEnabled", !props.enabled);
 }
 
-function forget() {
-  if (!confirm(props.forgetConfirm)) return;
+async function forget() {
+  const ok = await requestConfirm({
+    title: "移除节点？",
+    description: props.forgetConfirm,
+    confirmText: "移除",
+    tone: "danger",
+  });
+  if (!ok) return;
   emit("forget");
 }
 </script>

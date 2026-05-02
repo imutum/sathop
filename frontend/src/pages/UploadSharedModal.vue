@@ -8,6 +8,7 @@ import Alert from "../ui/Alert.vue";
 import FieldLabel from "../ui/FieldLabel.vue";
 import FilePicker from "../ui/FilePicker.vue";
 import Modal from "../ui/Modal.vue";
+import TextInput from "../ui/TextInput.vue";
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
 
@@ -22,7 +23,7 @@ const toast = useToast();
 const file = ref<File | null>(null);
 const name = ref(props.lockName ?? "");
 const description = ref(props.currentDescription);
-const err = ref<string | null>(null);
+const submitError = ref<string | null>(null);
 
 // Auto-fill the name field from the picked filename — but only on a fresh
 // upload (lockName empty) and only when the user hasn't typed a name yet.
@@ -37,7 +38,7 @@ const upload = useMutation({
     emit("uploaded", d);
   },
   onError: (e: Error) => {
-    err.value = e.message;
+    submitError.value = e.message;
     toast.error(`上传失败：${e.message}`);
   },
 });
@@ -50,11 +51,11 @@ const dirty = computed(
 );
 
 function submit() {
-  err.value = null;
-  if (!file.value) return (err.value = "请先选择文件");
-  if (!name.value) return (err.value = "请填写名称");
+  submitError.value = null;
+  if (!file.value) return (submitError.value = "请先选择文件");
+  if (!name.value) return (submitError.value = "请填写名称");
   if (!NAME_RE.test(name.value)) {
-    return (err.value =
+    return (submitError.value =
       "名称不合法：仅允许字母数字和 . _ -，不能以点开头，最长 255 字节。");
   }
   upload.mutate();
@@ -63,17 +64,17 @@ function submit() {
 
 <template>
   <Modal :dirty="dirty" @close="emit('close')">
-    <h2 class="font-display mb-5 text-lg font-semibold tracking-tight">
+    <h2 class="font-display mb-5 text-lg font-semibold">
       {{ lockName ? `替换 ${lockName}` : "上传共享文件" }}
     </h2>
     <div class="space-y-4 text-sm">
       <label class="block">
         <FieldLabel required>名称</FieldLabel>
-        <input
+        <TextInput
           v-model="name"
           :disabled="!!lockName"
           placeholder="mask.tif"
-          class="input mt-2 font-mono text-xs"
+          class="mt-2 font-mono text-xs"
         />
         <div class="mt-1.5 text-[10.5px] text-muted/80">
           允许字符：字母、数字、<code>.</code> <code>_</code> <code>-</code>；不能以点开头；最长 255 字节。
@@ -85,13 +86,13 @@ function submit() {
       </label>
       <label class="block">
         <FieldLabel>描述（可选）</FieldLabel>
-        <input
+        <TextInput
           v-model="description"
           placeholder="简短说明这个文件是什么"
-          class="input mt-2"
+          class="mt-2"
         />
       </label>
-      <Alert v-if="err">{{ err }}</Alert>
+      <Alert v-if="submitError">{{ submitError }}</Alert>
       <div class="flex justify-end gap-2 pt-2">
         <ActionButton @click="emit('close')">取消</ActionButton>
         <ActionButton

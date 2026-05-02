@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import { API, type BundleDetail } from "../api";
 import { fmtBytes } from "../ui/format";
+import { requestConfirm } from "../composables/useConfirm";
 import { useToast } from "../composables/useToast";
 import ActionButton from "../ui/ActionButton.vue";
 import Alert from "../ui/Alert.vue";
@@ -34,14 +35,14 @@ const slots = computed(() => m.value.inputs?.slots ?? []);
 const metaFields = computed(() => m.value.inputs?.meta ?? []);
 const sharedFiles = computed(() => m.value.shared_files ?? []);
 
-function confirmDelete() {
-  if (
-    confirm(
-      `删除任务包 ${props.d.name}@${props.d.version}？\n\n此操作不可撤销；已引用它的批次会拒绝删除。`,
-    )
-  ) {
-    emit("delete");
-  }
+async function confirmDelete() {
+  const ok = await requestConfirm({
+    title: `删除任务包 ${props.d.name}@${props.d.version}？`,
+    description: "此操作不可撤销；已引用它的批次会被服务端拒绝删除。",
+    confirmText: "删除",
+    tone: "danger",
+  });
+  if (ok) emit("delete");
 }
 
 function gotoNewBatch() {
@@ -103,7 +104,7 @@ async function download() {
     </div>
     <Alert v-if="error">{{ error }}</Alert>
 
-    <div class="grid grid-cols-2 gap-4 rounded-xl border border-border bg-subtle/40 p-4 text-xs sm:grid-cols-3">
+    <div class="grid grid-cols-2 gap-4 rounded-lg border border-border bg-subtle/40 p-4 text-xs sm:grid-cols-3">
       <Field label="SHA256">
         <span class="font-mono" :title="d.sha256">{{ d.sha256.slice(0, 16) }}…</span>
         <CopyButton :value="d.sha256" title="复制完整 SHA256" />

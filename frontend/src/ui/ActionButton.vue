@@ -22,7 +22,7 @@ const sizeCls = computed(() =>
 );
 
 const TONE_CLS: Record<ActionTone, string> = {
-  primary: "bg-accent text-accent-fg shadow-soft hover:bg-accent/90 hover:shadow-glow",
+  primary: "bg-accent text-accent-fg shadow-soft hover:bg-accent/90",
   default:
     "border border-border bg-surface text-text hover:border-accent/40 hover:bg-subtle",
   danger: "border border-danger/30 bg-danger/10 text-danger hover:bg-danger/15",

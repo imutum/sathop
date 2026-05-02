@@ -35,8 +35,8 @@ const valueCls = computed(
 
 const baseCls = computed(
   () =>
-    "group relative block overflow-hidden rounded-2xl border border-border bg-surface p-5 shadow-card transition" +
-    (props.to ? " hover:-translate-y-0.5 hover:border-accent/40 hover:shadow-pop" : ""),
+    "group relative block overflow-hidden rounded-lg border border-border bg-surface p-5 shadow-card transition" +
+    (props.to ? " hover:border-accent/40 hover:shadow-pop" : ""),
 );
 </script>
 
@@ -53,7 +53,7 @@ const baseCls = computed(
     </div>
     <div
       :class="[
-        'font-display mt-3 text-[32px] font-semibold leading-none tabular-nums tracking-tight',
+        'font-display mt-3 text-[32px] font-semibold leading-none tabular-nums',
         valueCls,
       ]"
     >
@@ -65,7 +65,7 @@ const baseCls = computed(
     <span
       v-if="to"
       aria-hidden
-      class="pointer-events-none absolute inset-x-0 -bottom-px h-px bg-gradient-to-r from-transparent via-accent/40 to-transparent opacity-0 transition group-hover:opacity-100"
+      class="pointer-events-none absolute inset-x-0 -bottom-px h-px bg-accent/30 opacity-0 transition group-hover:opacity-100"
     />
   </component>
 </template>

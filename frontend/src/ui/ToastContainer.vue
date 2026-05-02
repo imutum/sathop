@@ -21,7 +21,7 @@ const TONES: Record<ToastKind, Tone> = {
       :key="it.id"
       :role="it.kind === 'error' ? 'alert' : 'status'"
       :class="[
-        'pointer-events-auto flex items-start gap-2.5 rounded-xl border px-3.5 py-3 text-xs shadow-pop backdrop-blur-md animate-slide-up',
+        'pointer-events-auto flex items-start gap-2.5 rounded-lg border px-3.5 py-3 text-xs shadow-pop backdrop-blur-md animate-slide-up',
         TONES[it.kind].wrap,
       ]"
     >

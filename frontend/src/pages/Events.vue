@@ -8,6 +8,7 @@ import Badge from "../ui/Badge.vue";
 import Card from "../ui/Card.vue";
 import EmptyState from "../ui/EmptyState.vue";
 import PageHeader from "../ui/PageHeader.vue";
+import SelectInput from "../ui/SelectInput.vue";
 import Segmented from "../ui/Segmented.vue";
 import Spinner from "../ui/Spinner.vue";
 import TextInput from "../ui/TextInput.vue";
@@ -163,14 +164,14 @@ function highlight(text: string, n: string): HighlightSeg[] {
             </template>
           </TextInput>
         </div>
-        <select
+        <SelectInput
           v-model="batchFilter"
           aria-label="按批次过滤"
           class="h-8 rounded-lg border border-border bg-surface px-2.5 text-xs text-text outline-none transition hover:border-accent/40 focus:border-accent"
         >
           <option value="">所有批次</option>
           <option v-for="b in batches" :key="b" :value="b">{{ b }}</option>
-        </select>
+        </SelectInput>
         <Segmented v-model="filter" :options="LEVEL_FILTERS" />
         <span
           v-if="sourceFilter"

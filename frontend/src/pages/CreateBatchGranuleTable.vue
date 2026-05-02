@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { type Row, type RowErrors, type Schema, emptyRow } from "./createBatchTypes";
+import { requestConfirm } from "../composables/useConfirm";
 import CreateBatchCell from "./CreateBatchCell.vue";
 
 const props = defineProps<{
@@ -23,13 +24,23 @@ function addRow() {
   emit("update:rows", [...props.rows, emptyRow(props.schema.slots)]);
 }
 
-function removeRow(idx: number) {
+async function removeRow(idx: number) {
   const r = props.rows[idx];
   const hasContent =
     r.granule_id.trim() !== "" ||
     Object.values(r.inputs).some((i) => i.url.trim() || i.filename.trim()) ||
     Object.values(r.meta).some((v) => v.trim());
-  if (hasContent && !confirm(`删除第 ${idx + 1} 行？`)) return;
+  if (
+    hasContent &&
+    !(await requestConfirm({
+      title: `删除第 ${idx + 1} 行？`,
+      description: "该行已经填写了内容，删除后无法从当前表格恢复。",
+      confirmText: "删除行",
+      tone: "danger",
+    }))
+  ) {
+    return;
+  }
   emit(
     "update:rows",
     props.rows.filter((_, i) => i !== idx),
@@ -58,7 +69,7 @@ function removeRow(idx: number) {
         </button>
       </div>
     </div>
-    <div class="overflow-x-auto rounded-xl border border-border">
+    <div class="overflow-x-auto rounded-lg border border-border">
       <table class="w-full text-xs">
         <thead class="bg-subtle/60 th-row">
           <tr>

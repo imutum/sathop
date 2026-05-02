@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from "vue";
+import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
 import { API, STATE_ORDER, type GranuleState } from "../api";
@@ -9,19 +9,10 @@ import Card from "../ui/Card.vue";
 import EmptyState from "../ui/EmptyState.vue";
 import PageHeader from "../ui/PageHeader.vue";
 import Stat from "../ui/Stat.vue";
+import StateBarChart from "./StateBarChart.vue";
 import NodeStat from "./NodeStat.vue";
 import OnboardingCard from "./OnboardingCard.vue";
 import { Icon } from "../ui/Icon";
-
-// ECharts is heavy (~1MB). Defer until first render with data — empty/onboarding
-// state pays nothing.
-const StateBarChart = defineAsyncComponent({
-  loader: () => import("./StateBarChart.vue"),
-  loadingComponent: {
-    template: `<div class="flex h-[280px] items-center justify-center text-xs text-muted"><span class="mr-2">加载图表…</span></div>`,
-  },
-  delay: 80,
-});
 
 const router = useRouter();
 

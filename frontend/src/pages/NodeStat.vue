@@ -27,7 +27,7 @@ const colorCls = computed(
   <button
     type="button"
     @click="$emit('click')"
-    class="group flex w-full items-center justify-between rounded-xl border border-border bg-subtle/40 p-3.5 text-left transition hover:border-accent/40 hover:bg-subtle"
+    class="group flex w-full items-center justify-between rounded-lg border border-border bg-subtle/40 p-3.5 text-left transition hover:border-accent/40 hover:bg-subtle"
   >
     <div class="flex items-center gap-3">
       <span
@@ -41,7 +41,7 @@ const colorCls = computed(
       </div>
     </div>
     <div class="flex items-baseline gap-1.5 tabular-nums">
-      <span :class="['font-display text-2xl font-semibold tracking-tight', colorCls]">
+      <span :class="['font-display text-2xl font-semibold', colorCls]">
         {{ value }}
       </span>
       <span class="text-sm text-muted">/ {{ total }}</span>

@@ -41,15 +41,15 @@ export default {
         display: ['"Geist"', '"Inter"', "system-ui", "sans-serif"],
       },
       boxShadow: {
-        soft: "0 1px 2px 0 hsl(var(--shadow) / 0.06), 0 1px 3px 0 hsl(var(--shadow) / 0.08)",
-        card: "0 1px 0 0 hsl(var(--surface-edge) / 1) inset, 0 1px 2px -1px hsl(var(--shadow) / 0.10), 0 4px 18px -10px hsl(var(--shadow) / 0.18)",
-        pop: "0 12px 32px -8px hsl(var(--shadow) / 0.32), 0 4px 12px -4px hsl(var(--shadow) / 0.20)",
-        glow: "0 0 0 1px hsl(var(--accent) / 0.30), 0 8px 30px -12px hsl(var(--accent) / 0.45)",
+        soft: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
+        card: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
+        pop: "0 10px 24px -12px hsl(var(--shadow) / 0.24), 0 4px 8px -6px hsl(var(--shadow) / 0.18)",
+        glow: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
         "ring-soft": "0 0 0 4px hsl(var(--accent) / 0.12)",
       },
       borderRadius: {
-        xl: "0.875rem",
-        "2xl": "1.125rem",
+        xl: "0.5rem",
+        "2xl": "0.5rem",
       },
       keyframes: {
         "fade-in": {

@@ -4,6 +4,7 @@ import { type Row, type Schema, emptyRow } from "./createBatchTypes";
 import ActionButton from "../ui/ActionButton.vue";
 import Alert from "../ui/Alert.vue";
 import Modal from "../ui/Modal.vue";
+import TextareaInput from "../ui/TextareaInput.vue";
 
 const props = defineProps<{ schema: Schema }>();
 const emit = defineEmits<{ close: []; import: [rows: Row[]] }>();
@@ -75,15 +76,15 @@ function doImport() {
 
 <template>
   <Modal width-class="w-[720px]" :z-index="60" :dirty="dirty" @close="emit('close')">
-    <h3 class="font-display mb-2 text-base font-semibold tracking-tight">粘贴 CSV / TSV</h3>
+    <h3 class="font-display mb-2 text-base font-semibold">粘贴 CSV / TSV</h3>
     <div class="mb-3 text-[11px] text-muted">
       第一行必须是表头，列顺序不限。自动识别逗号或 Tab 分隔。
       <code class="font-mono text-[10px] text-muted">.size / .checksum / .credential</code> 列可选。
     </div>
-    <textarea
+    <TextareaInput
       v-model="text"
       rows="14"
-      class="input font-mono text-[11px]"
+      class="font-mono text-[11px]"
     />
     <div v-if="parseErr" class="mt-2"><Alert>{{ parseErr }}</Alert></div>
     <div class="mt-3 flex justify-end gap-2">

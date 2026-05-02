@@ -2,6 +2,8 @@
 import { hasCred } from "../credCache";
 import { type CredDraft } from "./createBatchTypes";
 import FieldLabel from "../ui/FieldLabel.vue";
+import SelectInput from "../ui/SelectInput.vue";
+import TextInput from "../ui/TextInput.vue";
 
 const props = defineProps<{
   names: string[];
@@ -27,7 +29,7 @@ function update(name: string, patch: Partial<CredDraft>) {
 <template>
   <fieldset class="space-y-2">
     <legend><FieldLabel>凭证 · 任务包需要 {{ names.length }} 个</FieldLabel></legend>
-    <div class="space-y-3 rounded-xl border border-border bg-subtle/40 p-3">
+    <div class="space-y-3 rounded-lg border border-border bg-subtle/40 p-3">
       <div
         v-for="name in names"
         :key="name"
@@ -36,40 +38,38 @@ function update(name: string, patch: Partial<CredDraft>) {
         <label :for="`cred-${name}-secret`" class="font-mono" title="凭证名">
           {{ name }}
         </label>
-        <select
+        <SelectInput
           :id="`cred-${name}-scheme`"
           :aria-label="`${name} 凭证方案`"
-          :value="draftFor(name).scheme"
-          @change="
+          :model-value="draftFor(name).scheme"
+          @update:model-value="
             update(name, {
-              scheme: ($event.target as HTMLSelectElement).value as 'basic' | 'bearer',
+              scheme: $event as 'basic' | 'bearer',
             })
           "
-          class="rounded-md border border-border bg-bg px-2 py-1 outline-none transition hover:border-accent/40 focus:border-accent"
         >
           <option value="basic">Basic</option>
           <option value="bearer">Bearer</option>
-        </select>
-        <input
+        </SelectInput>
+        <TextInput
           v-if="draftFor(name).scheme === 'basic'"
           :id="`cred-${name}-user`"
           :aria-label="`${name} 用户名`"
           autocomplete="off"
-          :value="draftFor(name).username"
-          @input="update(name, { username: ($event.target as HTMLInputElement).value })"
+          :model-value="draftFor(name).username"
+          @update:model-value="update(name, { username: $event })"
           placeholder="用户名"
-          class="rounded-md border border-border bg-bg px-2 py-1 outline-none transition hover:border-accent/40 focus:border-accent"
         />
         <div v-else class="text-muted">—</div>
-        <input
+        <TextInput
           :id="`cred-${name}-secret`"
           :aria-label="draftFor(name).scheme === 'basic' ? `${name} 密码` : `${name} Token`"
           autocomplete="off"
           type="password"
-          :value="draftFor(name).secret"
-          @input="update(name, { secret: ($event.target as HTMLInputElement).value })"
+          :model-value="draftFor(name).secret"
+          @update:model-value="update(name, { secret: $event })"
           :placeholder="draftFor(name).scheme === 'basic' ? '密码' : 'Token'"
-          class="rounded-md border border-border bg-bg px-2 py-1 font-mono outline-none transition hover:border-accent/40 focus:border-accent"
+          class="font-mono"
         />
         <div class="flex items-center gap-2 whitespace-nowrap">
           <label
