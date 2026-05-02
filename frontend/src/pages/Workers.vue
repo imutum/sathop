@@ -3,11 +3,11 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
 import { API } from "@/api";
-import Card from "@/ui/Card.vue";
-import EmptyState from "@/ui/EmptyState.vue";
-import PageHeader from "@/ui/PageHeader.vue";
+import { Card, CardContent } from "@/components/ui/card";
+import EmptyState from "@/components/EmptyState.vue";
+import PageHeader from "@/components/PageHeader.vue";
 import WorkerCard from "@/features/nodes/components/WorkerCard.vue";
-import { Icon } from "@/ui/Icon";
+import { Icon } from "@/components/Icon";
 
 const workers = useQuery({ queryKey: ["workers"], queryFn: API.workers });
 const list = computed(() => workers.data.value ?? []);
@@ -40,11 +40,13 @@ function setRef(id: string, el: Element | null) {
     <PageHeader title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列" />
 
     <Card v-if="list.length === 0">
-      <EmptyState title="暂无已注册的工作节点" description="启动 worker 容器后会自动出现在此。">
-        <template #icon>
-          <Icon name="workers" :size="20" />
-        </template>
-      </EmptyState>
+      <CardContent class="pt-6">
+        <EmptyState title="暂无已注册的工作节点" description="启动 worker 容器后会自动出现在此。">
+          <template #icon>
+            <Icon name="workers" :size="20" />
+          </template>
+        </EmptyState>
+      </CardContent>
     </Card>
 
     <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">

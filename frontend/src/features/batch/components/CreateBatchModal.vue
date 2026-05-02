@@ -16,9 +16,9 @@ import {
   rowToGranule,
   validateRow,
 } from "@/features/batch/types";
-import ActionButton from "@/ui/ActionButton.vue";
-import Alert from "@/ui/Alert.vue";
-import FieldLabel from "@/ui/FieldLabel.vue";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import FieldLabel from "@/components/FieldLabel.vue";
 import Modal from "@/ui/Modal.vue";
 import SelectInput from "@/ui/SelectInput.vue";
 import TextareaInput from "@/ui/TextareaInput.vue";
@@ -238,7 +238,7 @@ function onForget(n: string) {
 <template>
   <Modal width-class="w-[min(1200px,95vw)]" :dirty="dirty" @close="tryClose">
     <h2 class="font-display mb-1 text-lg font-semibold">新建任务</h2>
-    <div class="mb-4 flex items-center gap-1.5 text-[11px] text-legacy-muted">
+    <div class="mb-4 flex items-center gap-1.5 text-[11px] text-muted-foreground">
       <span>提示：</span>
       <kbd class="kbd">Ctrl</kbd>
       <span>+</span>
@@ -309,11 +309,11 @@ function onForget(n: string) {
 
       <div
         v-if="bundleDetail.data.value && schema"
-        class="rounded-lg border border-border bg-legacy-subtle/40 px-3 py-2 text-[11px] text-legacy-muted"
+        class="rounded-lg border border-border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground"
       >
         <div>
           入口：
-          <span class="font-mono text-legacy-text">
+          <span class="font-mono text-foreground">
             {{ bundleDetail.data.value.manifest.execution.entrypoint }}
           </span>
         </div>
@@ -344,8 +344,8 @@ function onForget(n: string) {
         @open-csv="showCsv = true"
       />
 
-      <details class="rounded-lg border border-border bg-legacy-subtle/40 px-3 py-2.5">
-        <summary class="cursor-pointer text-xs font-medium text-legacy-muted transition hover:text-legacy-text">
+      <details class="rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+        <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition hover:text-foreground">
           高级：环境变量覆盖（可选，JSON 对象）
         </summary>
         <TextareaInput
@@ -359,22 +359,22 @@ function onForget(n: string) {
         </div>
       </details>
 
-      <Alert v-if="submitError">
-        <span class="whitespace-pre-wrap">{{ submitError }}</span>
+      <Alert v-if="submitError" variant="destructive">
+        <AlertDescription class="whitespace-pre-wrap">{{ submitError }}</AlertDescription>
       </Alert>
 
       <div class="flex justify-end gap-2 pt-2">
-        <ActionButton type="button" @click="tryClose">取消</ActionButton>
-        <ActionButton
+        <Button type="button" @click="tryClose">取消</Button>
+        <Button
           type="submit"
-          tone="primary"
+          variant="default"
           :disabled="!canSubmit"
           :title="disabledReason ?? undefined"
           :pending="create.isPending.value"
           pending-label="提交中…"
         >
           提交 {{ rows.length > 0 ? `(${rows.length} 条)` : "" }}
-        </ActionButton>
+        </Button>
       </div>
     </form>
 

@@ -6,17 +6,17 @@ import { API, IN_FLIGHT_STATES, type BatchSummary, type GranuleState } from "@/a
 import { fmtAge, fmtDuration } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
-import ActionButton from "@/ui/ActionButton.vue";
-import Badge from "@/ui/Badge.vue";
-import Card from "@/ui/Card.vue";
-import CopyButton from "@/ui/CopyButton.vue";
-import EmptyState from "@/ui/EmptyState.vue";
-import PageHeader from "@/ui/PageHeader.vue";
-import ProgressBar from "@/ui/ProgressBar.vue";
-import Segmented from "@/ui/Segmented.vue";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import CopyButton from "@/components/CopyButton.vue";
+import EmptyState from "@/components/EmptyState.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import ProgressBar from "@/components/ProgressBar.vue";
+import Segmented from "@/components/Segmented.vue";
 import TextInput from "@/ui/TextInput.vue";
 import CreateBatchModal from "@/features/batch/components/CreateBatchModal.vue";
-import { Icon } from "@/ui/Icon";
+import { Icon } from "@/components/Icon";
 
 const TERMINAL: GranuleState[] = ["acked", "deleted"];
 const ERRORED: GranuleState[] = ["failed", "blacklisted"];
@@ -197,10 +197,10 @@ function onCreated() {
       description="管线提交单元 · 一个批次承载一组数据粒、统一的任务包与凭证"
     >
       <template #actions>
-        <ActionButton tone="primary" @click="showCreate = true">
+        <Button variant="default" @click="showCreate = true">
           <Icon name="plus" :size="13" />
           新建任务
-        </ActionButton>
+        </Button>
       </template>
     </PageHeader>
 
@@ -225,8 +225,8 @@ function onCreated() {
           ]"
         />
       </div>
-      <div class="text-xs text-legacy-muted tabular-nums">
-        显示 <span class="font-medium text-legacy-text">{{ visible.length }}</span> / {{ allCount }}
+      <div class="text-xs text-muted-foreground tabular-nums">
+        显示 <span class="font-medium text-foreground">{{ visible.length }}</span> / {{ allCount }}
       </div>
     </div>
 
@@ -237,22 +237,22 @@ function onCreated() {
       @created="onCreated"
     />
 
-    <Card :padded="false">
+    <Card>
       <EmptyState
         v-if="visible.length === 0"
         :title="all.length === 0 ? '还没有任何批次' : '当前筛选条件下没有匹配'"
         :description="all.length === 0 ? '通过页面右上角“新建任务”创建第一个批次。' : undefined"
       >
         <template v-if="all.length === 0" #action>
-          <ActionButton tone="primary" @click="showCreate = true">
+          <Button variant="default" @click="showCreate = true">
             <Icon name="plus" :size="13" />
             新建任务
-          </ActionButton>
+          </Button>
         </template>
       </EmptyState>
       <div v-else class="overflow-x-auto">
         <table class="w-full min-w-[820px] text-sm">
-          <thead class="bg-legacy-subtle/50 th-row">
+          <thead class="bg-muted/50 th-row">
             <tr>
               <th class="px-5 py-3">批次</th>
               <th class="px-2 py-3">处理包</th>
@@ -266,25 +266,25 @@ function onCreated() {
             <tr
               v-for="r in visible"
               :key="r.b.batch_id"
-              class="border-t border-border/60 transition hover:bg-legacy-subtle/40"
+              class="border-t border-border/60 transition hover:bg-muted/40"
             >
               <td class="px-5 py-3.5">
                 <RouterLink :to="`/batches/${r.b.batch_id}`" class="block">
-                  <div class="font-medium text-legacy-text transition hover:text-legacy-accent">{{ r.b.name }}</div>
-                  <div class="mt-0.5 inline-flex items-center font-mono text-[11px] text-legacy-muted">
+                  <div class="font-medium text-foreground transition hover:text-primary">{{ r.b.name }}</div>
+                  <div class="mt-0.5 inline-flex items-center font-mono text-[11px] text-muted-foreground">
                     {{ r.b.batch_id }}
                     <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
                   </div>
                 </RouterLink>
               </td>
-              <td class="px-2 py-3.5 font-mono text-[11.5px] text-legacy-muted">
+              <td class="px-2 py-3.5 font-mono text-[11.5px] text-muted-foreground">
                 <RouterLink
                   v-if="r.bundleLink"
                   :to="{
                     path: '/bundles',
                     query: { name: r.bundleLink.name, version: r.bundleLink.version },
                   }"
-                  class="transition hover:text-legacy-accent"
+                  class="transition hover:text-primary"
                   title="在任务包页查看"
                 >
                   {{ r.b.bundle_ref }}
@@ -297,14 +297,14 @@ function onCreated() {
               <td class="w-[280px] px-2 py-3.5">
                 <div class="mb-1 flex items-center justify-between text-[11.5px]">
                   <span class="tabular-nums">
-                    <span class="font-medium text-legacy-text">{{ r.done }}</span>
-                    <span class="text-legacy-muted"> / {{ r.total }}</span>
-                    <span class="ml-1 text-legacy-muted">({{ r.pct }}%)</span>
+                    <span class="font-medium text-foreground">{{ r.done }}</span>
+                    <span class="text-muted-foreground"> / {{ r.total }}</span>
+                    <span class="ml-1 text-muted-foreground">({{ r.pct }}%)</span>
                   </span>
                   <span class="flex items-center gap-2">
                     <span
                       v-if="r.b.eta_seconds != null"
-                      class="text-legacy-muted tabular-nums"
+                      class="text-muted-foreground tabular-nums"
                       :title="`按当前吞吐外推剩余 ${r.inFlight} 条`"
                     >
                       ≈ {{ fmtDuration(r.b.eta_seconds * 1000) }}
@@ -325,9 +325,9 @@ function onCreated() {
                   :tone="r.errors > 0 || r.b.objects_exhausted > 0 ? 'warn' : 'good'"
                 />
               </td>
-              <td class="px-2 py-3.5 text-[11.5px] text-legacy-muted">{{ fmtAge(r.b.created_at) }}</td>
+              <td class="px-2 py-3.5 text-[11.5px] text-muted-foreground">{{ fmtAge(r.b.created_at) }}</td>
               <td class="space-x-1.5 whitespace-nowrap px-5 py-3.5 text-right">
-                <ActionButton
+                <Button
                   v-if="r.errors > 0"
                   size="sm"
                   :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
@@ -335,19 +335,19 @@ function onCreated() {
                   @click="retry.mutate(r.b.batch_id)"
                 >
                   重试失败 ({{ r.errors }})
-                </ActionButton>
-                <ActionButton
+                </Button>
+                <Button
                   v-if="r.inFlight > 0"
-                  tone="danger"
+                  variant="destructive"
                   size="sm"
                   :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
                   pending-label="取消中…"
                   @click="confirmCancel(r.b)"
                 >
                   取消 ({{ r.inFlight }})
-                </ActionButton>
-                <ActionButton
-                  tone="danger"
+                </Button>
+                <Button
+                  variant="destructive"
                   size="sm"
                   :pending="
                     remove.isPending.value && remove.variables.value?.id === r.b.batch_id
@@ -357,7 +357,7 @@ function onCreated() {
                   title="永久删除该批次及其所有数据粒、产物、进度、事件"
                 >
                   删除
-                </ActionButton>
+                </Button>
               </td>
             </tr>
           </tbody>

@@ -3,8 +3,8 @@ import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API, type TimingStage } from "@/api";
 import { TIMING_STAGE_ZH, fmtDuration, fmtMs, fmtPerMinute } from "@/i18n";
-import Card from "@/ui/Card.vue";
-import Field from "@/ui/Field.vue";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import Field from "@/components/Field.vue";
 
 const props = defineProps<{ batchId: string; remaining: number; etaSeconds: number | null }>();
 
@@ -21,12 +21,12 @@ const doneCount = computed(() => data.value?.stages.upload.count ?? 0);
 </script>
 
 <template>
-  <Card
-    title="耗时统计"
-    description="样本数 = 闭合阶段次数（同一数据粒重试会计入多次）。失败未闭合的阶段不计入。"
-    :padded="false"
-  >
-    <div v-if="q.isLoading.value" class="px-5 py-4 text-xs text-legacy-muted">加载中…</div>
+  <Card>
+    <CardHeader>
+      <CardTitle>耗时统计</CardTitle>
+      <CardDescription>样本数 = 闭合阶段次数（同一数据粒重试会计入多次）。失败未闭合的阶段不计入。</CardDescription>
+    </CardHeader>
+    <div v-if="q.isLoading.value" class="px-6 py-4 text-xs text-muted-foreground">加载中…</div>
     <template v-if="data">
       <div
         v-if="data.wall_ms > 0"
@@ -51,7 +51,7 @@ const doneCount = computed(() => data.value?.stages.upload.count ?? 0);
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead class="bg-legacy-subtle/50 th-row">
+          <thead class="bg-muted/50 th-row">
             <tr>
               <th class="px-5 py-3">阶段</th>
               <th class="px-2 py-3 text-right">样本数</th>
@@ -65,7 +65,7 @@ const doneCount = computed(() => data.value?.stages.upload.count ?? 0);
             <tr
               v-for="st in STAGE_ORDER"
               :key="st"
-              :class="['border-t border-border/60', data.stages[st].count === 0 ? 'text-legacy-muted' : '']"
+              :class="['border-t border-border/60', data.stages[st].count === 0 ? 'text-muted-foreground' : '']"
             >
               <td class="px-5 py-2.5">{{ TIMING_STAGE_ZH[st] }}</td>
               <td class="px-2 py-2.5 text-right tabular-nums">{{ data.stages[st].count }}</td>

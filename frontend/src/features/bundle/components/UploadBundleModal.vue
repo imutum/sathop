@@ -3,10 +3,10 @@ import { computed, ref } from "vue";
 import { useMutation } from "@tanstack/vue-query";
 import { API, type BundleDetail } from "@/api";
 import { useToast } from "@/composables/useToast";
-import ActionButton from "@/ui/ActionButton.vue";
-import Alert from "@/ui/Alert.vue";
-import FieldLabel from "@/ui/FieldLabel.vue";
-import FilePicker from "@/ui/FilePicker.vue";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import FieldLabel from "@/components/FieldLabel.vue";
+import FilePicker from "@/components/FilePicker.vue";
 import Modal from "@/ui/Modal.vue";
 import TextInput from "@/ui/TextInput.vue";
 
@@ -57,17 +57,17 @@ function submit() {
           class="mt-2"
         />
       </label>
-      <Alert v-if="submitError">{{ submitError }}</Alert>
+      <Alert v-if="submitError" variant="destructive"><AlertDescription>{{ submitError }}</AlertDescription></Alert>
       <div class="flex justify-end gap-2 pt-2">
-        <ActionButton @click="emit('close')">取消</ActionButton>
-        <ActionButton
-          tone="primary"
+        <Button @click="emit('close')">取消</Button>
+        <Button
+          variant="default"
           @click="submit"
           :pending="upload.isPending.value"
           pending-label="上传中…"
         >
           上传
-        </ActionButton>
+        </Button>
       </div>
     </div>
   </Modal>

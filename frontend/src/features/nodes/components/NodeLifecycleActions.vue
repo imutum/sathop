@@ -52,7 +52,7 @@ async function forget() {
       :class="[
         'rounded-md border px-2 py-0.5 text-[10.5px] font-medium transition disabled:opacity-50',
         enabled
-          ? 'border-border bg-legacy-surface text-legacy-muted hover:border-danger/40 hover:text-danger'
+          ? 'border-border bg-background text-muted-foreground hover:border-danger/40 hover:text-danger'
           : 'border-success/30 bg-success/10 text-success hover:bg-success/15',
       ]"
     >

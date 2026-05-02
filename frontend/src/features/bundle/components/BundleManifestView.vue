@@ -2,17 +2,17 @@
 import { computed, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import { API, type BundleDetail } from "@/api";
-import { fmtBytes } from "@/ui/format";
+import { fmtBytes } from "@/lib/format";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
-import ActionButton from "@/ui/ActionButton.vue";
-import Alert from "@/ui/Alert.vue";
-import Badge from "@/ui/Badge.vue";
-import CopyButton from "@/ui/CopyButton.vue";
-import Field from "@/ui/Field.vue";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import CopyButton from "@/components/CopyButton.vue";
+import Field from "@/components/Field.vue";
 import BundleFileBrowser from "@/features/bundle/components/BundleFileBrowser.vue";
 import BundleSection from "@/features/bundle/components/BundleSection.vue";
-import { Icon } from "@/ui/Icon";
+import { Icon } from "@/components/Icon";
 
 const props = defineProps<{
   d: BundleDetail;
@@ -69,20 +69,20 @@ async function download() {
         <div class="flex items-center gap-2">
           <div class="font-mono text-[14px]">
             <span class="font-semibold">{{ d.name }}</span>
-            <span class="text-legacy-muted">@{{ d.version }}</span>
+            <span class="text-muted-foreground">@{{ d.version }}</span>
           </div>
           <span v-if="d.in_use_count > 0" title="被批次引用 — 删除会被拒绝">
             <Badge tone="info">{{ d.in_use_count }} 批次引用中</Badge>
           </span>
         </div>
-        <div v-if="d.description" class="mt-1.5 text-xs text-legacy-muted">{{ d.description }}</div>
+        <div v-if="d.description" class="mt-1.5 text-xs text-muted-foreground">{{ d.description }}</div>
       </div>
       <div class="flex items-center gap-2">
-        <ActionButton tone="primary" @click="gotoNewBatch" title="跳转到批次页并预选此任务包">
+        <Button variant="default" @click="gotoNewBatch" title="跳转到批次页并预选此任务包">
           新建批次
           <Icon name="arrowRight" :size="13" />
-        </ActionButton>
-        <ActionButton
+        </Button>
+        <Button
           @click="download"
           :pending="downloading"
           pending-label="下载中…"
@@ -90,21 +90,21 @@ async function download() {
         >
           <Icon name="download" :size="13" />
           下载
-        </ActionButton>
-        <ActionButton
-          tone="danger"
+        </Button>
+        <Button
+          variant="destructive"
           @click="confirmDelete"
           :pending="pending"
           pending-label="删除中…"
         >
           <Icon name="trash" :size="13" />
           删除
-        </ActionButton>
+        </Button>
       </div>
     </div>
-    <Alert v-if="error">{{ error }}</Alert>
+    <Alert v-if="error" variant="destructive"><AlertDescription>{{ error }}</AlertDescription></Alert>
 
-    <div class="grid grid-cols-2 gap-4 rounded-lg border border-border bg-legacy-subtle/40 p-4 text-xs sm:grid-cols-3">
+    <div class="grid grid-cols-2 gap-4 rounded-lg border border-border bg-muted/40 p-4 text-xs sm:grid-cols-3">
       <Field label="SHA256">
         <span class="font-mono" :title="d.sha256">{{ d.sha256.slice(0, 16) }}…</span>
         <CopyButton :value="d.sha256" title="复制完整 SHA256" />
@@ -127,9 +127,9 @@ async function download() {
     </div>
 
     <BundleSection title="输入槽位 · slots" :count="slots.length">
-      <div v-if="slots.length === 0" class="text-xs text-legacy-muted">未声明</div>
+      <div v-if="slots.length === 0" class="text-xs text-muted-foreground">未声明</div>
       <table v-else class="w-full font-mono text-[11.5px]">
-        <thead class="text-legacy-muted">
+        <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
             <th class="py-1.5 pr-3 text-left font-normal">name</th>
             <th class="py-1.5 pr-3 text-left font-normal">product</th>
@@ -150,7 +150,7 @@ async function download() {
 
     <BundleSection v-if="metaFields.length > 0" title="元字段 · meta" :count="metaFields.length">
       <table class="w-full font-mono text-[11.5px]">
-        <thead class="text-legacy-muted">
+        <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
             <th class="py-1.5 pr-3 text-left font-normal">name</th>
             <th class="py-1.5 text-left font-normal">pattern</th>
@@ -175,7 +175,7 @@ async function download() {
           v-for="n in sharedFiles"
           :key="n"
           to="/shared"
-          class="inline-flex items-center gap-1 rounded-md bg-legacy-subtle px-2 py-1 font-mono text-[11px] text-legacy-muted transition hover:bg-legacy-accent-soft hover:text-legacy-accent"
+          class="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground transition hover:bg-accent hover:text-primary"
           title="跳转到「共享文件」页"
         >
           {{ n }}
@@ -185,7 +185,7 @@ async function download() {
     </BundleSection>
 
     <BundleSection title="Python 依赖 · pip" :count="pip.length">
-      <div v-if="pip.length === 0" class="text-xs text-legacy-muted">无</div>
+      <div v-if="pip.length === 0" class="text-xs text-muted-foreground">无</div>
       <ul v-else class="space-y-0.5 font-mono text-[11.5px]">
         <li v-for="p in pip" :key="p">{{ p }}</li>
       </ul>
@@ -205,7 +205,7 @@ async function download() {
       <table class="w-full font-mono text-[11.5px]">
         <tbody>
           <tr v-for="[k, v] in envEntries" :key="k" class="border-t border-border/50">
-            <td class="py-1.5 pr-3 text-legacy-muted">{{ k }}</td>
+            <td class="py-1.5 pr-3 text-muted-foreground">{{ k }}</td>
             <td class="break-all py-1.5">{{ String(v) }}</td>
           </tr>
         </tbody>

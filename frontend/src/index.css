@@ -33,16 +33,6 @@
     --shadow: 222.2 84% 4.9%;
     --surface-edge: 0 0% 100%;
 
-    /* Legacy tokens — kept verbatim for self-built ui/ until Phase 4 replaces them. */
-    --legacy-bg: 0 0% 100%;
-    --legacy-surface: 0 0% 100%;
-    --legacy-elevated: 0 0% 100%;
-    --legacy-subtle: 210 40% 96.1%;
-    --legacy-muted: 215.4 16.3% 46.9%;
-    --legacy-text: 222.2 84% 4.9%;
-    --legacy-accent: 222.2 47.4% 11.2%;
-    --legacy-accent-fg: 0 0% 100%;
-    --legacy-accent-soft: 210 40% 96.1%;
     color-scheme: light;
   }
 
@@ -73,15 +63,6 @@
     --shadow: 0 0% 0%;
     --surface-edge: 217.2 32.6% 17.5%;
 
-    --legacy-bg: 222.2 84% 4.9%;
-    --legacy-surface: 222.2 84% 4.9%;
-    --legacy-elevated: 222.2 47.4% 7.5%;
-    --legacy-subtle: 217.2 32.6% 17.5%;
-    --legacy-muted: 215 20.2% 65.1%;
-    --legacy-text: 210 40% 98%;
-    --legacy-accent: 210 40% 98%;
-    --legacy-accent-fg: 222.2 47.4% 11.2%;
-    --legacy-accent-soft: 217.2 32.6% 17.5%;
     color-scheme: dark;
   }
 
@@ -111,18 +92,14 @@
 }
 
 @layer components {
-  /* Legacy component classes — used by self-built ui/ until Phase 4. */
-  .input {
-    @apply w-full rounded-lg border border-border bg-legacy-bg px-3 py-2 outline-none transition hover:border-legacy-accent/40 focus:border-legacy-accent disabled:opacity-60;
-  }
   .stat-label {
-    @apply text-[10.5px] font-medium uppercase tracking-[0.10em] text-legacy-muted;
+    @apply text-[10.5px] font-medium uppercase tracking-[0.10em] text-muted-foreground;
   }
   .kbd {
-    @apply rounded-md border border-border bg-legacy-subtle px-1.5 py-0.5 font-mono text-[10.5px];
+    @apply rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10.5px];
   }
   .th-row {
-    @apply text-left text-[10.5px] font-semibold uppercase tracking-[0.10em] text-legacy-muted;
+    @apply text-left text-[10.5px] font-semibold uppercase tracking-[0.10em] text-muted-foreground;
   }
 }
 

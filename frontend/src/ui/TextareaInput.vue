@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Textarea } from "@/components/ui/textarea";
+
 defineProps<{
   modelValue: string;
   placeholder?: string;
@@ -10,12 +12,11 @@ defineOptions({ inheritAttrs: false });
 </script>
 
 <template>
-  <textarea
+  <Textarea
     v-bind="$attrs"
-    :value="modelValue"
+    :model-value="modelValue"
+    @update:model-value="$emit('update:modelValue', String($event))"
     :placeholder="placeholder"
     :aria-label="ariaLabel"
-    @input="$emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
-    class="w-full rounded-md border border-border bg-legacy-surface px-3 py-2 text-sm text-legacy-text outline-none transition placeholder:text-legacy-muted/70 hover:border-legacy-accent/40 focus:border-legacy-accent disabled:cursor-not-allowed disabled:opacity-60"
   />
 </template>

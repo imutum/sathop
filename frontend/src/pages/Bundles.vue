@@ -3,17 +3,17 @@ import { computed, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
 import { API, type BundleDetail, type BundleSummary } from "@/api";
-import { fmtBytes } from "@/ui/format";
+import { fmtBytes } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { useToast } from "@/composables/useToast";
-import ActionButton from "@/ui/ActionButton.vue";
-import Badge from "@/ui/Badge.vue";
-import Card from "@/ui/Card.vue";
-import EmptyState from "@/ui/EmptyState.vue";
-import PageHeader from "@/ui/PageHeader.vue";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import EmptyState from "@/components/EmptyState.vue";
+import PageHeader from "@/components/PageHeader.vue";
 import BundleManifestView from "@/features/bundle/components/BundleManifestView.vue";
 import UploadBundleModal from "@/features/bundle/components/UploadBundleModal.vue";
-import { Icon } from "@/ui/Icon";
+import { Icon } from "@/components/Icon";
 
 const qc = useQueryClient();
 const toast = useToast();
@@ -74,15 +74,15 @@ function onUploaded(d: BundleDetail) {
       description="用户脚本注册表 · 批次通过 orch:<name>@<version> 引用"
     >
       <template #actions>
-        <ActionButton tone="primary" @click="showUpload = true">
+        <Button variant="default" @click="showUpload = true">
           <Icon name="upload" :size="13" />
           上传 ZIP
-        </ActionButton>
+        </Button>
       </template>
     </PageHeader>
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-      <Card :padded="false">
+      <Card>
         <EmptyState
           v-if="rows.length === 0"
           title="还没有任务包"
@@ -94,7 +94,7 @@ function onUploaded(d: BundleDetail) {
         </EmptyState>
         <div v-else class="overflow-x-auto">
           <table class="w-full text-sm">
-            <thead class="bg-legacy-subtle/50 th-row">
+            <thead class="bg-muted/50 th-row">
               <tr>
                 <th class="px-5 py-3">名称</th>
                 <th class="px-2 py-3">版本</th>
@@ -110,21 +110,21 @@ function onUploaded(d: BundleDetail) {
                 @click="selected = { name: b.name, version: b.version }"
                 :class="[
                   'cursor-pointer border-t border-border/60 transition',
-                  isActive(b) ? 'bg-legacy-accent-soft/60' : 'hover:bg-legacy-subtle/50',
+                  isActive(b) ? 'bg-accent/60' : 'hover:bg-muted/50',
                 ]"
               >
                 <td class="px-5 py-2.5 font-mono text-[12px] font-medium">{{ b.name }}</td>
                 <td class="px-2 py-2.5">
                   <Badge tone="info">{{ b.version }}</Badge>
                 </td>
-                <td class="px-2 py-2.5 text-[11.5px] text-legacy-muted tabular-nums">{{ fmtBytes(b.size) }}</td>
+                <td class="px-2 py-2.5 text-[11.5px] text-muted-foreground tabular-nums">{{ fmtBytes(b.size) }}</td>
                 <td class="px-2 py-2.5 text-[11.5px] tabular-nums">
-                  <span v-if="b.in_use_count > 0" class="font-medium text-legacy-text">
+                  <span v-if="b.in_use_count > 0" class="font-medium text-foreground">
                     {{ b.in_use_count }}
                   </span>
-                  <span v-else class="text-legacy-muted/60">0</span>
+                  <span v-else class="text-muted-foreground/60">0</span>
                 </td>
-                <td class="px-5 py-2.5 text-[11.5px] text-legacy-muted">{{ fmtAge(b.uploaded_at) }}</td>
+                <td class="px-5 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(b.uploaded_at) }}</td>
               </tr>
             </tbody>
           </table>
@@ -132,25 +132,27 @@ function onUploaded(d: BundleDetail) {
       </Card>
 
       <Card>
-        <EmptyState
-          v-if="!selected"
-          title="未选择任务包"
-          description="选择左侧任意任务包查看清单 / 文件浏览。"
-        >
-          <template #icon>
-            <Icon name="bundles" :size="20" />
-          </template>
-        </EmptyState>
-        <div v-else-if="detail.isLoading.value" class="py-8 text-center text-sm text-legacy-muted">
-          加载中…
-        </div>
-        <BundleManifestView
-          v-else-if="detail.data.value"
-          :d="detail.data.value"
-          :pending="del.isPending.value"
-          :error="del.error.value?.message ?? null"
-          @delete="del.mutate(selected!)"
-        />
+        <CardContent class="pt-6">
+          <EmptyState
+            v-if="!selected"
+            title="未选择任务包"
+            description="选择左侧任意任务包查看清单 / 文件浏览。"
+          >
+            <template #icon>
+              <Icon name="bundles" :size="20" />
+            </template>
+          </EmptyState>
+          <div v-else-if="detail.isLoading.value" class="py-8 text-center text-sm text-muted-foreground">
+            加载中…
+          </div>
+          <BundleManifestView
+            v-else-if="detail.data.value"
+            :d="detail.data.value"
+            :pending="del.isPending.value"
+            :error="del.error.value?.message ?? null"
+            @delete="del.mutate(selected!)"
+          />
+        </CardContent>
       </Card>
     </div>
 

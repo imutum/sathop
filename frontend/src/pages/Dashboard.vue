@@ -4,15 +4,15 @@ import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
 import { API, STATE_ORDER, type GranuleState } from "@/api";
 import { fmtAge, levelLabel, stateLabel } from "@/i18n";
-import Badge from "@/ui/Badge.vue";
-import Card from "@/ui/Card.vue";
-import EmptyState from "@/ui/EmptyState.vue";
-import PageHeader from "@/ui/PageHeader.vue";
-import Stat from "@/ui/Stat.vue";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import EmptyState from "@/components/EmptyState.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import Stat from "@/components/Stat.vue";
 import StateBarChart from "@/features/batch/components/StateBarChart.vue";
 import NodeStat from "@/features/nodes/components/NodeStat.vue";
 import OnboardingCard from "@/components/onboarding/OnboardingCard.vue";
-import { Icon } from "@/ui/Icon";
+import { Icon } from "@/components/Icon";
 
 const router = useRouter();
 
@@ -123,45 +123,57 @@ function fmtHours(h: number): string {
     </div>
 
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <Card
-        title="各阶段数据粒数量"
-        description="管线各阶段当前驻留数据粒"
-        class-name="lg:col-span-2"
-      >
-        <div v-if="!hasChartData" class="flex h-56 items-center justify-center">
-          <EmptyState title="暂无数据粒" />
-        </div>
-        <StateBarChart v-else :counts="counts" />
+      <Card class="lg:col-span-2">
+        <CardHeader>
+          <CardTitle>各阶段数据粒数量</CardTitle>
+          <CardDescription>管线各阶段当前驻留数据粒</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div v-if="!hasChartData" class="flex h-56 items-center justify-center">
+            <EmptyState title="暂无数据粒" />
+          </div>
+          <StateBarChart v-else :counts="counts" />
+        </CardContent>
       </Card>
 
-      <Card title="节点" description="集群健康度">
-        <div class="space-y-3">
-          <NodeStat
-            label="工作节点"
-            :value="activeWorkers"
-            :total="workers.data.value?.length ?? 0"
-            @click="router.push('/workers')"
-          >
-            <template #icon><Icon name="workers" /></template>
-          </NodeStat>
-          <NodeStat
-            label="接收端"
-            :value="activeReceivers"
-            :total="receivers.data.value?.length ?? 0"
-            @click="router.push('/receivers')"
-          >
-            <template #icon><Icon name="receivers" /></template>
-          </NodeStat>
-        </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>节点</CardTitle>
+          <CardDescription>集群健康度</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div class="space-y-3">
+            <NodeStat
+              label="工作节点"
+              :value="activeWorkers"
+              :total="workers.data.value?.length ?? 0"
+              @click="router.push('/workers')"
+            >
+              <template #icon><Icon name="workers" /></template>
+            </NodeStat>
+            <NodeStat
+              label="接收端"
+              :value="activeReceivers"
+              :total="receivers.data.value?.length ?? 0"
+              @click="router.push('/receivers')"
+            >
+              <template #icon><Icon name="receivers" /></template>
+            </NodeStat>
+          </div>
+        </CardContent>
       </Card>
     </div>
 
-    <Card title="正在处理" description="近 30 条非终态数据粒" :padded="false">
-      <template #action>
-        <span class="rounded-full border border-border bg-legacy-subtle px-2.5 py-0.5 text-[11px] font-medium text-legacy-muted tabular-nums">
+    <Card>
+      <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
+        <div class="space-y-1.5">
+          <CardTitle>正在处理</CardTitle>
+          <CardDescription>近 30 条非终态数据粒</CardDescription>
+        </div>
+        <span class="rounded-full border border-border bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">
           {{ active.length > 0 ? `${active.length} 条` : "空闲" }}
         </span>
-      </template>
+      </CardHeader>
       <EmptyState
         v-if="active.length === 0"
         title="当前没有正在处理的数据粒"
@@ -169,7 +181,7 @@ function fmtHours(h: number): string {
       />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead class="bg-legacy-subtle/50 th-row">
+          <thead class="bg-muted/50 th-row">
             <tr>
               <th class="px-5 py-2.5">数据粒</th>
               <th class="px-2 py-2.5">批次</th>
@@ -182,52 +194,51 @@ function fmtHours(h: number): string {
             <tr
               v-for="g in active"
               :key="g.granule_id"
-              class="cursor-pointer border-t border-border/70 transition hover:bg-legacy-subtle/50"
+              class="cursor-pointer border-t border-border/70 transition hover:bg-muted/50"
               title="跳转到该数据粒详情"
               @click="gotoGranule(g.batch_id, g.granule_id)"
             >
               <td class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</td>
-              <td class="px-2 py-2.5 font-mono text-[11.5px] text-legacy-muted">{{ g.batch_id }}</td>
+              <td class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground">{{ g.batch_id }}</td>
               <td class="px-2 py-2.5">
                 <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
               </td>
               <td
-                class="px-2 py-2.5 font-mono text-[11.5px] text-legacy-muted"
+                class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground"
                 @click.stop
               >
                 <RouterLink
                   v-if="g.leased_by"
                   :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                  class="transition hover:text-legacy-accent"
+                  class="transition hover:text-primary"
                   title="跳转到该 worker 卡片"
                 >
                   {{ g.leased_by }}
                 </RouterLink>
                 <template v-else>—</template>
               </td>
-              <td class="px-5 py-2.5 text-[11.5px] text-legacy-muted">{{ fmtAge(g.updated_at) }}</td>
+              <td class="px-5 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(g.updated_at) }}</td>
             </tr>
           </tbody>
         </table>
       </div>
     </Card>
 
-    <Card
-      v-if="stuckTotal > 0"
-      title="卡住的数据粒"
-      :description="`非终态且 > ${stuckHours} 小时未推进 · 最旧者优先`"
-      :padded="false"
-    >
-      <template #action>
+    <Card v-if="stuckTotal > 0">
+      <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
+        <div class="space-y-1.5">
+          <CardTitle>卡住的数据粒</CardTitle>
+          <CardDescription>非终态且 &gt; {{ stuckHours }} 小时未推进 · 最旧者优先</CardDescription>
+        </div>
         <span
           class="rounded-full border border-warning/40 bg-warning/10 px-2.5 py-0.5 text-[11px] font-medium text-warning tabular-nums"
         >
           {{ stuckRows.length }} / {{ stuckTotal }}
         </span>
-      </template>
+      </CardHeader>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead class="bg-legacy-subtle/50 th-row">
+          <thead class="bg-muted/50 th-row">
             <tr>
               <th class="px-5 py-2.5">数据粒</th>
               <th class="px-2 py-2.5">批次</th>
@@ -241,23 +252,23 @@ function fmtHours(h: number): string {
             <tr
               v-for="g in stuckRows"
               :key="g.granule_id"
-              class="cursor-pointer border-t border-border/70 transition hover:bg-legacy-subtle/50"
+              class="cursor-pointer border-t border-border/70 transition hover:bg-muted/50"
               title="跳转到该数据粒详情"
               @click="gotoGranule(g.batch_id, g.granule_id)"
             >
               <td class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</td>
-              <td class="px-2 py-2.5 font-mono text-[11.5px] text-legacy-muted">{{ g.batch_id }}</td>
+              <td class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground">{{ g.batch_id }}</td>
               <td class="px-2 py-2.5">
                 <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
               </td>
               <td
-                class="px-2 py-2.5 font-mono text-[11.5px] text-legacy-muted"
+                class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground"
                 @click.stop
               >
                 <RouterLink
                   v-if="g.leased_by"
                   :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                  class="transition hover:text-legacy-accent"
+                  class="transition hover:text-primary"
                 >
                   {{ g.leased_by }}
                 </RouterLink>
@@ -275,17 +286,21 @@ function fmtHours(h: number): string {
       </div>
     </Card>
 
-    <Card title="最近事件" description="后台 10 条" :padded="false">
+    <Card>
+      <CardHeader>
+        <CardTitle>最近事件</CardTitle>
+        <CardDescription>后台 10 条</CardDescription>
+      </CardHeader>
       <div class="divide-y divide-border/60">
         <div
           v-for="e in lastEvents"
           :key="e.id"
-          class="flex items-center gap-3 px-5 py-2.5 font-mono text-[11.5px] transition hover:bg-legacy-subtle/50"
+          class="flex items-center gap-3 px-5 py-2.5 font-mono text-[11.5px] transition hover:bg-muted/50"
         >
-          <span class="w-20 shrink-0 text-legacy-muted">{{ fmtAge(e.ts) }}</span>
+          <span class="w-20 shrink-0 text-muted-foreground">{{ fmtAge(e.ts) }}</span>
           <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>
-          <span class="w-32 shrink-0 truncate text-legacy-muted">{{ e.source }}</span>
-          <span class="flex-1 truncate text-legacy-text">{{ e.message }}</span>
+          <span class="w-32 shrink-0 truncate text-muted-foreground">{{ e.source }}</span>
+          <span class="flex-1 truncate text-foreground">{{ e.message }}</span>
         </div>
         <EmptyState v-if="lastEvents.length === 0" title="暂无事件" />
       </div>

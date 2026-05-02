@@ -2,8 +2,8 @@
 import { computed, ref } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
-import { fmtBytes } from "@/ui/format";
-import Alert from "@/ui/Alert.vue";
+import { fmtBytes } from "@/lib/format";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const props = defineProps<{ name: string; version: string }>();
 const sel = ref("manifest.yaml");
@@ -26,15 +26,15 @@ function parts(path: string) {
 </script>
 
 <template>
-  <div v-if="files.isLoading.value" class="py-4 text-xs text-legacy-muted">加载文件列表…</div>
-  <Alert v-else-if="files.isError.value">
-    无法列出文件：{{ (files.error.value as Error).message }}
+  <div v-if="files.isLoading.value" class="py-4 text-xs text-muted-foreground">加载文件列表…</div>
+  <Alert v-else-if="files.isError.value" variant="destructive">
+    <AlertDescription>无法列出文件：{{ (files.error.value as Error).message }}</AlertDescription>
   </Alert>
-  <div v-else-if="(files.data.value?.length ?? 0) === 0" class="py-4 text-xs text-legacy-muted">
+  <div v-else-if="(files.data.value?.length ?? 0) === 0" class="py-4 text-xs text-muted-foreground">
     （包为空）
   </div>
   <div v-else class="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,280px)_1fr]">
-    <ul class="max-h-[420px] overflow-auto rounded-lg border border-border bg-legacy-subtle/40 py-1">
+    <ul class="max-h-[420px] overflow-auto rounded-lg border border-border bg-muted/40 py-1">
       <li v-for="f in files.data.value ?? []" :key="f.path">
         <button
           @click="sel = f.path"
@@ -43,28 +43,28 @@ function parts(path: string) {
           :class="[
             'flex w-full items-center justify-between px-2 py-1 text-left font-mono text-[11px] transition',
             f.path === sel
-              ? 'bg-legacy-accent-soft text-legacy-accent'
-              : 'text-legacy-muted hover:bg-legacy-subtle hover:text-legacy-text',
+              ? 'bg-accent text-primary'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
           ]"
         >
           <span class="truncate">
-            <span v-if="parts(f.path).depth > 0" class="mr-1 select-none text-legacy-muted/50">└</span>
+            <span v-if="parts(f.path).depth > 0" class="mr-1 select-none text-muted-foreground/50">└</span>
             {{ parts(f.path).leaf }}
-            <span v-if="parts(f.path).dir" class="ml-2 text-[10px] text-legacy-muted/60">
+            <span v-if="parts(f.path).dir" class="ml-2 text-[10px] text-muted-foreground/60">
               {{ parts(f.path).dir }}/
             </span>
           </span>
-          <span class="ml-2 shrink-0 text-[10px] text-legacy-muted">{{ fmtBytes(f.size) }}</span>
+          <span class="ml-2 shrink-0 text-[10px] text-muted-foreground">{{ fmtBytes(f.size) }}</span>
         </button>
       </li>
     </ul>
-    <div class="rounded-lg border border-border bg-legacy-subtle/30">
-      <div v-if="content.isLoading.value" class="p-3 text-xs text-legacy-muted">加载 {{ sel }}…</div>
+    <div class="rounded-lg border border-border bg-muted/30">
+      <div v-if="content.isLoading.value" class="p-3 text-xs text-muted-foreground">加载 {{ sel }}…</div>
       <div v-else-if="content.isError.value" class="p-3 text-xs text-danger">
         读取失败：{{ (content.error.value as Error).message }}
       </div>
       <div v-else-if="content.data.value">
-        <div class="flex items-center justify-between border-b border-border px-3 py-2 text-[11px] text-legacy-muted">
+        <div class="flex items-center justify-between border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
           <span class="font-mono">{{ content.data.value.path }}</span>
           <span class="flex gap-2">
             <span class="tabular-nums">{{ fmtBytes(content.data.value.size) }}</span>
@@ -73,7 +73,7 @@ function parts(path: string) {
             </span>
           </span>
         </div>
-        <div v-if="content.data.value.binary" class="p-3 text-xs text-legacy-muted">
+        <div v-if="content.data.value.binary" class="p-3 text-xs text-muted-foreground">
           二进制文件，无法预览。
         </div>
         <pre

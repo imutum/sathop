@@ -2,17 +2,17 @@
 import { ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { API, type SharedFileInfo } from "@/api";
-import { fmtBytes } from "@/ui/format";
+import { fmtBytes } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
-import ActionButton from "@/ui/ActionButton.vue";
-import Card from "@/ui/Card.vue";
-import CopyButton from "@/ui/CopyButton.vue";
-import EmptyState from "@/ui/EmptyState.vue";
-import PageHeader from "@/ui/PageHeader.vue";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import CopyButton from "@/components/CopyButton.vue";
+import EmptyState from "@/components/EmptyState.vue";
+import PageHeader from "@/components/PageHeader.vue";
 import UploadSharedModal from "@/features/shared/components/UploadSharedModal.vue";
-import { Icon } from "@/ui/Icon";
+import { Icon } from "@/components/Icon";
 
 const qc = useQueryClient();
 const toast = useToast();
@@ -52,19 +52,19 @@ function onUploaded() {
     <PageHeader title="共享文件">
       <template #description>
         被任务包通过
-        <code class="rounded bg-legacy-subtle px-1.5 py-0.5 font-mono text-[11px]">shared_files</code>
+        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">shared_files</code>
         引用的辅助资源，Worker 按需拉取到
-        <code class="rounded bg-legacy-subtle px-1.5 py-0.5 font-mono text-[11px]">$SATHOP_SHARED_DIR</code>。
+        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">$SATHOP_SHARED_DIR</code>。
       </template>
       <template #actions>
-        <ActionButton tone="primary" @click="showUpload = true">
+        <Button variant="default" @click="showUpload = true">
           <Icon name="upload" :size="13" />
           上传文件
-        </ActionButton>
+        </Button>
       </template>
     </PageHeader>
 
-    <Card :padded="false">
+    <Card>
       <EmptyState
         v-if="(list.data.value?.length ?? 0) === 0 && !list.isLoading.value"
         title="还没有共享文件"
@@ -76,7 +76,7 @@ function onUploaded() {
       </EmptyState>
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead class="bg-legacy-subtle/50 th-row">
+          <thead class="bg-muted/50 th-row">
             <tr>
               <th class="px-5 py-3">名称</th>
               <th class="px-2 py-3">大小</th>
@@ -90,33 +90,33 @@ function onUploaded() {
             <tr
               v-for="f in list.data.value ?? []"
               :key="f.name"
-              class="border-t border-border/60 transition hover:bg-legacy-subtle/40"
+              class="border-t border-border/60 transition hover:bg-muted/40"
             >
               <td class="px-5 py-3 font-mono text-[12px] font-medium">{{ f.name }}</td>
-              <td class="px-2 py-3 text-[11.5px] text-legacy-muted tabular-nums">
+              <td class="px-2 py-3 text-[11.5px] text-muted-foreground tabular-nums">
                 {{ fmtBytes(f.size) }}
               </td>
               <td class="px-2 py-3 text-[11.5px]">
                 <span class="font-mono" :title="f.sha256">{{ f.sha256.slice(0, 12) }}…</span>
                 <CopyButton :value="f.sha256" title="复制完整 SHA256" />
               </td>
-              <td class="px-2 py-3 text-[11.5px] text-legacy-muted">
+              <td class="px-2 py-3 text-[11.5px] text-muted-foreground">
                 <template v-if="f.description">{{ f.description }}</template>
-                <span v-else class="text-legacy-muted/50">—</span>
+                <span v-else class="text-muted-foreground/50">—</span>
               </td>
-              <td class="px-2 py-3 text-[11.5px] text-legacy-muted">{{ fmtAge(f.uploaded_at) }}</td>
+              <td class="px-2 py-3 text-[11.5px] text-muted-foreground">{{ fmtAge(f.uploaded_at) }}</td>
               <td class="px-5 py-3 text-right">
                 <div class="inline-flex gap-1.5">
-                  <ActionButton size="sm" @click="replaceTarget = f">替换</ActionButton>
-                  <ActionButton
-                    tone="danger"
+                  <Button size="sm" @click="replaceTarget = f">替换</Button>
+                  <Button
+                    variant="destructive"
                     size="sm"
                     :pending="del.isPending.value && del.variables.value === f.name"
                     pending-label="删除中…"
                     @click="confirmDelete(f)"
                   >
                     删除
-                  </ActionButton>
+                  </Button>
                 </div>
               </td>
             </tr>

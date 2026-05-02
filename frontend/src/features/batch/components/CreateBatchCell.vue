@@ -16,8 +16,8 @@ defineEmits<{ "update:modelValue": [v: string] }>();
       :placeholder="placeholder"
       :title="error"
       :class="[
-        'w-full rounded-md border bg-legacy-bg px-2 py-1 outline-none transition',
-        error ? 'border-danger/60' : 'border-border focus:border-legacy-accent',
+        'w-full rounded-md border bg-background px-2 py-1 outline-none transition',
+        error ? 'border-danger/60' : 'border-border focus:border-primary',
         mono ? 'font-mono text-[11px]' : 'text-xs',
       ]"
     />

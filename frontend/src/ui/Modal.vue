@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from "vue";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { requestConfirm } from "@/composables/useConfirm";
 
 const props = withDefaults(
@@ -13,50 +14,38 @@ const props = withDefaults(
 
 const emit = defineEmits<{ close: [] }>();
 
-async function tryClose() {
-  if (
-    props.dirty &&
-    !(await requestConfirm({
-      title: "放弃未保存修改？",
-      description: "关闭后，当前表单中尚未保存的内容会丢失。",
-      confirmText: "放弃修改",
-      tone: "danger",
-    }))
-  ) {
-    return;
-  }
-  emit("close");
+async function tryClose(): Promise<boolean> {
+  if (!props.dirty) return true;
+  return await requestConfirm({
+    title: "放弃未保存修改？",
+    description: "关闭后，当前表单中尚未保存的内容会丢失。",
+    confirmText: "放弃修改",
+    tone: "danger",
+  });
 }
 
-function onKeyDown(e: KeyboardEvent) {
-  if (e.key === "Escape") {
-    e.stopPropagation();
-    void tryClose();
-  }
+function onUpdateOpen(open: boolean) {
+  if (!open) emit("close");
 }
 
-onMounted(() => window.addEventListener("keydown", onKeyDown));
-onBeforeUnmount(() => window.removeEventListener("keydown", onKeyDown));
+async function onEsc(e: Event) {
+  if (!(await tryClose())) e.preventDefault();
+}
+
+async function onInteractOutside(e: Event) {
+  if (!(await tryClose())) e.preventDefault();
+}
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      class="fixed inset-0 flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm"
+  <Dialog :open="true" @update:open="onUpdateOpen">
+    <DialogContent
+      :class="cn('block max-h-[90vh] max-w-none gap-0 overflow-auto', widthClass)"
       :style="{ zIndex }"
-      @click="void tryClose()"
-      role="dialog"
-      aria-modal="true"
+      @escape-key-down="onEsc"
+      @interact-outside="onInteractOutside"
     >
-      <div
-        :class="[
-          widthClass,
-          'relative max-h-[90vh] overflow-auto rounded-lg border border-border bg-legacy-elevated p-6 shadow-pop animate-scale-in',
-        ]"
-        @click.stop
-      >
-        <slot />
-      </div>
-    </div>
-  </Teleport>
+      <slot />
+    </DialogContent>
+  </Dialog>
 </template>

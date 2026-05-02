@@ -4,15 +4,15 @@ import { useQuery } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, type EventRow } from "@/api";
 import { fmtAge, levelLabel } from "@/i18n";
-import Badge from "@/ui/Badge.vue";
-import Card from "@/ui/Card.vue";
-import EmptyState from "@/ui/EmptyState.vue";
-import PageHeader from "@/ui/PageHeader.vue";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import EmptyState from "@/components/EmptyState.vue";
+import PageHeader from "@/components/PageHeader.vue";
 import SelectInput from "@/ui/SelectInput.vue";
-import Segmented from "@/ui/Segmented.vue";
-import Spinner from "@/ui/Spinner.vue";
+import Segmented from "@/components/Segmented.vue";
+import { Loader2Icon } from "lucide-vue-next";
 import TextInput from "@/ui/TextInput.vue";
-import { Icon } from "@/ui/Icon";
+import { Icon } from "@/components/Icon";
 
 type Level = "all" | "warn" | "error";
 const LEVEL_FILTERS: { value: Level; label: string }[] = [
@@ -145,13 +145,13 @@ function highlight(text: string, n: string): HighlightSeg[] {
       description="所有 Orchestrator / Worker / Receiver 上报事件的合并视图"
     >
       <template #actions>
-        <span class="rounded-full border border-border bg-legacy-subtle px-3 py-1 text-[11px] font-medium tabular-nums text-legacy-muted">
-          <span class="text-legacy-text">{{ visible.length }}</span> / {{ rows.length }} 条
+        <span class="rounded-full border border-border bg-muted px-3 py-1 text-[11px] font-medium tabular-nums text-muted-foreground">
+          <span class="text-foreground">{{ visible.length }}</span> / {{ rows.length }} 条
         </span>
       </template>
     </PageHeader>
 
-    <Card :padded="false">
+    <Card>
       <div class="flex flex-wrap items-center gap-2 border-b border-border/60 px-5 py-3.5">
         <div class="min-w-[260px] flex-1">
           <TextInput
@@ -167,7 +167,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
         <SelectInput
           v-model="batchFilter"
           aria-label="按批次过滤"
-          class="h-8 rounded-lg border border-border bg-legacy-surface px-2.5 text-xs text-legacy-text outline-none transition hover:border-legacy-accent/40 focus:border-legacy-accent"
+          class="h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground outline-none transition hover:border-primary/40 focus:border-primary"
         >
           <option value="">所有批次</option>
           <option v-for="b in batches" :key="b" :value="b">{{ b }}</option>
@@ -175,14 +175,14 @@ function highlight(text: string, n: string): HighlightSeg[] {
         <Segmented v-model="filter" :options="LEVEL_FILTERS" />
         <span
           v-if="sourceFilter"
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-legacy-accent/40 bg-legacy-accent/10 px-2.5 text-xs text-legacy-accent"
+          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 text-xs text-primary"
           title="按事件源（worker / receiver ID）过滤 — 服务端精确匹配"
         >
           源: <span class="font-mono">{{ sourceFilter }}</span>
           <button
             type="button"
             @click="sourceFilter = ''"
-            class="text-legacy-accent/70 transition hover:text-legacy-accent"
+            class="text-primary/70 transition hover:text-primary"
             title="移除源过滤"
             aria-label="移除源过滤"
           >
@@ -192,7 +192,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
         <button
           v-if="search || batchFilter || sourceFilter || filter !== 'all'"
           @click="clearAll"
-          class="h-8 rounded-lg border border-border bg-legacy-surface px-2.5 text-xs text-legacy-muted transition hover:border-legacy-accent/40 hover:text-legacy-text"
+          class="h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
         >
           清除
         </button>
@@ -207,15 +207,15 @@ function highlight(text: string, n: string): HighlightSeg[] {
           <li
             v-for="e in visible"
             :key="e.id"
-            class="flex items-start gap-3 px-5 py-2 text-[11.5px] transition hover:bg-legacy-subtle/40"
+            class="flex items-start gap-3 px-5 py-2 text-[11.5px] transition hover:bg-muted/40"
           >
-            <span class="w-20 shrink-0 text-legacy-muted">{{ fmtAge(e.ts) }}</span>
+            <span class="w-20 shrink-0 text-muted-foreground">{{ fmtAge(e.ts) }}</span>
             <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>
-            <span class="w-32 shrink-0 truncate text-legacy-muted" :title="e.source">{{ e.source }}</span>
+            <span class="w-32 shrink-0 truncate text-muted-foreground" :title="e.source">{{ e.source }}</span>
             <span
               :class="
                 isLong(e.message) && !expanded.has(e.id)
-                  ? 'flex-1 cursor-pointer truncate hover:text-legacy-text'
+                  ? 'flex-1 cursor-pointer truncate hover:text-foreground'
                   : 'flex-1 break-all whitespace-pre-wrap'
               "
               :title="isLong(e.message) && !expanded.has(e.id) ? '点击展开完整消息' : undefined"
@@ -229,7 +229,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
                 v-if="isLong(e.message)"
                 type="button"
                 @click.stop="toggle(e.id)"
-                class="ml-2 text-[10px] text-legacy-muted hover:text-legacy-accent"
+                class="ml-2 text-[10px] text-muted-foreground hover:text-primary"
               >
                 {{ expanded.has(e.id) ? "收起" : "展开" }}
               </button>
@@ -238,12 +238,12 @@ function highlight(text: string, n: string): HighlightSeg[] {
               <RouterLink
                 v-if="e.batch_id"
                 :to="`/batches/${e.batch_id}?granule=${encodeURIComponent(e.granule_id)}`"
-                class="shrink-0 truncate text-legacy-muted transition hover:text-legacy-accent"
+                class="shrink-0 truncate text-muted-foreground transition hover:text-primary"
                 :title="`跳转到 ${e.batch_id} 中的 ${e.granule_id}`"
               >
                 {{ e.granule_id }}
               </RouterLink>
-              <span v-else class="shrink-0 truncate text-legacy-muted">{{ e.granule_id }}</span>
+              <span v-else class="shrink-0 truncate text-muted-foreground">{{ e.granule_id }}</span>
             </template>
           </li>
         </ul>
@@ -256,12 +256,12 @@ function highlight(text: string, n: string): HighlightSeg[] {
             type="button"
             @click="loadOlder"
             :disabled="loadingOlder"
-            class="flex items-center gap-2 rounded-lg border border-border bg-legacy-surface px-3 py-1.5 text-[11.5px] text-legacy-muted transition hover:border-legacy-accent/40 hover:text-legacy-text disabled:cursor-not-allowed disabled:opacity-50"
+            class="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-[11.5px] text-muted-foreground transition hover:border-primary/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Spinner v-if="loadingOlder" :size="12" />
+            <Loader2Icon v-if="loadingOlder" class="size-3 animate-spin" />
             {{ loadingOlder ? "加载中…" : "加载更早事件" }}
           </button>
-          <span v-else class="text-[11px] text-legacy-muted">已加载到最早事件</span>
+          <span v-else class="text-[11px] text-muted-foreground">已加载到最早事件</span>
         </div>
       </div>
     </Card>

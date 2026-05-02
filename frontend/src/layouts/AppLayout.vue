@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Icon, type IconName } from "@/ui/Icon";
+import { Icon, type IconName } from "@/components/Icon";
 import { useTheme } from "@/composables/useTheme";
 import { useLiveStream } from "@/composables/useLiveStream";
 import { logout } from "@/composables/useAuthGate";
@@ -31,16 +31,16 @@ const isDark = computed(() => effective.value === "dark");
 </script>
 
 <template>
-  <div class="flex h-full bg-legacy-bg text-legacy-text">
+  <div class="flex h-full bg-background text-foreground">
     <aside
       :class="[
         collapsed ? 'w-[72px]' : 'w-60',
-        'relative flex shrink-0 flex-col border-r border-border bg-legacy-surface transition-[width] duration-200 ease-out',
+        'relative flex shrink-0 flex-col border-r border-border bg-background transition-[width] duration-200 ease-out',
       ]"
       aria-label="主导航"
     >
       <div class="flex h-16 items-center gap-3 border-b border-border px-4">
-        <div class="relative grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-legacy-surface text-legacy-text shadow-soft">
+        <div class="relative grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-background text-foreground shadow-soft">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
             <path d="M21 12.79A9 9 0 1 1 11.21 3" />
             <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
@@ -48,12 +48,12 @@ const isDark = computed(() => effective.value === "dark");
         </div>
         <div v-if="!collapsed" class="min-w-0">
           <div class="font-display text-[15px] font-semibold leading-none">SatHop</div>
-          <div class="mt-1 text-[10.5px] uppercase tracking-[0.18em] text-legacy-muted">Mission Console</div>
+          <div class="mt-1 text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
         </div>
       </div>
 
       <nav class="flex-1 overflow-y-auto px-3 py-3">
-        <div v-if="!collapsed" class="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-legacy-muted/80">
+        <div v-if="!collapsed" class="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/80">
           控制台
         </div>
         <ul class="space-y-0.5">
@@ -70,15 +70,15 @@ const isDark = computed(() => effective.value === "dark");
                 :class="[
                   'group relative flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition outline-none',
                   (n.end ? isExactActive : isActive)
-                    ? 'bg-legacy-subtle text-legacy-text shadow-soft'
-                    : 'text-legacy-muted hover:bg-legacy-subtle hover:text-legacy-text',
+                    ? 'bg-muted text-foreground shadow-soft'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                   collapsed ? 'justify-center' : '',
                 ]"
               >
                 <span
                   :class="[
                     'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full transition',
-                    (n.end ? isExactActive : isActive) ? 'bg-legacy-text' : 'bg-transparent',
+                    (n.end ? isExactActive : isActive) ? 'bg-foreground' : 'bg-transparent',
                   ]"
                   aria-hidden
                 />
@@ -86,7 +86,7 @@ const isDark = computed(() => effective.value === "dark");
                   :name="n.icon"
                   :class="[
                     'shrink-0 transition',
-                    (n.end ? isExactActive : isActive) ? 'text-legacy-text' : 'text-legacy-muted group-hover:text-legacy-text',
+                    (n.end ? isExactActive : isActive) ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground',
                   ]"
                 />
                 <span v-if="!collapsed" class="truncate">{{ n.label }}</span>
@@ -102,7 +102,7 @@ const isDark = computed(() => effective.value === "dark");
           @click="logout"
           :title="collapsed ? '退出登录' : undefined"
           :class="[
-            'flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-legacy-muted transition hover:bg-legacy-subtle hover:text-legacy-text',
+            'flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground',
             collapsed ? 'justify-center' : '',
           ]"
         >
@@ -115,15 +115,15 @@ const isDark = computed(() => effective.value === "dark");
         type="button"
         @click="collapsed = !collapsed"
         :aria-label="collapsed ? '展开侧边栏' : '收起侧边栏'"
-        class="absolute -right-3 top-20 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-legacy-surface text-legacy-muted shadow-soft transition hover:text-legacy-text"
+        class="absolute -right-3 top-20 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-soft transition hover:text-foreground"
       >
         <Icon :name="collapsed ? 'chevronRight' : 'chevronLeft'" :size="12" :stroke-width="2.2" />
       </button>
     </aside>
 
     <div class="flex min-w-0 flex-1 flex-col">
-      <header class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-border bg-legacy-bg/85 px-6 backdrop-blur-md lg:px-8">
-        <div class="text-[12.5px] text-legacy-muted">
+      <header class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/85 px-6 backdrop-blur-md lg:px-8">
+        <div class="text-[12.5px] text-muted-foreground">
           <!-- breadcrumbs land here once route metadata + nested-route migration is in -->
         </div>
         <div class="flex items-center gap-2">
@@ -132,7 +132,7 @@ const isDark = computed(() => effective.value === "dark");
               'hidden items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium md:inline-flex',
               connected
                 ? 'border-success/30 bg-success/10 text-success'
-                : 'border-border bg-legacy-subtle text-legacy-muted',
+                : 'border-border bg-muted text-muted-foreground',
             ]"
             :title="connected ? 'SSE 已连接' : 'SSE 未连接'"
           >
@@ -140,7 +140,7 @@ const isDark = computed(() => effective.value === "dark");
               <span
                 :class="[
                   'absolute inset-0 rounded-full',
-                  connected ? 'bg-success animate-pulse-soft' : 'bg-legacy-muted',
+                  connected ? 'bg-success animate-pulse-soft' : 'bg-muted-foreground',
                 ]"
               />
             </span>
@@ -151,7 +151,7 @@ const isDark = computed(() => effective.value === "dark");
             @click="toggleTheme"
             :aria-label="isDark ? '切换到亮色模式' : '切换到暗色模式'"
             :title="isDark ? '切换到亮色模式' : '切换到暗色模式'"
-            class="grid h-9 w-9 place-items-center rounded-md border border-border bg-legacy-surface text-legacy-muted transition hover:text-legacy-text hover:shadow-soft"
+            class="grid h-9 w-9 place-items-center rounded-md border border-border bg-background text-muted-foreground transition hover:text-foreground hover:shadow-soft"
           >
             <Icon :name="isDark ? 'sun' : 'moon'" :stroke-width="2" />
           </button>

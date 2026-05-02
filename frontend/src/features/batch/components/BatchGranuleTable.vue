@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { GranuleRow, ProgressRow, GranuleState } from "@/api";
 import { fmtAge, stateLabel } from "@/i18n";
-import ActionButton from "@/ui/ActionButton.vue";
-import Badge from "@/ui/Badge.vue";
-import EmptyState from "@/ui/EmptyState.vue";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import EmptyState from "@/components/EmptyState.vue";
 import ErrorCell from "@/features/batch/components/ErrorCell.vue";
 import GranuleEvents from "@/features/batch/components/GranuleEvents.vue";
 import LatestProgressLine from "@/features/batch/components/LatestProgressLine.vue";
@@ -37,7 +37,7 @@ function stripBatchPrefix(gid: string) {
 <template>
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
-      <thead class="bg-legacy-subtle/50 th-row">
+      <thead class="bg-muted/50 th-row">
         <tr>
           <th class="px-5 py-3">数据粒</th>
           <th class="px-2 py-3">状态</th>
@@ -53,14 +53,14 @@ function stripBatchPrefix(gid: string) {
           <tr
             :ref="(el) => emit('rowRef', g.granule_id, el as Element | null)"
             :class="[
-              'border-t border-border/60 align-top transition hover:bg-legacy-subtle/40',
-              g.granule_id === highlight ? 'bg-legacy-accent-soft/40' : '',
+              'border-t border-border/60 align-top transition hover:bg-muted/40',
+              g.granule_id === highlight ? 'bg-accent/40' : '',
             ]"
           >
             <td class="px-5 py-2.5 font-mono text-[11.5px]">
               <button
                 @click="emit('toggle', g.granule_id)"
-                class="mr-1 inline-block w-3 text-legacy-muted hover:text-legacy-text"
+                class="mr-1 inline-block w-3 text-muted-foreground hover:text-foreground"
                 :title="expanded === g.granule_id ? '收起进度' : '展开进度'"
               >
                 {{ expanded === g.granule_id ? "▾" : "▸" }}
@@ -83,33 +83,33 @@ function stripBatchPrefix(gid: string) {
               </div>
             </td>
             <td class="px-2 py-2.5 text-[11.5px] tabular-nums">{{ g.retry_count }}</td>
-            <td class="px-2 py-2.5 font-mono text-[11.5px] text-legacy-muted">
+            <td class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground">
               <RouterLink
                 v-if="g.leased_by"
                 :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                class="transition hover:text-legacy-accent"
+                class="transition hover:text-primary"
                 title="跳转到该 worker 卡片"
               >
                 {{ g.leased_by }}
               </RouterLink>
               <template v-else>—</template>
             </td>
-            <td class="px-2 py-2.5 text-[11.5px] text-legacy-muted">{{ fmtAge(g.updated_at) }}</td>
+            <td class="px-2 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(g.updated_at) }}</td>
             <td class="max-w-[320px] px-2 py-2.5 font-mono text-[11.5px] text-danger">
               <ErrorCell :error="g.error" />
             </td>
             <td class="space-x-1 whitespace-nowrap px-5 py-2.5 text-right">
-              <ActionButton
+              <Button
                 v-if="cancellable.has(g.state)"
-                tone="danger"
+                variant="destructive"
                 size="sm"
                 :pending="cancellingId === g.granule_id"
                 pending-label="取消"
                 @click="emit('cancel', g)"
               >
                 取消
-              </ActionButton>
-              <ActionButton
+              </Button>
+              <Button
                 v-if="retryable.has(g.state)"
                 size="sm"
                 :pending="retryingId === g.granule_id"
@@ -117,10 +117,10 @@ function stripBatchPrefix(gid: string) {
                 @click="emit('retry', g.granule_id)"
               >
                 重试
-              </ActionButton>
+              </Button>
             </td>
           </tr>
-          <tr v-if="expanded === g.granule_id" class="bg-legacy-subtle/40">
+          <tr v-if="expanded === g.granule_id" class="bg-muted/40">
             <td colspan="7" class="space-y-3 px-5 py-3">
               <StageTimingStrip :granule-id="g.granule_id" />
               <ProgressTimeline :granule-id="g.granule_id" />

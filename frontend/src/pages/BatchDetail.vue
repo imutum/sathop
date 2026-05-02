@@ -6,17 +6,17 @@ import { API, IN_FLIGHT_STATES, type GranuleRow, type GranuleState } from "@/api
 import { fmtAge, fmtDuration, stateLabel } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
-import ActionButton from "@/ui/ActionButton.vue";
-import Badge from "@/ui/Badge.vue";
-import Card from "@/ui/Card.vue";
-import CopyButton from "@/ui/CopyButton.vue";
-import Field from "@/ui/Field.vue";
-import PageHeader from "@/ui/PageHeader.vue";
-import Segmented from "@/ui/Segmented.vue";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import CopyButton from "@/components/CopyButton.vue";
+import Field from "@/components/Field.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import Segmented from "@/components/Segmented.vue";
 import BatchEventLog from "@/features/batch/components/BatchEventLog.vue";
 import BatchGranuleTable from "@/features/batch/components/BatchGranuleTable.vue";
 import BatchTimingCard from "@/features/batch/components/BatchTimingCard.vue";
-import { Icon } from "@/ui/Icon";
+import { Icon } from "@/components/Icon";
 
 const STATE_FILTERS: { value: GranuleState | "all"; label: string }[] = [
   { value: "all", label: "全部" },
@@ -262,7 +262,7 @@ async function confirmDelete() {
     <div>
       <RouterLink
         to="/batches"
-        class="inline-flex items-center gap-1.5 text-xs text-legacy-muted transition hover:text-legacy-text"
+        class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground"
       >
         <Icon name="arrowLeft" :size="12" />
         批次列表
@@ -270,13 +270,13 @@ async function confirmDelete() {
       <div class="mt-2">
         <PageHeader :title="b?.name ?? batchId">
           <template #description>
-            <span class="inline-flex items-center font-mono text-[11.5px] text-legacy-muted">
+            <span class="inline-flex items-center font-mono text-[11.5px] text-muted-foreground">
               {{ batchId }}
               <CopyButton :value="batchId" title="复制批次 ID" />
             </span>
           </template>
           <template v-if="b" #actions>
-            <ActionButton
+            <Button
               v-if="failedCount > 0"
               size="sm"
               :pending="retryAll.isPending.value"
@@ -284,8 +284,8 @@ async function confirmDelete() {
               @click="retryAll.mutate()"
             >
               重试失败 ({{ failedCount }})
-            </ActionButton>
-            <ActionButton
+            </Button>
+            <Button
               v-if="exhaustedCount > 0"
               size="sm"
               :pending="resetExhausted.isPending.value"
@@ -294,19 +294,19 @@ async function confirmDelete() {
               title="清零所有已放弃产物的拉取失败计数 — 下次 receiver poll 重新派发"
             >
               重置已放弃 ({{ exhaustedCount }})
-            </ActionButton>
-            <ActionButton
+            </Button>
+            <Button
               v-if="inflightCount > 0"
-              tone="danger"
+              variant="destructive"
               size="sm"
               :pending="cancelAll.isPending.value"
               pending-label="取消中…"
               @click="confirmCancelAll"
             >
               取消 ({{ inflightCount }})
-            </ActionButton>
-            <ActionButton
-              tone="danger"
+            </Button>
+            <Button
+              variant="destructive"
               size="sm"
               :pending="deleteBatch.isPending.value"
               pending-label="删除中…"
@@ -314,14 +314,14 @@ async function confirmDelete() {
               title="永久删除该批次及其全部数据粒、产物、进度、事件"
             >
               删除
-            </ActionButton>
+            </Button>
           </template>
         </PageHeader>
       </div>
     </div>
 
-    <Card v-if="b" :padded="false">
-      <div class="grid grid-cols-2 gap-x-6 gap-y-4 px-5 py-4 sm:grid-cols-4">
+    <Card v-if="b">
+      <div class="grid grid-cols-2 gap-x-6 gap-y-4 px-6 py-4 sm:grid-cols-4">
         <Field label="处理包" mono>{{ b.bundle_ref }}</Field>
         <Field label="目标接收端">
           <Badge tone="info">{{ b.target_receiver_id ?? "任意" }}</Badge>
@@ -348,14 +348,14 @@ async function confirmDelete() {
       </div>
     </Card>
 
-    <Card
-      title="数据粒"
-      description="按状态筛选 · 点击行展开阶段计时 / 进度时间线 / 该粒事件"
-      :padded="false"
-    >
-      <template #action>
+    <Card>
+      <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
+        <div class="space-y-1.5">
+          <CardTitle>数据粒</CardTitle>
+          <CardDescription>按状态筛选 · 点击行展开阶段计时 / 进度时间线 / 该粒事件</CardDescription>
+        </div>
         <Segmented v-model="filter" size="sm" :options="stateOptions" />
-      </template>
+      </CardHeader>
       <BatchGranuleTable
         :rows="rows"
         :batch-id="batchId"
@@ -379,14 +379,14 @@ async function confirmDelete() {
       :eta-seconds="b?.eta_seconds ?? null"
     />
 
-    <Card
-      title="日志"
-      description="按级别筛选 · 仅本批次的事件"
-      :padded="false"
-    >
-      <template #action>
+    <Card>
+      <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
+        <div class="space-y-1.5">
+          <CardTitle>日志</CardTitle>
+          <CardDescription>按级别筛选 · 仅本批次的事件</CardDescription>
+        </div>
         <div class="flex items-center gap-3">
-          <span class="text-[11px] text-legacy-muted tabular-nums">
+          <span class="text-[11px] text-muted-foreground tabular-nums">
             {{ eventCountLabel }}
           </span>
           <Segmented
@@ -395,7 +395,7 @@ async function confirmDelete() {
             :options="LOG_LEVEL_OPTIONS"
           />
         </div>
-      </template>
+      </CardHeader>
       <BatchEventLog :events="batchEvents" :batch-id="batchId" />
     </Card>
   </div>

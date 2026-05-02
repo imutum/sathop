@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { useMutation, useQueryClient } from "@tanstack/vue-query";
 import { API, type ReceiverInfo } from "@/api";
-import { fmtGB, fmtRate, nodeStatusBadge } from "@/ui/format";
+import { fmtGB, fmtRate, nodeStatusBadge } from "@/lib/format";
 import { PLATFORM_ZH, fmtAge } from "@/i18n";
 import { useToast } from "@/composables/useToast";
-import Badge from "@/ui/Badge.vue";
-import Card from "@/ui/Card.vue";
-import CopyButton from "@/ui/CopyButton.vue";
-import NodeLifecycleActions from "@/ui/NodeLifecycleActions.vue";
-import { Icon } from "@/ui/Icon";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import CopyButton from "@/components/CopyButton.vue";
+import NodeLifecycleActions from "@/features/nodes/components/NodeLifecycleActions.vue";
+import { Icon } from "@/components/Icon";
 import { computed } from "vue";
 
 const props = defineProps<{ receiver: ReceiverInfo }>();
@@ -38,14 +38,14 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
 </script>
 
 <template>
-  <Card :padded="false">
+  <Card>
     <div class="flex items-start justify-between gap-2 border-b border-border/60 px-5 py-4">
       <div class="min-w-0">
         <div class="flex items-center gap-1 font-mono text-[13px] font-semibold">
           <span class="truncate">{{ receiver.receiver_id }}</span>
           <CopyButton :value="receiver.receiver_id" title="复制接收端 ID" />
         </div>
-        <div class="mt-0.5 text-[11px] text-legacy-muted">
+        <div class="mt-0.5 text-[11px] text-muted-foreground">
           平台 · {{ PLATFORM_ZH[receiver.platform] ?? receiver.platform }}
         </div>
       </div>
@@ -78,7 +78,7 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
     <div class="flex items-center justify-end gap-3 border-t border-border/60 px-5 py-2.5">
       <RouterLink
         :to="`/events?source=${encodeURIComponent(receiver.receiver_id)}`"
-        class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-legacy-surface px-2 text-[10.5px] text-legacy-muted transition hover:border-legacy-accent/40 hover:text-legacy-accent"
+        class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-[10.5px] text-muted-foreground transition hover:border-primary/40 hover:text-primary"
         title="查看该接收端的事件流"
       >
         <Icon name="events" :size="11" />

@@ -51,19 +51,19 @@ async function removeRow(idx: number) {
 <template>
   <div>
     <div class="mb-2 flex items-center justify-between">
-      <span class="text-xs text-legacy-muted">数据粒 · {{ rows.length }} 条</span>
+      <span class="text-xs text-muted-foreground">数据粒 · {{ rows.length }} 条</span>
       <div class="flex gap-1.5 text-xs">
         <button
           type="button"
           @click="emit('openCsv')"
-          class="rounded-md border border-border bg-legacy-surface px-2 py-1 text-legacy-muted transition hover:border-legacy-accent/40 hover:text-legacy-text"
+          class="rounded-md border border-border bg-background px-2 py-1 text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
         >
           粘贴 CSV
         </button>
         <button
           type="button"
           @click="addRow"
-          class="rounded-md border border-border bg-legacy-surface px-2 py-1 text-legacy-muted transition hover:border-legacy-accent/40 hover:text-legacy-text"
+          class="rounded-md border border-border bg-background px-2 py-1 text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
         >
           + 添加行
         </button>
@@ -71,7 +71,7 @@ async function removeRow(idx: number) {
     </div>
     <div class="overflow-x-auto rounded-lg border border-border">
       <table class="w-full text-xs">
-        <thead class="bg-legacy-subtle/60 th-row">
+        <thead class="bg-muted/60 th-row">
           <tr>
             <th class="px-2 py-1.5">granule_id</th>
             <th
@@ -96,14 +96,14 @@ async function removeRow(idx: number) {
           <tr class="text-[10px] normal-case">
             <th></th>
             <template v-for="s in schema.slots" :key="`sub-${s.name}`">
-              <th class="px-2 py-1 text-legacy-muted">url</th>
-              <th class="px-2 py-1 text-legacy-muted">filename</th>
-              <th v-if="!s.credential" class="px-2 py-1 text-legacy-muted">credential</th>
+              <th class="px-2 py-1 text-muted-foreground">url</th>
+              <th class="px-2 py-1 text-muted-foreground">filename</th>
+              <th v-if="!s.credential" class="px-2 py-1 text-muted-foreground">credential</th>
             </template>
             <th
               v-for="m in schema.metaFields"
               :key="`sub-meta-${m.name}`"
-              class="px-2 py-1 text-legacy-muted"
+              class="px-2 py-1 text-muted-foreground"
             >
               {{ m.pattern ?? "—" }}
             </th>
@@ -193,14 +193,14 @@ async function removeRow(idx: number) {
               <button
                 type="button"
                 @click="removeRow(idx)"
-                class="text-legacy-muted hover:text-danger"
+                class="text-muted-foreground hover:text-danger"
               >
                 ×
               </button>
             </td>
           </tr>
           <tr v-if="rows.length === 0">
-            <td :colspan="99" class="px-4 py-4 text-center text-legacy-muted">
+            <td :colspan="99" class="px-4 py-4 text-center text-muted-foreground">
               还没有数据粒。点击 "+ 添加行" 或 "粘贴 CSV"。
             </td>
           </tr>

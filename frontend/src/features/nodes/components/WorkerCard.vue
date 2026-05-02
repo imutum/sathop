@@ -2,16 +2,16 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useMutation, useQueryClient } from "@tanstack/vue-query";
 import { API, type WorkerInfo } from "@/api";
-import { fmtGB, nodeStatusBadge } from "@/ui/format";
+import { fmtGB, nodeStatusBadge } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { useToast } from "@/composables/useToast";
-import Badge from "@/ui/Badge.vue";
-import Card from "@/ui/Card.vue";
-import CopyButton from "@/ui/CopyButton.vue";
-import NodeLifecycleActions from "@/ui/NodeLifecycleActions.vue";
-import ProgressBar from "@/ui/ProgressBar.vue";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import CopyButton from "@/components/CopyButton.vue";
+import NodeLifecycleActions from "@/features/nodes/components/NodeLifecycleActions.vue";
+import ProgressBar from "@/components/ProgressBar.vue";
 import TextInput from "@/ui/TextInput.vue";
-import { Icon } from "@/ui/Icon";
+import { Icon } from "@/components/Icon";
 
 const props = defineProps<{ worker: WorkerInfo; focused?: boolean }>();
 
@@ -103,18 +103,18 @@ function onKey(e: KeyboardEvent) {
   <div
     :class="
       focused
-        ? 'rounded-lg ring-2 ring-legacy-accent/60 ring-offset-2 ring-offset-bg'
+        ? 'rounded-lg ring-2 ring-primary/60 ring-offset-2 ring-offset-bg'
         : undefined
     "
   >
-    <Card :padded="false">
+    <Card>
       <div class="flex items-start justify-between gap-2 border-b border-border/60 px-5 py-4">
         <div class="min-w-0">
           <div class="flex items-center gap-1 font-mono text-[13px] font-semibold">
             <span class="truncate">{{ worker.worker_id }}</span>
             <CopyButton :value="worker.worker_id" title="复制节点 ID" />
           </div>
-          <div class="mt-0.5 truncate font-mono text-[11px] text-legacy-muted" :title="worker.public_url ?? ''">
+          <div class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" :title="worker.public_url ?? ''">
             {{ worker.public_url ?? "—" }}
           </div>
         </div>
@@ -152,41 +152,41 @@ function onKey(e: KeyboardEvent) {
         </div>
 
         <div>
-          <div class="mb-1.5 flex items-center justify-between text-[11px] text-legacy-muted">
+          <div class="mb-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
             <span class="font-medium uppercase tracking-[0.10em]">磁盘</span>
             <span class="tabular-nums">{{ fmtGB(worker.disk_used_gb) }} / {{ fmtGB(worker.disk_total_gb) }}</span>
           </div>
           <ProgressBar :value="worker.disk_used_gb" :max="worker.disk_total_gb" :tone="diskTone" />
         </div>
 
-        <div class="grid grid-cols-4 gap-3 rounded-lg border border-border bg-legacy-subtle/60 p-3 text-center">
+        <div class="grid grid-cols-4 gap-3 rounded-lg border border-border bg-muted/60 p-3 text-center">
           <div>
             <div class="stat-label">排队</div>
-            <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-legacy-text">
+            <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-foreground">
               {{ worker.queue_queued }}
             </div>
           </div>
           <div>
             <div class="stat-label">下载</div>
-            <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-legacy-text">
+            <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-foreground">
               {{ worker.queue_downloading }}
             </div>
           </div>
           <div>
             <div class="stat-label">处理</div>
-            <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-legacy-text">
+            <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-foreground">
               {{ worker.queue_processing }}
             </div>
           </div>
           <div>
             <div class="stat-label">上传</div>
-            <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-legacy-text">
+            <div class="font-display mt-0.5 text-base font-semibold tabular-nums text-foreground">
               {{ worker.queue_uploading }}
             </div>
           </div>
         </div>
 
-        <div class="flex items-center justify-between border-t border-border/60 pt-3 text-[11px] text-legacy-muted">
+        <div class="flex items-center justify-between border-t border-border/60 pt-3 text-[11px] text-muted-foreground">
           <span class="flex items-center gap-1.5">
             <span>容量 {{ effective }}/{{ worker.capacity }}</span>
             <template v-if="draft !== null">
@@ -205,14 +205,14 @@ function onKey(e: KeyboardEvent) {
               <button
                 @click="submitDraft"
                 :disabled="setCap.isPending.value"
-                class="rounded-md bg-legacy-accent/15 px-1.5 py-0.5 text-[10.5px] font-medium text-legacy-accent hover:bg-legacy-accent/25 disabled:opacity-50"
+                class="rounded-md bg-primary/15 px-1.5 py-0.5 text-[10.5px] font-medium text-primary hover:bg-primary/25 disabled:opacity-50"
               >
                 保存
               </button>
               <button
                 @click="draft = null"
                 :disabled="setCap.isPending.value"
-                class="text-[10.5px] text-legacy-muted hover:text-legacy-text"
+                class="text-[10.5px] text-muted-foreground hover:text-foreground"
               >
                 取消
               </button>
@@ -220,7 +220,7 @@ function onKey(e: KeyboardEvent) {
             <button
               v-else
               @click="startEdit"
-              class="rounded-md border border-border bg-legacy-surface px-1.5 py-0.5 text-[10.5px] text-legacy-muted transition hover:border-legacy-accent/40 hover:text-legacy-text"
+              class="rounded-md border border-border bg-background px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
               title="改实际并发上限（不超过容器启动设置的容量）"
             >
               {{ worker.desired_capacity != null ? "改" : "限流" }}
@@ -229,7 +229,7 @@ function onKey(e: KeyboardEvent) {
           <div class="flex items-center gap-3">
             <RouterLink
               :to="`/events?source=${encodeURIComponent(worker.worker_id)}`"
-              class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-legacy-surface px-2 text-[10.5px] text-legacy-muted transition hover:border-legacy-accent/40 hover:text-legacy-accent"
+              class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-[10.5px] text-muted-foreground transition hover:border-primary/40 hover:text-primary"
               title="查看该 worker 的事件流"
             >
               <Icon name="events" :size="11" />

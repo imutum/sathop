@@ -29,4 +29,39 @@ describe("ui/Button", () => {
     const w = mount(Button, { props: { class: "custom-x" } });
     expect(w.classes()).toContain("custom-x");
   });
+
+  it("shows spinner + pendingLabel when pending=true", () => {
+    const w = mount(Button, {
+      props: { pending: true, pendingLabel: "上传中…" },
+      slots: { default: "上传" },
+    });
+    expect(w.text()).toBe("上传中…");
+    expect(w.text()).not.toContain("上传 "); // slot suppressed
+    expect(w.find("svg").exists()).toBe(true);
+    expect(w.attributes("aria-busy")).toBe("true");
+    expect(w.attributes("disabled")).toBeDefined();
+  });
+
+  it("falls back to default pendingLabel when omitted", () => {
+    const w = mount(Button, {
+      props: { pending: true },
+      slots: { default: "保存" },
+    });
+    expect(w.text()).toBe("处理中…");
+  });
+
+  it("renders slot content when pending=false", () => {
+    const w = mount(Button, {
+      props: { pending: false, pendingLabel: "上传中…" },
+      slots: { default: "上传" },
+    });
+    expect(w.text()).toBe("上传");
+    expect(w.find("svg").exists()).toBe(false);
+    expect(w.attributes("aria-busy")).toBeUndefined();
+  });
+
+  it("respects explicit disabled even when not pending", () => {
+    const w = mount(Button, { props: { disabled: true } });
+    expect(w.attributes("disabled")).toBeDefined();
+  });
 });

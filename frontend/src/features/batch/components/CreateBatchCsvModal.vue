@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { type Row, type Schema, emptyRow } from "@/features/batch/types";
-import ActionButton from "@/ui/ActionButton.vue";
-import Alert from "@/ui/Alert.vue";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import Modal from "@/ui/Modal.vue";
 import TextareaInput from "@/ui/TextareaInput.vue";
 
@@ -77,19 +77,19 @@ function doImport() {
 <template>
   <Modal width-class="w-[720px]" :z-index="60" :dirty="dirty" @close="emit('close')">
     <h3 class="font-display mb-2 text-base font-semibold">粘贴 CSV / TSV</h3>
-    <div class="mb-3 text-[11px] text-legacy-muted">
+    <div class="mb-3 text-[11px] text-muted-foreground">
       第一行必须是表头，列顺序不限。自动识别逗号或 Tab 分隔。
-      <code class="font-mono text-[10px] text-legacy-muted">.size / .checksum / .credential</code> 列可选。
+      <code class="font-mono text-[10px] text-muted-foreground">.size / .checksum / .credential</code> 列可选。
     </div>
     <TextareaInput
       v-model="text"
       rows="14"
       class="font-mono text-[11px]"
     />
-    <div v-if="parseErr" class="mt-2"><Alert>{{ parseErr }}</Alert></div>
+    <div v-if="parseErr" class="mt-2"><Alert variant="destructive"><AlertDescription>{{ parseErr }}</AlertDescription></Alert></div>
     <div class="mt-3 flex justify-end gap-2">
-      <ActionButton @click="emit('close')">取消</ActionButton>
-      <ActionButton tone="primary" @click="doImport">导入</ActionButton>
+      <Button @click="emit('close')">取消</Button>
+      <Button variant="default" @click="doImport">导入</Button>
     </div>
   </Modal>
 </template>

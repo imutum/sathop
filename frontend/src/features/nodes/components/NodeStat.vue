@@ -15,7 +15,7 @@ const tone = computed(() => {
 const colorCls = computed(
   () =>
     ({
-      muted: "text-legacy-muted",
+      muted: "text-muted-foreground",
       success: "text-success",
       warning: "text-warning",
       danger: "text-danger",
@@ -27,24 +27,24 @@ const colorCls = computed(
   <button
     type="button"
     @click="$emit('click')"
-    class="group flex w-full items-center justify-between rounded-lg border border-border bg-legacy-subtle/40 p-3.5 text-left transition hover:border-legacy-accent/40 hover:bg-legacy-subtle"
+    class="group flex w-full items-center justify-between rounded-lg border border-border bg-muted/40 p-3.5 text-left transition hover:border-primary/40 hover:bg-muted"
   >
     <div class="flex items-center gap-3">
       <span
-        class="grid h-9 w-9 place-items-center rounded-lg bg-legacy-surface text-legacy-muted shadow-soft transition group-hover:text-legacy-accent"
+        class="grid h-9 w-9 place-items-center rounded-lg bg-background text-muted-foreground shadow-soft transition group-hover:text-primary"
       >
         <slot name="icon" />
       </span>
       <div>
-        <div class="text-[11px] font-medium uppercase tracking-[0.10em] text-legacy-muted">{{ label }}</div>
-        <div class="mt-1 text-[13px] text-legacy-text">在线 / 已注册</div>
+        <div class="text-[11px] font-medium uppercase tracking-[0.10em] text-muted-foreground">{{ label }}</div>
+        <div class="mt-1 text-[13px] text-foreground">在线 / 已注册</div>
       </div>
     </div>
     <div class="flex items-baseline gap-1.5 tabular-nums">
       <span :class="['font-display text-2xl font-semibold', colorCls]">
         {{ value }}
       </span>
-      <span class="text-sm text-legacy-muted">/ {{ total }}</span>
+      <span class="text-sm text-muted-foreground">/ {{ total }}</span>
     </div>
   </button>
 </template>

@@ -25,7 +25,7 @@ function onCopy(e: MouseEvent) {
     :aria-label="title ?? '复制'"
     :class="[
       'ml-1 inline-grid h-5 w-5 place-items-center rounded-md transition',
-      copied ? 'text-success' : 'text-legacy-muted/60 hover:bg-legacy-subtle hover:text-legacy-text',
+      copied ? 'text-success' : 'text-muted-foreground/60 hover:bg-muted hover:text-foreground',
     ]"
   >
     <Icon

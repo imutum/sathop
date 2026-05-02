@@ -6,7 +6,7 @@ import { stateLabel } from "@/i18n";
 const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
 
 const TONE: Record<GranuleState, string> = {
-  pending: "bg-legacy-muted",
+  pending: "bg-muted-foreground",
   queued: "bg-amber-500",
   downloading: "bg-sky-500",
   downloaded: "bg-sky-600",
@@ -40,14 +40,14 @@ const rows = computed(() => {
       :key="row.state"
       class="grid grid-cols-[74px_minmax(0,1fr)_54px] items-center gap-3"
     >
-      <div class="truncate text-xs text-legacy-muted">{{ row.label }}</div>
-      <div class="h-7 rounded-md bg-legacy-subtle">
+      <div class="truncate text-xs text-muted-foreground">{{ row.label }}</div>
+      <div class="h-7 rounded-md bg-muted">
         <div
           :class="['h-full rounded-md transition-[width]', TONE[row.state]]"
           :style="{ width: `${row.pct}%` }"
         />
       </div>
-      <div class="text-right font-mono text-xs tabular-nums text-legacy-text">
+      <div class="text-right font-mono text-xs tabular-nums text-foreground">
         {{ row.value.toLocaleString() }}
       </div>
     </div>

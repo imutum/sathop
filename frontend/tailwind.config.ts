@@ -46,17 +46,6 @@ export default {
         success: "hsl(var(--success) / <alpha-value>)",
         warning: "hsl(var(--warning) / <alpha-value>)",
         danger: "hsl(var(--danger) / <alpha-value>)",
-
-        // Legacy tokens — temporary, removed once Phase 4 is done.
-        "legacy-bg": "hsl(var(--legacy-bg) / <alpha-value>)",
-        "legacy-surface": "hsl(var(--legacy-surface) / <alpha-value>)",
-        "legacy-elevated": "hsl(var(--legacy-elevated) / <alpha-value>)",
-        "legacy-subtle": "hsl(var(--legacy-subtle) / <alpha-value>)",
-        "legacy-muted": "hsl(var(--legacy-muted) / <alpha-value>)",
-        "legacy-text": "hsl(var(--legacy-text) / <alpha-value>)",
-        "legacy-accent": "hsl(var(--legacy-accent) / <alpha-value>)",
-        "legacy-accent-fg": "hsl(var(--legacy-accent-fg) / <alpha-value>)",
-        "legacy-accent-soft": "hsl(var(--legacy-accent-soft) / <alpha-value>)",
       },
       borderRadius: {
         lg: "var(--radius)",

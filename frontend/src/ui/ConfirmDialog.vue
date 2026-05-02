@@ -1,71 +1,95 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import ActionButton from "./ActionButton.vue";
-import TextInput from "./TextInput.vue";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { confirmInput, confirmRequest, resolveConfirm } from "@/composables/useConfirm";
 
-const inputRef = ref<InstanceType<typeof TextInput> | null>(null);
+const inputRef = ref<{ $el?: HTMLInputElement } | null>(null);
+
+const open = computed({
+  get: () => !!confirmRequest.value,
+  set: (v) => {
+    if (!v) resolveConfirm(false);
+  },
+});
 
 const canConfirm = computed(() => {
   const required = confirmRequest.value?.requireText;
   return !required || confirmInput.value === required;
 });
 
+const actionClass = computed(() =>
+  cn(
+    buttonVariants({
+      variant: confirmRequest.value?.tone === "danger" ? "destructive" : "default",
+    }),
+  ),
+);
+
 watch(confirmRequest, (request) => {
-  if (request?.requireText) void nextTick(() => inputRef.value?.focus?.());
+  if (request?.requireText) {
+    void nextTick(() => inputRef.value?.$el?.focus?.());
+  }
 });
+
+function onActionClick(e: Event) {
+  if (!canConfirm.value) {
+    e.preventDefault();
+    return;
+  }
+  resolveConfirm(true);
+}
 </script>
 
 <template>
-  <Teleport to="body">
-    <div
-      v-if="confirmRequest"
-      class="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 px-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      @click="resolveConfirm(false)"
-      @keydown.esc="resolveConfirm(false)"
-    >
-      <div
-        class="w-full max-w-[420px] rounded-lg border border-border bg-legacy-elevated p-5 shadow-pop animate-scale-in"
-        @click.stop
-      >
-        <h2 class="font-display text-base font-semibold text-legacy-text">
-          {{ confirmRequest.title }}
-        </h2>
-        <p
+  <AlertDialog v-model:open="open">
+    <AlertDialogContent v-if="confirmRequest" class="max-w-[420px]">
+      <AlertDialogHeader>
+        <AlertDialogTitle>{{ confirmRequest.title }}</AlertDialogTitle>
+        <AlertDialogDescription
           v-if="confirmRequest.description"
-          class="mt-2 whitespace-pre-line text-sm leading-relaxed text-legacy-muted"
+          class="whitespace-pre-line"
         >
           {{ confirmRequest.description }}
-        </p>
+        </AlertDialogDescription>
+      </AlertDialogHeader>
 
-        <label v-if="confirmRequest.requireText" class="mt-4 block">
-          <span class="text-xs font-medium text-legacy-text">
-            {{ confirmRequest.inputLabel ?? `输入 ${confirmRequest.requireText} 确认` }}
-          </span>
-          <TextInput
-            ref="inputRef"
-            v-model="confirmInput"
-            class="mt-2"
-            :placeholder="confirmRequest.requireText"
-            aria-label="确认文本"
-          />
-        </label>
+      <label v-if="confirmRequest.requireText" class="block">
+        <span class="text-xs font-medium">
+          {{ confirmRequest.inputLabel ?? `输入 ${confirmRequest.requireText} 确认` }}
+        </span>
+        <Input
+          ref="inputRef"
+          v-model="confirmInput"
+          class="mt-2"
+          :placeholder="confirmRequest.requireText"
+          aria-label="确认文本"
+        />
+      </label>
 
-        <div class="mt-5 flex justify-end gap-2">
-          <ActionButton tone="default" @click="resolveConfirm(false)">
-            {{ confirmRequest.cancelText }}
-          </ActionButton>
-          <ActionButton
-            :tone="confirmRequest.tone === 'danger' ? 'danger' : 'primary'"
-            :disabled="!canConfirm"
-            @click="resolveConfirm(true)"
-          >
-            {{ confirmRequest.confirmText }}
-          </ActionButton>
-        </div>
-      </div>
-    </div>
-  </Teleport>
+      <AlertDialogFooter>
+        <AlertDialogCancel @click="resolveConfirm(false)">
+          {{ confirmRequest.cancelText }}
+        </AlertDialogCancel>
+        <AlertDialogAction
+          :class="actionClass"
+          :disabled="!canConfirm"
+          @click="onActionClick"
+        >
+          {{ confirmRequest.confirmText }}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 </template>

@@ -3,10 +3,10 @@ import { computed, ref, watch } from "vue";
 import { useMutation } from "@tanstack/vue-query";
 import { API, type SharedFileInfo } from "@/api";
 import { useToast } from "@/composables/useToast";
-import ActionButton from "@/ui/ActionButton.vue";
-import Alert from "@/ui/Alert.vue";
-import FieldLabel from "@/ui/FieldLabel.vue";
-import FilePicker from "@/ui/FilePicker.vue";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import FieldLabel from "@/components/FieldLabel.vue";
+import FilePicker from "@/components/FilePicker.vue";
 import Modal from "@/ui/Modal.vue";
 import TextInput from "@/ui/TextInput.vue";
 
@@ -76,7 +76,7 @@ function submit() {
           placeholder="mask.tif"
           class="mt-2 font-mono text-xs"
         />
-        <div class="mt-1.5 text-[10.5px] text-legacy-muted/80">
+        <div class="mt-1.5 text-[10.5px] text-muted-foreground/80">
           允许字符：字母、数字、<code>.</code> <code>_</code> <code>-</code>；不能以点开头；最长 255 字节。
         </div>
       </label>
@@ -92,17 +92,17 @@ function submit() {
           class="mt-2"
         />
       </label>
-      <Alert v-if="submitError">{{ submitError }}</Alert>
+      <Alert v-if="submitError" variant="destructive"><AlertDescription>{{ submitError }}</AlertDescription></Alert>
       <div class="flex justify-end gap-2 pt-2">
-        <ActionButton @click="emit('close')">取消</ActionButton>
-        <ActionButton
-          tone="primary"
+        <Button @click="emit('close')">取消</Button>
+        <Button
+          variant="default"
           :pending="upload.isPending.value"
           pending-label="上传中…"
           @click="submit"
         >
           {{ lockName ? "替换" : "上传" }}
-        </ActionButton>
+        </Button>
       </div>
     </div>
   </Modal>

@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 defineProps<{
   modelValue: string;
@@ -10,29 +12,26 @@ defineProps<{
 defineEmits<{ "update:modelValue": [value: string] }>();
 defineOptions({ inheritAttrs: false });
 
-const inputEl = ref<HTMLInputElement | null>(null);
-defineExpose({ focus: () => inputEl.value?.focus() });
+const inputRef = ref<{ $el?: HTMLInputElement } | null>(null);
+defineExpose({ focus: () => inputRef.value?.$el?.focus?.() });
 </script>
 
 <template>
-  <div class="relative">
+  <div :class="$slots.leftIcon ? 'relative' : ''">
     <span
       v-if="$slots.leftIcon"
-      class="pointer-events-none absolute inset-y-0 left-2.5 grid place-items-center text-legacy-muted"
+      class="pointer-events-none absolute inset-y-0 left-2.5 z-10 grid place-items-center text-muted-foreground"
     >
       <slot name="leftIcon" />
     </span>
-    <input
-      ref="inputEl"
+    <Input
+      ref="inputRef"
       v-bind="$attrs"
-      :value="modelValue"
-      @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+      :model-value="modelValue"
+      @update:model-value="$emit('update:modelValue', String($event))"
       :placeholder="placeholder"
       :aria-label="ariaLabel"
-      :class="[
-        'h-8 w-full rounded-lg border border-border bg-legacy-surface text-xs text-legacy-text outline-none transition placeholder:text-legacy-muted/70 hover:border-legacy-accent/40 focus:border-legacy-accent',
-        $slots.leftIcon ? 'pl-8 pr-3' : 'px-3',
-      ]"
+      :class="cn($slots.leftIcon ? 'pl-8' : '')"
     />
   </div>
 </template>

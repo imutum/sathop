@@ -1,40 +1,14 @@
-import { reactive } from "vue";
-
-// Singleton toast queue. ToastContainer.vue renders `items`; useToast().error
-// etc. push onto it. error toasts stay until dismissed; success/info auto-pop
-// after 3.5s.
+import { toast } from "vue-sonner";
 
 export type ToastKind = "success" | "error" | "info";
-export type ToastItem = {
-  id: number;
-  kind: ToastKind;
-  text: string;
-  sticky: boolean;
-};
-
-const state = reactive<{ items: ToastItem[] }>({ items: [] });
-let nextId = 0;
-
-function push(kind: ToastKind, text: string) {
-  const id = ++nextId;
-  state.items.push({ id, kind, text, sticky: kind === "error" });
-  if (kind !== "error") {
-    window.setTimeout(() => dismiss(id), 3500);
-  }
-}
-
-export function dismiss(id: number) {
-  const i = state.items.findIndex((x) => x.id === id);
-  if (i >= 0) state.items.splice(i, 1);
-}
-
-export const toastItems = state.items;
 
 export function useToast() {
   return {
-    success: (text: string) => push("success", text),
-    error: (text: string) => push("error", text),
-    info: (text: string) => push("info", text),
+    success: (text: string) => toast.success(text),
+    info: (text: string) => toast.info(text),
+    // Errors are sticky — vue-sonner auto-dismisses by default; force Infinity
+    // so failures linger until the user dismisses, matching prior behavior.
+    error: (text: string) => toast.error(text, { duration: Infinity }),
   };
 }
 

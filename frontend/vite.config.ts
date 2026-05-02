@@ -25,6 +25,15 @@ export default defineConfig({
         manualChunks: {
           vue: ["vue", "vue-router"],
           query: ["@tanstack/vue-query"],
+          ui: [
+            "reka-ui",
+            "class-variance-authority",
+            "clsx",
+            "tailwind-merge",
+            "@vueuse/core",
+            "lucide-vue-next",
+            "vue-sonner",
+          ],
         },
       },
     },
