@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
 import { API, STATE_ORDER, type GranuleState } from "@/api";
 import { fmtAge, levelLabel, stateLabel } from "@/i18n";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
@@ -96,6 +98,16 @@ function fmtHours(h: number): string {
 <template>
   <div class="space-y-6">
     <PageHeader title="总览" description="管道健康一览 · SSE 实时更新" />
+
+    <Alert
+      v-if="overview.error.value && overview.data.value === undefined"
+      variant="destructive"
+    >
+      <AlertDescription class="flex items-center justify-between gap-3">
+        <span>加载总览失败：{{ overview.error.value.message }}</span>
+        <Button size="sm" variant="outline" @click="overview.refetch()">重试</Button>
+      </AlertDescription>
+    </Alert>
 
     <OnboardingCard v-if="firstRun" />
 

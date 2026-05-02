@@ -6,9 +6,11 @@ import { API, IN_FLIGHT_STATES, type GranuleRow, type GranuleState } from "@/api
 import { fmtAge, fmtDuration, stateLabel } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import CopyButton from "@/components/CopyButton.vue";
 import Field from "@/components/Field.vue";
 import PageHeader from "@/components/PageHeader.vue";
@@ -319,6 +321,24 @@ async function confirmDelete() {
         </PageHeader>
       </div>
     </div>
+
+    <Alert
+      v-if="batch.error.value && !b"
+      variant="destructive"
+    >
+      <AlertDescription class="flex items-center justify-between gap-3">
+        <span>加载批次失败：{{ batch.error.value.message }}</span>
+        <Button size="sm" variant="outline" @click="batch.refetch()">重试</Button>
+      </AlertDescription>
+    </Alert>
+
+    <Card v-else-if="!b">
+      <div class="space-y-3 p-6">
+        <Skeleton class="h-5 w-1/3" />
+        <Skeleton class="h-4 w-1/4" />
+        <Skeleton class="h-4 w-1/2" />
+      </div>
+    </Card>
 
     <Card v-if="b">
       <div class="grid grid-cols-2 gap-x-6 gap-y-4 px-6 py-4 sm:grid-cols-4">

@@ -6,13 +6,16 @@ import { API, IN_FLIGHT_STATES, type BatchSummary, type GranuleState } from "@/a
 import { fmtAge, fmtDuration } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import CopyButton from "@/components/CopyButton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import ProgressBar from "@/components/ProgressBar.vue";
+import QueryState from "@/components/QueryState.vue";
 import Segmented from "@/components/Segmented.vue";
 import TextInput from "@/ui/TextInput.vue";
 import CreateBatchModal from "@/features/batch/components/CreateBatchModal.vue";
@@ -238,19 +241,41 @@ function onCreated() {
     />
 
     <Card>
-      <EmptyState
-        v-if="visible.length === 0"
-        :title="all.length === 0 ? '还没有任何批次' : '当前筛选条件下没有匹配'"
-        :description="all.length === 0 ? '通过页面右上角“新建任务”创建第一个批次。' : undefined"
-      >
-        <template v-if="all.length === 0" #action>
-          <Button variant="default" @click="showCreate = true">
-            <Icon name="plus" :size="13" />
-            新建任务
-          </Button>
+      <QueryState :query="batches">
+        <template #loading>
+          <div class="space-y-2 p-5">
+            <Skeleton v-for="n in 5" :key="n" class="h-14 w-full" />
+          </div>
         </template>
-      </EmptyState>
-      <div v-else class="overflow-x-auto">
+        <template #error="{ error, retry: retryFetch }">
+          <div class="p-5">
+            <Alert variant="destructive">
+              <AlertDescription class="flex items-center justify-between gap-3">
+                <span>加载批次失败：{{ error.message }}</span>
+                <Button size="sm" variant="outline" @click="retryFetch">重试</Button>
+              </AlertDescription>
+            </Alert>
+          </div>
+        </template>
+        <template #empty>
+          <EmptyState
+            title="还没有任何批次"
+            description="通过页面右上角“新建任务”创建第一个批次。"
+          >
+            <template #action>
+              <Button variant="default" @click="showCreate = true">
+                <Icon name="plus" :size="13" />
+                新建任务
+              </Button>
+            </template>
+          </EmptyState>
+        </template>
+        <template #default>
+          <EmptyState
+            v-if="visible.length === 0"
+            title="当前筛选条件下没有匹配"
+          />
+          <div v-else class="overflow-x-auto">
         <table class="w-full min-w-[820px] text-sm">
           <thead class="bg-muted/50 th-row">
             <tr>
@@ -363,6 +388,8 @@ function onCreated() {
           </tbody>
         </table>
       </div>
+        </template>
+      </QueryState>
     </Card>
   </div>
 </template>

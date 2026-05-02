@@ -4,10 +4,14 @@ import { useQuery } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, type EventRow } from "@/api";
 import { fmtAge, levelLabel } from "@/i18n";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
+import QueryState from "@/components/QueryState.vue";
 import SelectInput from "@/ui/SelectInput.vue";
 import Segmented from "@/components/Segmented.vue";
 import { Loader2Icon } from "lucide-vue-next";
@@ -199,9 +203,29 @@ function highlight(text: string, n: string): HighlightSeg[] {
       </div>
 
       <div class="max-h-[70vh] overflow-auto font-mono">
+        <QueryState :query="q" :is-empty="() => rows.length === 0">
+          <template #loading>
+            <div class="space-y-2 p-5">
+              <Skeleton v-for="n in 6" :key="n" class="h-7 w-full" />
+            </div>
+          </template>
+          <template #error="{ error, retry: retryFetch }">
+            <div class="p-5">
+              <Alert variant="destructive">
+                <AlertDescription class="flex items-center justify-between gap-3">
+                  <span>加载事件失败：{{ error.message }}</span>
+                  <Button size="sm" variant="outline" @click="retryFetch">重试</Button>
+                </AlertDescription>
+              </Alert>
+            </div>
+          </template>
+          <template #empty>
+            <EmptyState title="暂无事件" />
+          </template>
+          <template #default>
         <EmptyState
           v-if="visible.length === 0"
-          :title="rows.length === 0 ? '暂无事件' : '当前筛选条件下没有匹配'"
+          title="当前筛选条件下没有匹配"
         />
         <ul v-else class="divide-y divide-border/50">
           <li
@@ -263,6 +287,8 @@ function highlight(text: string, n: string): HighlightSeg[] {
           </button>
           <span v-else class="text-[11px] text-muted-foreground">已加载到最早事件</span>
         </div>
+          </template>
+        </QueryState>
       </div>
     </Card>
   </div>
