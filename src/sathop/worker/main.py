@@ -16,6 +16,7 @@ import shutil
 import time
 import traceback
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 import psutil
@@ -35,10 +36,17 @@ from sathop.shared.protocol import (
 from . import bundle, downloader, storage
 from .agent import OrchestratorClient
 from .config import Settings, load
-from .processor import run_bundle
+from .processor import ProcessResult, run_bundle
 from .progress import ProgressServer
 
 log = logging.getLogger("sathop.worker")
+
+_PROCESSING_FAILURE_TAIL_CHARS = 2000
+_WORKER_TRACEBACK_TAIL_CHARS = 1500
+_DOWNLOAD_PROGRESS_MIN_INTERVAL_SECONDS = 2.0
+_DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT = 5.0
+_StageTransition = Callable[[str], None]
+_StageExit = Callable[[], None]
 
 
 class Worker:
@@ -173,73 +181,22 @@ class Worker:
                 current = None
 
         try:
-            # Lease wrote state=QUEUED. We hold that bucket until the download
-            # semaphore frees up, then promote QUEUED→DOWNLOADING so the UI
-            # only flags rows whose bytes are actually moving.
-            _enter("queued")
-            paths: list[Path] = []
-            async with self._download_sem:
-                _exit()
-                _enter("downloading")
-                await self._report_state(gid, GranuleState.DOWNLOADING)
-                log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
-                for spec in item.inputs:
-                    dst = input_dir / spec.filename
-                    auth = _auth_for(item.credentials, spec.credential, gid)
-                    cb = self._make_download_progress_cb(gid, spec.filename)
-                    await self.downloader.fetch(spec.url, dst, auth=auth, progress_cb=cb)
-                    if spec.checksum:
-                        await downloader.verify_sha256(dst, spec.checksum)
-                    paths.append(dst)
-            _exit()
-            await self._report_state(gid, GranuleState.DOWNLOADED)
-
-            _enter("processing")
-            await self._report_state(gid, GranuleState.PROCESSING)
-            handle = await asyncio.to_thread(
-                bundle.ensure,
-                item.bundle_ref,
-                self.s.bundle_cache,
-                self.s.venv_cache,
-                self.s.shared_cache,
-                self.s.orchestrator_url,
-                self.s.token,
-            )
-            result = await asyncio.to_thread(
-                run_bundle,
-                handle,
-                gid,
-                item.batch_id,
-                paths,
-                item.meta,
-                self.s.work_root,
-                item.execution_env,
-                progress_url,
-            )
-            _exit()
+            paths = await self._download_inputs(item, input_dir, _enter, _exit)
+            handle, result = await self._process_inputs(item, paths, progress_url, _enter, _exit)
 
             if not result.ok:
                 await self.client.report_failure(
                     ProcessFailure(
                         granule_id=gid,
                         worker_id=self.s.worker_id,
-                        error=(result.stderr or "no output")[-2000:],
+                        error=_processing_failure_message(result.stderr),
                         exit_code=result.exit_code,
                     )
                 )
                 log.warning("[%s] processing failed exit=%s", gid, result.exit_code)
                 return
 
-            await self._report_state(gid, GranuleState.PROCESSED)
-            _enter("uploading")
-            uploaded: list[UploadedObject] = []
-            key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
-            for out in result.outputs:
-                key = _render_key(key_tpl, out, item.meta)
-                uploaded.append(self.storage.put(out, key))
-            await self.client.report_upload(gid, self.s.worker_id, uploaded)
-            _exit()
-            log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
+            await self._upload_outputs(item, handle, result.outputs, _enter, _exit)
 
         except Exception as e:
             log.exception("[%s] unhandled error", gid)
@@ -247,12 +204,11 @@ class Worker:
                 # Carry exception type + tail of traceback so operators can
                 # diagnose without ssh'ing into the worker. Orchestrator caps
                 # the field at 2000 chars; the tail keeps the deepest frames.
-                tb = "".join(traceback.format_exception(e))[-1500:]
                 await self.client.report_failure(
                     ProcessFailure(
                         granule_id=gid,
                         worker_id=self.s.worker_id,
-                        error=f"worker {type(e).__name__}: {e}\n\n{tb}",
+                        error=f"worker {type(e).__name__}: {e}\n\n{_traceback_tail(e)}",
                         exit_code=None,
                     )
                 )
@@ -262,6 +218,90 @@ class Worker:
             _exit()
             self.progress.revoke(nonce)
             shutil.rmtree(work_dir, ignore_errors=True)
+
+    async def _download_inputs(
+        self,
+        item: LeaseItem,
+        input_dir: Path,
+        enter_stage: _StageTransition,
+        exit_stage: _StageExit,
+    ) -> list[Path]:
+        gid = item.granule_id
+        # Lease wrote state=QUEUED. Hold that bucket until the download
+        # semaphore frees up, then promote QUEUED→DOWNLOADING so the UI only
+        # flags rows whose bytes are actually moving.
+        enter_stage("queued")
+        paths: list[Path] = []
+        async with self._download_sem:
+            exit_stage()
+            enter_stage("downloading")
+            await self._report_state(gid, GranuleState.DOWNLOADING)
+            log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
+            for spec in item.inputs:
+                dst = input_dir / spec.filename
+                auth = _auth_for(item.credentials, spec.credential, gid)
+                cb = self._make_download_progress_cb(gid, spec.filename)
+                await self.downloader.fetch(spec.url, dst, auth=auth, progress_cb=cb)
+                if spec.checksum:
+                    await downloader.verify_sha256(dst, spec.checksum)
+                paths.append(dst)
+        exit_stage()
+        await self._report_state(gid, GranuleState.DOWNLOADED)
+        return paths
+
+    async def _process_inputs(
+        self,
+        item: LeaseItem,
+        paths: list[Path],
+        progress_url: str,
+        enter_stage: _StageTransition,
+        exit_stage: _StageExit,
+    ) -> tuple[bundle.BundleHandle, ProcessResult]:
+        gid = item.granule_id
+        enter_stage("processing")
+        await self._report_state(gid, GranuleState.PROCESSING)
+        handle = await asyncio.to_thread(
+            bundle.ensure,
+            item.bundle_ref,
+            self.s.bundle_cache,
+            self.s.venv_cache,
+            self.s.shared_cache,
+            self.s.orchestrator_url,
+            self.s.token,
+        )
+        result = await asyncio.to_thread(
+            run_bundle,
+            handle,
+            gid,
+            item.batch_id,
+            paths,
+            item.meta,
+            self.s.work_root,
+            item.execution_env,
+            progress_url,
+        )
+        exit_stage()
+        return handle, result
+
+    async def _upload_outputs(
+        self,
+        item: LeaseItem,
+        handle: bundle.BundleHandle,
+        outputs: list[Path],
+        enter_stage: _StageTransition,
+        exit_stage: _StageExit,
+    ) -> None:
+        gid = item.granule_id
+        await self._report_state(gid, GranuleState.PROCESSED)
+        enter_stage("uploading")
+        uploaded: list[UploadedObject] = []
+        key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
+        for out in outputs:
+            key = _render_key(key_tpl, out, item.meta)
+            uploaded.append(self.storage.put(out, key))
+        await self.client.report_upload(gid, self.s.worker_id, uploaded)
+        exit_stage()
+        log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
 
     async def _report_state(self, gid: str, state: GranuleState) -> None:
         """Best-effort phase report. A failure here only delays UI state until
@@ -286,18 +326,22 @@ class Worker:
             now = time.monotonic()
             pct = (downloaded / total * 100.0) if total else None
             is_final = pct is not None and pct >= 100.0
-            if not (is_final or now - last_ts >= 2.0 or (pct is not None and pct >= last_pct + 5.0)):
+            enough_time_passed = now - last_ts >= _DOWNLOAD_PROGRESS_MIN_INTERVAL_SECONDS
+            enough_percent_passed = pct is not None and pct >= last_pct + _DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT
+            if not (is_final or enough_time_passed or enough_percent_passed):
                 return
             last_ts = now
             if pct is not None:
                 last_pct = pct
             done = is_final
-            mb = downloaded / 1_000_000
-            detail = f"{mb:.1f}/{total / 1_000_000:.1f} MB" if total else f"{mb:.1f} MB"
             try:
                 await self.client.report_progress(
                     gid,
-                    ProgressEvent(step=f"download:{filename}", pct=pct, detail=detail),
+                    ProgressEvent(
+                        step=f"download:{filename}",
+                        pct=pct,
+                        detail=_download_progress_detail(downloaded, total),
+                    ),
                 )
             except Exception as e:
                 log.debug("[%s] download progress emit failed: %s", gid, e)
@@ -347,6 +391,21 @@ def _auth_for(creds: dict[str, Credential], name: str | None, gid: str) -> Crede
     if c is None:
         log.warning("[%s] credential %r not provided by batch", gid, name)
     return c
+
+
+def _processing_failure_message(stderr: str) -> str:
+    return (stderr or "no output")[-_PROCESSING_FAILURE_TAIL_CHARS:]
+
+
+def _traceback_tail(exc: Exception) -> str:
+    return "".join(traceback.format_exception(exc))[-_WORKER_TRACEBACK_TAIL_CHARS:]
+
+
+def _download_progress_detail(downloaded: int, total: int | None) -> str:
+    downloaded_mb = downloaded / 1_000_000
+    if total:
+        return f"{downloaded_mb:.1f}/{total / 1_000_000:.1f} MB"
+    return f"{downloaded_mb:.1f} MB"
 
 
 def _render_key(template: str, out: Path, meta: dict) -> str:
