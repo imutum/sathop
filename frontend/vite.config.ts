@@ -17,7 +17,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          echarts: ["echarts", "vue-echarts", "zrender"],
           vue: ["vue", "vue-router"],
           query: ["@tanstack/vue-query"],
         },
