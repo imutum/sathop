@@ -63,7 +63,7 @@ const isDark = computed(() => effective.value === "dark");
       </div>
 
       <nav class="flex-1 overflow-y-auto px-3 py-3">
-        <div v-if="!collapsed" class="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/80">
+        <div v-if="!collapsed" class="mb-2 px-2 text-3xs font-semibold uppercase tracking-[0.12em] text-muted-foreground/80">
           控制台
         </div>
         <ul class="space-y-0.5">
@@ -146,7 +146,7 @@ const isDark = computed(() => effective.value === "dark");
           </div>
         </div>
         <nav class="flex-1 overflow-y-auto px-3 py-3">
-          <div class="mb-2 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/80">
+          <div class="mb-2 px-2 text-3xs font-semibold uppercase tracking-[0.12em] text-muted-foreground/80">
             控制台
           </div>
           <ul class="space-y-0.5">

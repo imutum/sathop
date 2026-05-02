@@ -168,14 +168,14 @@ function onUploaded(d: BundleDetail) {
                   <TableCell>
                     <Badge tone="info">{{ b.version }}</Badge>
                   </TableCell>
-                  <TableCell class="text-[11.5px] text-muted-foreground tabular-nums">{{ fmtBytes(b.size) }}</TableCell>
-                  <TableCell class="text-[11.5px] tabular-nums">
+                  <TableCell class="text-cell text-muted-foreground tabular-nums">{{ fmtBytes(b.size) }}</TableCell>
+                  <TableCell class="text-cell tabular-nums">
                     <span v-if="b.in_use_count > 0" class="font-medium text-foreground">
                       {{ b.in_use_count }}
                     </span>
                     <span v-else class="text-muted-foreground/60">0</span>
                   </TableCell>
-                  <TableCell class="px-5 text-[11.5px] text-muted-foreground">{{ fmtAge(b.uploaded_at) }}</TableCell>
+                  <TableCell class="px-5 text-cell text-muted-foreground">{{ fmtAge(b.uploaded_at) }}</TableCell>
                 </TableRow>
               </TableBody>
             </Table>

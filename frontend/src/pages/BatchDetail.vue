@@ -272,7 +272,7 @@ async function confirmDelete() {
       <div class="mt-2">
         <PageHeader :title="b?.name ?? batchId">
           <template #description>
-            <span class="inline-flex items-center font-mono text-[11.5px] text-muted-foreground">
+            <span class="inline-flex items-center font-mono text-cell text-muted-foreground">
               {{ batchId }}
               <CopyButton :value="batchId" title="复制批次 ID" />
             </span>

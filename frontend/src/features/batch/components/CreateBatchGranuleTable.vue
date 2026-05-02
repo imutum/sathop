@@ -93,7 +93,7 @@ async function removeRow(idx: number) {
             </th>
             <th class="px-2 py-1.5"></th>
           </tr>
-          <tr class="text-[10px] normal-case">
+          <tr class="text-3xs normal-case">
             <th></th>
             <template v-for="s in schema.slots" :key="`sub-${s.name}`">
               <th class="px-2 py-1 text-muted-foreground">url</th>

@@ -8,7 +8,7 @@ defineProps<{ title: string; count?: number }>();
       <span>{{ title }}</span>
       <span
         v-if="count !== undefined"
-        class="rounded-full bg-muted px-1.5 py-px text-[10px] tabular-nums text-muted-foreground"
+        class="rounded-full bg-muted px-1.5 py-px text-3xs tabular-nums text-muted-foreground"
       >
         {{ count }}
       </span>

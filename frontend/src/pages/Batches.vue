@@ -314,7 +314,7 @@ function onCreated() {
                 {{ r.b.bundle_ref }}
               </div>
               <div>
-                <div class="mb-1 flex flex-wrap items-center justify-between gap-2 text-[11.5px]">
+                <div class="mb-1 flex flex-wrap items-center justify-between gap-2 text-cell">
                   <span class="tabular-nums">
                     <span class="font-medium text-foreground">{{ r.done }}</span>
                     <span class="text-muted-foreground"> / {{ r.total }}</span>
@@ -406,7 +406,7 @@ function onCreated() {
                       </div>
                     </RouterLink>
                   </TableCell>
-                  <TableCell class="py-3.5 font-mono text-[11.5px] text-muted-foreground">
+                  <TableCell class="py-3.5 font-mono text-cell text-muted-foreground">
                     <RouterLink
                       v-if="r.bundleLink"
                       :to="{
@@ -424,7 +424,7 @@ function onCreated() {
                     <Badge tone="info">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
                   </TableCell>
                   <TableCell class="w-[280px] py-3.5">
-                    <div class="mb-1 flex items-center justify-between text-[11.5px]">
+                    <div class="mb-1 flex items-center justify-between text-cell">
                       <span class="tabular-nums">
                         <span class="font-medium text-foreground">{{ r.done }}</span>
                         <span class="text-muted-foreground"> / {{ r.total }}</span>
@@ -454,7 +454,7 @@ function onCreated() {
                       :tone="r.errors > 0 || r.b.objects_exhausted > 0 ? 'warn' : 'good'"
                     />
                   </TableCell>
-                  <TableCell class="py-3.5 text-[11.5px] text-muted-foreground">{{ fmtAge(r.b.created_at) }}</TableCell>
+                  <TableCell class="py-3.5 text-cell text-muted-foreground">{{ fmtAge(r.b.created_at) }}</TableCell>
                   <TableCell class="space-x-1.5 whitespace-nowrap px-5 py-3.5 text-right">
                     <Button
                       v-if="r.errors > 0"

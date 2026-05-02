@@ -50,11 +50,11 @@ function parts(path: string) {
           <span class="truncate">
             <span v-if="parts(f.path).depth > 0" class="mr-1 select-none text-muted-foreground/50">└</span>
             {{ parts(f.path).leaf }}
-            <span v-if="parts(f.path).dir" class="ml-2 text-[10px] text-muted-foreground/60">
+            <span v-if="parts(f.path).dir" class="ml-2 text-3xs text-muted-foreground/60">
               {{ parts(f.path).dir }}/
             </span>
           </span>
-          <span class="ml-2 shrink-0 text-[10px] text-muted-foreground">{{ fmtBytes(f.size) }}</span>
+          <span class="ml-2 shrink-0 text-3xs text-muted-foreground">{{ fmtBytes(f.size) }}</span>
         </button>
       </li>
     </ul>

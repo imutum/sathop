@@ -21,6 +21,6 @@ defineEmits<{ "update:modelValue": [v: string] }>();
         mono ? 'font-mono text-2xs' : 'text-xs',
       ]"
     />
-    <div v-if="error" class="mt-0.5 text-[10px] text-danger">{{ error }}</div>
+    <div v-if="error" class="mt-0.5 text-3xs text-danger">{{ error }}</div>
   </div>
 </template>

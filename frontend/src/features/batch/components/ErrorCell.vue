@@ -18,7 +18,7 @@ const isLong = computed(() => {
       <button
         type="button"
         @click="open = true"
-        class="mt-1 rounded-md bg-danger/15 px-1.5 py-0.5 text-[10px] font-medium text-danger transition hover:bg-danger/25"
+        class="mt-1 rounded-md bg-danger/15 px-1.5 py-0.5 text-3xs font-medium text-danger transition hover:bg-danger/25"
       >
         展开完整错误（{{ error.length }} 字符）
       </button>
@@ -28,7 +28,7 @@ const isLong = computed(() => {
       <button
         type="button"
         @click="open = false"
-        class="mt-1 rounded-md bg-danger/15 px-1.5 py-0.5 text-[10px] font-medium text-danger transition hover:bg-danger/25"
+        class="mt-1 rounded-md bg-danger/15 px-1.5 py-0.5 text-3xs font-medium text-danger transition hover:bg-danger/25"
       >
         收起
       </button>

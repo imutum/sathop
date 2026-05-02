@@ -65,7 +65,7 @@ function stripBatchPrefix(gid: string) {
             >
               {{ expanded === g.granule_id ? "▾" : "▸" }}
             </button>
-            <span class="break-all font-mono text-[11.5px]">{{ stripBatchPrefix(g.granule_id) }}</span>
+            <span class="break-all font-mono text-cell">{{ stripBatchPrefix(g.granule_id) }}</span>
             <LatestProgressLine
               v-if="latestProgress[g.granule_id]"
               :row="latestProgress[g.granule_id]"
@@ -97,7 +97,7 @@ function stripBatchPrefix(gid: string) {
           </span>
           <span>{{ fmtAge(g.updated_at) }}</span>
         </div>
-        <div v-if="g.error" class="font-mono text-[11.5px] text-danger">
+        <div v-if="g.error" class="font-mono text-cell text-danger">
           <ErrorCell :error="g.error" />
         </div>
         <div
@@ -153,7 +153,7 @@ function stripBatchPrefix(gid: string) {
             :ref="(el) => emit('rowRef', g.granule_id, el as Element | null)"
             :class="['align-top', g.granule_id === highlight ? 'bg-accent/40' : '']"
           >
-            <TableCell class="px-5 py-2.5 font-mono text-[11.5px]">
+            <TableCell class="px-5 py-2.5 font-mono text-cell">
               <button
                 @click="emit('toggle', g.granule_id)"
                 class="mr-1 inline-block w-3 text-muted-foreground hover:text-foreground"
@@ -178,8 +178,8 @@ function stripBatchPrefix(gid: string) {
                 </span>
               </div>
             </TableCell>
-            <TableCell class="py-2.5 text-[11.5px] tabular-nums">{{ g.retry_count }}</TableCell>
-            <TableCell class="py-2.5 font-mono text-[11.5px] text-muted-foreground">
+            <TableCell class="py-2.5 text-cell tabular-nums">{{ g.retry_count }}</TableCell>
+            <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">
               <RouterLink
                 v-if="g.leased_by"
                 :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
@@ -190,8 +190,8 @@ function stripBatchPrefix(gid: string) {
               </RouterLink>
               <template v-else>—</template>
             </TableCell>
-            <TableCell class="py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
-            <TableCell class="max-w-[320px] py-2.5 font-mono text-[11.5px] text-danger">
+            <TableCell class="py-2.5 text-cell text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
+            <TableCell class="max-w-[320px] py-2.5 font-mono text-cell text-danger">
               <ErrorCell :error="g.error" />
             </TableCell>
             <TableCell class="space-x-1 whitespace-nowrap px-5 py-2.5 text-right">

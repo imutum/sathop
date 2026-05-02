@@ -217,13 +217,13 @@ function fmtHours(h: number): string {
             title="跳转到该数据粒详情"
             @click="gotoGranule(g.batch_id, g.granule_id)"
           >
-            <TableCell class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</TableCell>
-            <TableCell class="py-2.5 font-mono text-[11.5px] text-muted-foreground">{{ g.batch_id }}</TableCell>
+            <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
+            <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">{{ g.batch_id }}</TableCell>
             <TableCell class="py-2.5">
               <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
             </TableCell>
             <TableCell
-              class="py-2.5 font-mono text-[11.5px] text-muted-foreground"
+              class="py-2.5 font-mono text-cell text-muted-foreground"
               @click.stop
             >
               <RouterLink
@@ -236,7 +236,7 @@ function fmtHours(h: number): string {
               </RouterLink>
               <template v-else>—</template>
             </TableCell>
-            <TableCell class="px-5 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
+            <TableCell class="px-5 py-2.5 text-cell text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
           </TableRow>
         </TableBody>
       </Table>
@@ -273,13 +273,13 @@ function fmtHours(h: number): string {
             title="跳转到该数据粒详情"
             @click="gotoGranule(g.batch_id, g.granule_id)"
           >
-            <TableCell class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</TableCell>
-            <TableCell class="py-2.5 font-mono text-[11.5px] text-muted-foreground">{{ g.batch_id }}</TableCell>
+            <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
+            <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">{{ g.batch_id }}</TableCell>
             <TableCell class="py-2.5">
               <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
             </TableCell>
             <TableCell
-              class="py-2.5 font-mono text-[11.5px] text-muted-foreground"
+              class="py-2.5 font-mono text-cell text-muted-foreground"
               @click.stop
             >
               <RouterLink
@@ -291,10 +291,10 @@ function fmtHours(h: number): string {
               </RouterLink>
               <template v-else>—</template>
             </TableCell>
-            <TableCell class="py-2.5 text-[11.5px] text-warning tabular-nums">
+            <TableCell class="py-2.5 text-cell text-warning tabular-nums">
               {{ fmtHours(g.age_hours) }}
             </TableCell>
-            <TableCell class="max-w-[320px] truncate px-5 py-2.5 font-mono text-[11.5px] text-danger">
+            <TableCell class="max-w-[320px] truncate px-5 py-2.5 font-mono text-cell text-danger">
               {{ g.error ?? "—" }}
             </TableCell>
           </TableRow>
@@ -311,7 +311,7 @@ function fmtHours(h: number): string {
         <div
           v-for="e in lastEvents"
           :key="e.id"
-          class="flex items-center gap-3 px-5 py-2.5 font-mono text-[11.5px] transition hover:bg-muted/50"
+          class="flex items-center gap-3 px-5 py-2.5 font-mono text-cell transition hover:bg-muted/50"
         >
           <span class="w-20 shrink-0 text-muted-foreground">{{ fmtAge(e.ts) }}</span>
           <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>

@@ -128,7 +128,7 @@ async function download() {
 
     <BundleSection title="输入槽位 · slots" :count="slots.length">
       <div v-if="slots.length === 0" class="text-xs text-muted-foreground">未声明</div>
-      <table v-else class="w-full font-mono text-[11.5px]">
+      <table v-else class="w-full font-mono text-cell">
         <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
             <th class="py-1.5 pr-3 text-left font-normal">name</th>
@@ -149,7 +149,7 @@ async function download() {
     </BundleSection>
 
     <BundleSection v-if="metaFields.length > 0" title="元字段 · meta" :count="metaFields.length">
-      <table class="w-full font-mono text-[11.5px]">
+      <table class="w-full font-mono text-cell">
         <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
             <th class="py-1.5 pr-3 text-left font-normal">name</th>
@@ -186,13 +186,13 @@ async function download() {
 
     <BundleSection title="Python 依赖 · pip" :count="pip.length">
       <div v-if="pip.length === 0" class="text-xs text-muted-foreground">无</div>
-      <ul v-else class="space-y-0.5 font-mono text-[11.5px]">
+      <ul v-else class="space-y-0.5 font-mono text-cell">
         <li v-for="p in pip" :key="p">{{ p }}</li>
       </ul>
     </BundleSection>
 
     <BundleSection v-if="apt.length > 0" title="系统依赖 · apt" :count="apt.length">
-      <ul class="space-y-0.5 font-mono text-[11.5px]">
+      <ul class="space-y-0.5 font-mono text-cell">
         <li v-for="p in apt" :key="p">{{ p }}</li>
       </ul>
     </BundleSection>
@@ -202,7 +202,7 @@ async function download() {
       title="默认环境变量"
       :count="envEntries.length"
     >
-      <table class="w-full font-mono text-[11.5px]">
+      <table class="w-full font-mono text-cell">
         <tbody>
           <tr v-for="[k, v] in envEntries" :key="k" class="border-t border-border/50">
             <td class="py-1.5 pr-3 text-muted-foreground">{{ k }}</td>

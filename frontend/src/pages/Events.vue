@@ -231,7 +231,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
           <li
             v-for="e in visible"
             :key="e.id"
-            class="flex items-start gap-3 px-5 py-2 text-[11.5px] transition hover:bg-muted/40"
+            class="flex items-start gap-3 px-5 py-2 text-cell transition hover:bg-muted/40"
           >
             <span class="w-20 shrink-0 text-muted-foreground">{{ fmtAge(e.ts) }}</span>
             <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>
@@ -253,7 +253,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
                 v-if="isLong(e.message)"
                 type="button"
                 @click.stop="toggle(e.id)"
-                class="ml-2 text-[10px] text-muted-foreground hover:text-primary"
+                class="ml-2 text-3xs text-muted-foreground hover:text-primary"
               >
                 {{ expanded.has(e.id) ? "收起" : "展开" }}
               </button>
@@ -280,7 +280,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
             type="button"
             @click="loadOlder"
             :disabled="loadingOlder"
-            class="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-[11.5px] text-muted-foreground transition hover:border-primary/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            class="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-cell text-muted-foreground transition hover:border-primary/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Loader2Icon v-if="loadingOlder" class="size-3 animate-spin" />
             {{ loadingOlder ? "加载中…" : "加载更早事件" }}

@@ -16,7 +16,7 @@ const rows = computed(() => q.data.value ?? []);
 
 <template>
   <div v-if="q.isLoading.value" class="text-xs text-muted-foreground">加载中…</div>
-  <div v-else-if="rows.length === 0" class="text-[11.5px] text-muted-foreground">
+  <div v-else-if="rows.length === 0" class="text-cell text-muted-foreground">
     暂无进度上报（bundle 可能未接入 $SATHOP_PROGRESS_URL）
   </div>
   <ol v-else class="space-y-1.5 border-l border-border pl-4 text-xs">

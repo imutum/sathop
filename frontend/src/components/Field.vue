@@ -10,7 +10,7 @@ defineProps<{ label: string; mono?: boolean; hint?: string }>();
     <div
       :class="[
         'mt-1.5 flex items-center break-all',
-        mono ? 'font-mono text-[11.5px]' : 'text-sm',
+        mono ? 'font-mono text-cell' : 'text-sm',
       ]"
     >
       <slot />

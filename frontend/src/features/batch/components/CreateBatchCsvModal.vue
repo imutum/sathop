@@ -103,7 +103,7 @@ const onSubmit = handleSubmit((vals) => {
     <h3 class="font-display mb-2 text-base font-semibold">粘贴 CSV / TSV</h3>
     <div class="mb-3 text-2xs text-muted-foreground">
       第一行必须是表头，列顺序不限。自动识别逗号或 Tab 分隔。
-      <code class="font-mono text-[10px] text-muted-foreground">.size / .checksum / .credential</code> 列可选。
+      <code class="font-mono text-3xs text-muted-foreground">.size / .checksum / .credential</code> 列可选。
     </div>
     <form @submit.prevent="onSubmit">
       <FormField v-slot="{ componentField }" name="text">

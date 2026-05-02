@@ -56,12 +56,18 @@ export default {
       },
       fontSize: {
         // Sub-text-xs scale for the dense admin UI. Names follow the
-        // Shadboard convention: 2xs sits below Tailwind's xs (12px), and
-        // `mini` is the uppercase-tracked label size used by Field /
-        // FieldLabel / Stat headers. Adding a literal here is preferred
-        // over `text-[NNpx]` so future tweaks happen in one file.
-        "2xs": ["11px", "15px"],
+        // Shadboard convention; 2xs sits below Tailwind's xs (12px).
+        // Adding a literal here is preferred over `text-[NNpx]` so
+        // future tweaks happen in one file.
+        //
+        //   3xs   10px    smallest captions
+        //   mini  10.5px  uppercase mini-labels (Field / Stat / kbd)
+        //   2xs   11px    dense small UI
+        //   cell  11.5px  mono table cells / row metadata
+        "3xs": ["10px", "14px"],
         mini: ["10.5px", "14px"],
+        "2xs": ["11px", "15px"],
+        cell: ["11.5px", "16px"],
       },
       fontFamily: {
         sans: [

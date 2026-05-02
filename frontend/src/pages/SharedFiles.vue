@@ -148,18 +148,18 @@ function onUploaded() {
               <TableBody>
                 <TableRow v-for="f in files" :key="f.name">
                   <TableCell class="px-5 py-3 font-mono text-[12px] font-medium">{{ f.name }}</TableCell>
-                  <TableCell class="py-3 text-[11.5px] text-muted-foreground tabular-nums">
+                  <TableCell class="py-3 text-cell text-muted-foreground tabular-nums">
                     {{ fmtBytes(f.size) }}
                   </TableCell>
-                  <TableCell class="py-3 text-[11.5px]">
+                  <TableCell class="py-3 text-cell">
                     <span class="font-mono" :title="f.sha256">{{ f.sha256.slice(0, 12) }}…</span>
                     <CopyButton :value="f.sha256" title="复制完整 SHA256" />
                   </TableCell>
-                  <TableCell class="py-3 text-[11.5px] text-muted-foreground">
+                  <TableCell class="py-3 text-cell text-muted-foreground">
                     <template v-if="f.description">{{ f.description }}</template>
                     <span v-else class="text-muted-foreground/50">—</span>
                   </TableCell>
-                  <TableCell class="py-3 text-[11.5px] text-muted-foreground">{{ fmtAge(f.uploaded_at) }}</TableCell>
+                  <TableCell class="py-3 text-cell text-muted-foreground">{{ fmtAge(f.uploaded_at) }}</TableCell>
                   <TableCell class="px-5 py-3 text-right">
                     <div class="inline-flex gap-1.5">
                       <Button size="sm" @click="replaceTarget = f">替换</Button>
