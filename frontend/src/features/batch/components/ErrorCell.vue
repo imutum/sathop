@@ -24,7 +24,7 @@ const isLong = computed(() => {
       </button>
     </span>
     <span v-else class="block">
-      <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-danger/30 bg-danger/5 p-2.5 text-[11px]">{{ error }}</pre>
+      <pre class="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-danger/30 bg-danger/5 p-2.5 text-2xs">{{ error }}</pre>
       <button
         type="button"
         @click="open = false"

@@ -406,7 +406,7 @@ async function confirmDelete() {
           <CardDescription>按级别筛选 · 仅本批次的事件</CardDescription>
         </div>
         <div class="flex items-center gap-3">
-          <span class="text-[11px] text-muted-foreground tabular-nums">
+          <span class="text-2xs text-muted-foreground tabular-nums">
             {{ eventCountLabel }}
           </span>
           <Segmented

@@ -134,7 +134,7 @@ function onUploaded(d: BundleDetail) {
                   <div class="min-w-0 flex-1 truncate font-mono text-[12px] font-medium">{{ b.name }}</div>
                   <Badge tone="info">{{ b.version }}</Badge>
                 </div>
-                <div class="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                <div class="mt-2 flex items-center justify-between text-2xs text-muted-foreground">
                   <span class="tabular-nums">{{ fmtBytes(b.size) }}</span>
                   <span class="tabular-nums">
                     <span v-if="b.in_use_count > 0" class="font-medium text-foreground">{{ b.in_use_count }}</span>

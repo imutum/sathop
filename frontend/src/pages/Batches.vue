@@ -292,7 +292,7 @@ function onCreated() {
                   <div class="truncate font-medium text-foreground transition hover:text-primary">
                     {{ r.b.name }}
                   </div>
-                  <div class="mt-0.5 inline-flex items-center font-mono text-[11px] text-muted-foreground">
+                  <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground">
                     {{ r.b.batch_id }}
                     <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
                   </div>
@@ -305,12 +305,12 @@ function onCreated() {
                   path: '/bundles',
                   query: { name: r.bundleLink.name, version: r.bundleLink.version },
                 }"
-                class="block truncate font-mono text-[11px] text-muted-foreground transition hover:text-primary"
+                class="block truncate font-mono text-2xs text-muted-foreground transition hover:text-primary"
                 title="在任务包页查看"
               >
                 {{ r.b.bundle_ref }}
               </RouterLink>
-              <div v-else class="truncate font-mono text-[11px] text-muted-foreground">
+              <div v-else class="truncate font-mono text-2xs text-muted-foreground">
                 {{ r.b.bundle_ref }}
               </div>
               <div>
@@ -345,7 +345,7 @@ function onCreated() {
                 />
               </div>
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="text-[11px] text-muted-foreground">{{ fmtAge(r.b.created_at) }}</span>
+                <span class="text-2xs text-muted-foreground">{{ fmtAge(r.b.created_at) }}</span>
                 <div class="flex flex-wrap gap-1.5">
                   <Button
                     v-if="r.errors > 0"
@@ -400,7 +400,7 @@ function onCreated() {
                   <TableCell class="px-5 py-3.5">
                     <RouterLink :to="`/batches/${r.b.batch_id}`" class="block">
                       <div class="font-medium text-foreground transition hover:text-primary">{{ r.b.name }}</div>
-                      <div class="mt-0.5 inline-flex items-center font-mono text-[11px] text-muted-foreground">
+                      <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground">
                         {{ r.b.batch_id }}
                         <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
                       </div>

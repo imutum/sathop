@@ -149,7 +149,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
       description="所有 Orchestrator / Worker / Receiver 上报事件的合并视图"
     >
       <template #actions>
-        <span class="rounded-full border border-border bg-muted px-3 py-1 text-[11px] font-medium tabular-nums text-muted-foreground">
+        <span class="rounded-full border border-border bg-muted px-3 py-1 text-2xs font-medium tabular-nums text-muted-foreground">
           <span class="text-foreground">{{ visible.length }}</span> / {{ rows.length }} 条
         </span>
       </template>
@@ -285,7 +285,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
             <Loader2Icon v-if="loadingOlder" class="size-3 animate-spin" />
             {{ loadingOlder ? "加载中…" : "加载更早事件" }}
           </button>
-          <span v-else class="text-[11px] text-muted-foreground">已加载到最早事件</span>
+          <span v-else class="text-2xs text-muted-foreground">已加载到最早事件</span>
         </div>
           </template>
         </QueryState>

@@ -58,7 +58,7 @@ const isDark = computed(() => effective.value === "dark");
         </div>
         <div v-if="!collapsed" class="min-w-0">
           <div class="font-display text-[15px] font-semibold leading-none">SatHop</div>
-          <div class="mt-1 text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
+          <div class="mt-1 text-mini uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
         </div>
       </div>
 
@@ -142,7 +142,7 @@ const isDark = computed(() => effective.value === "dark");
           </div>
           <div class="min-w-0">
             <div class="font-display text-[15px] font-semibold leading-none">SatHop</div>
-            <div class="mt-1 text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
+            <div class="mt-1 text-mini uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
           </div>
         </div>
         <nav class="flex-1 overflow-y-auto px-3 py-3">
@@ -208,7 +208,7 @@ const isDark = computed(() => effective.value === "dark");
         <div class="flex items-center gap-2">
           <span
             :class="[
-              'hidden items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] font-medium md:inline-flex',
+              'hidden items-center gap-2 rounded-full border px-2.5 py-1 text-2xs font-medium md:inline-flex',
               connected
                 ? 'border-success/30 bg-success/10 text-success'
                 : 'border-border bg-muted text-muted-foreground',

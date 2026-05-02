@@ -101,7 +101,7 @@ const onSubmit = handleSubmit((vals) => {
 <template>
   <Modal width-class="w-[720px]" :z-index="60" :dirty="meta.dirty" @close="emit('close')">
     <h3 class="font-display mb-2 text-base font-semibold">粘贴 CSV / TSV</h3>
-    <div class="mb-3 text-[11px] text-muted-foreground">
+    <div class="mb-3 text-2xs text-muted-foreground">
       第一行必须是表头，列顺序不限。自动识别逗号或 Tab 分隔。
       <code class="font-mono text-[10px] text-muted-foreground">.size / .checksum / .credential</code> 列可选。
     </div>
@@ -112,7 +112,7 @@ const onSubmit = handleSubmit((vals) => {
             <Textarea
               v-bind="componentField"
               rows="14"
-              class="font-mono text-[11px]"
+              class="font-mono text-2xs"
             />
           </FormControl>
           <FormMessage />

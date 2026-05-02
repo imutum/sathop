@@ -55,7 +55,7 @@ const year = new Date().getFullYear();
           </div>
           <div>
             <div class="font-display text-lg font-semibold">SatHop</div>
-            <div class="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
+            <div class="text-2xs uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
           </div>
         </div>
 
@@ -70,15 +70,15 @@ const year = new Date().getFullYear();
           <p class="max-w-sm text-sm leading-relaxed text-muted-foreground">
             基于 lease 的分布式管线 · SQLite 单事实状态 · 实时事件流 · 用户脚本任务包热插拔。
           </p>
-          <div class="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <div class="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
             <span v-for="t in ['Orchestrator', 'Worker', 'Receiver', 'Bundle Registry']" :key="t"
-                  class="rounded-full border border-border bg-background/80 px-2.5 py-1 font-mono text-[10.5px] text-muted-foreground backdrop-blur">
+                  class="rounded-full border border-border bg-background/80 px-2.5 py-1 font-mono text-mini text-muted-foreground backdrop-blur">
               {{ t }}
             </span>
           </div>
         </div>
 
-        <div class="text-[11px] text-muted-foreground">
+        <div class="text-2xs text-muted-foreground">
           © {{ year }} SatHop · Pull-based · HTTP-only
         </div>
       </div>
@@ -91,7 +91,7 @@ const year = new Date().getFullYear();
         <div class="mb-6">
           <div class="font-display text-xl font-semibold">欢迎回来</div>
           <p class="mt-1.5 text-xs text-muted-foreground">
-            使用 Orchestrator 的 <code class="rounded bg-muted px-1 py-0.5 font-mono text-[10.5px]">SATHOP_TOKEN</code> 登录。
+            使用 Orchestrator 的 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">SATHOP_TOKEN</code> 登录。
           </p>
         </div>
 
@@ -123,7 +123,7 @@ const year = new Date().getFullYear();
           {{ probing ? "验证中…" : "进入控制台" }}
         </button>
 
-        <div class="mt-6 border-t border-border pt-4 text-[11px] leading-relaxed text-muted-foreground">
+        <div class="mt-6 border-t border-border pt-4 text-2xs leading-relaxed text-muted-foreground">
           令牌仅保存在本浏览器 localStorage。
           如需轮换，请在 Orchestrator 容器重新设置 <span class="font-mono text-foreground">SATHOP_TOKEN</span>。
         </div>

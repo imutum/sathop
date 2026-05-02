@@ -251,7 +251,7 @@ function onForget(n: string) {
 <template>
   <Modal width-class="w-[min(1200px,95vw)]" :dirty="dirty" @close="tryClose">
     <h2 class="font-display mb-1 text-lg font-semibold">新建任务</h2>
-    <div class="mb-4 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+    <div class="mb-4 flex items-center gap-1.5 text-2xs text-muted-foreground">
       <span>提示：</span>
       <kbd class="kbd">Ctrl</kbd>
       <span>+</span>
@@ -321,7 +321,7 @@ function onForget(n: string) {
             </SelectInput>
           </FormControl>
           <FormMessage />
-          <div v-if="(bundles.data.value ?? []).length === 0" class="text-[11px] text-warning">
+          <div v-if="(bundles.data.value ?? []).length === 0" class="text-2xs text-warning">
             尚无已注册任务包。先到"任务包"页上传一个 ZIP。
           </div>
         </FormItem>
@@ -329,7 +329,7 @@ function onForget(n: string) {
 
       <div
         v-if="bundleDetail.data.value && schema"
-        class="rounded-lg border border-border bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground"
+        class="rounded-lg border border-border bg-muted/40 px-3 py-2 text-2xs text-muted-foreground"
       >
         <div>
           入口：

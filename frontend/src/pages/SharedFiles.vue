@@ -63,9 +63,9 @@ function onUploaded() {
     <PageHeader title="共享文件">
       <template #description>
         被任务包通过
-        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">shared_files</code>
+        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs">shared_files</code>
         引用的辅助资源，Worker 按需拉取到
-        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">$SATHOP_SHARED_DIR</code>。
+        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs">$SATHOP_SHARED_DIR</code>。
       </template>
       <template #actions>
         <Button variant="default" @click="showUpload = true">
@@ -107,17 +107,17 @@ function onUploaded() {
           <ul class="divide-y divide-border/60 sm:hidden">
             <li v-for="f in files" :key="f.name" class="space-y-2 p-4">
               <div class="font-mono text-[12px] font-medium">{{ f.name }}</div>
-              <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+              <div class="flex items-center justify-between text-2xs text-muted-foreground">
                 <span class="tabular-nums">{{ fmtBytes(f.size) }}</span>
                 <span class="tabular-nums">{{ fmtAge(f.uploaded_at) }}</span>
               </div>
-              <div class="flex items-center text-[11px]">
+              <div class="flex items-center text-2xs">
                 <span class="font-mono text-muted-foreground" :title="f.sha256">
                   {{ f.sha256.slice(0, 12) }}…
                 </span>
                 <CopyButton :value="f.sha256" title="复制完整 SHA256" />
               </div>
-              <div v-if="f.description" class="text-[11px] text-muted-foreground">{{ f.description }}</div>
+              <div v-if="f.description" class="text-2xs text-muted-foreground">{{ f.description }}</div>
               <div class="flex justify-end gap-1.5">
                 <Button size="sm" @click="replaceTarget = f">替换</Button>
                 <Button

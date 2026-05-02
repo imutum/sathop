@@ -81,7 +81,7 @@ function stripBatchPrefix(gid: string) {
             </span>
           </div>
         </div>
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-2xs text-muted-foreground">
           <span class="tabular-nums">重试 {{ g.retry_count }}</span>
           <span class="font-mono">
             领取方:

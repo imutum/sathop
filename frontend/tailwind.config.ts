@@ -54,6 +54,15 @@ export default {
         xl: "0.5rem",
         "2xl": "0.5rem",
       },
+      fontSize: {
+        // Sub-text-xs scale for the dense admin UI. Names follow the
+        // Shadboard convention: 2xs sits below Tailwind's xs (12px), and
+        // `mini` is the uppercase-tracked label size used by Field /
+        // FieldLabel / Stat headers. Adding a literal here is preferred
+        // over `text-[NNpx]` so future tweaks happen in one file.
+        "2xs": ["11px", "15px"],
+        mini: ["10.5px", "14px"],
+      },
       fontFamily: {
         sans: [
           '"Geist"',

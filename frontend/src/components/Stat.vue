@@ -43,7 +43,7 @@ const baseCls = computed(
 <template>
   <component :is="to ? RouterLink : 'div'" :to="to" :class="baseCls">
     <div class="flex items-center justify-between">
-      <span class="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+      <span class="flex items-center gap-2 text-2xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
         <span :class="['h-1.5 w-1.5 rounded-full', dotCls]" aria-hidden />
         {{ label }}
       </span>

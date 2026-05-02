@@ -45,7 +45,7 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
           <span class="truncate">{{ receiver.receiver_id }}</span>
           <CopyButton :value="receiver.receiver_id" title="复制接收端 ID" />
         </div>
-        <div class="mt-0.5 text-[11px] text-muted-foreground">
+        <div class="mt-0.5 text-2xs text-muted-foreground">
           平台 · {{ PLATFORM_ZH[receiver.platform] ?? receiver.platform }}
         </div>
       </div>
@@ -78,7 +78,7 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
     <div class="flex items-center justify-end gap-3 border-t border-border/60 px-5 py-2.5">
       <RouterLink
         :to="`/events?source=${encodeURIComponent(receiver.receiver_id)}`"
-        class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-[10.5px] text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+        class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-primary"
         title="查看该接收端的事件流"
       >
         <Icon name="events" :size="11" />

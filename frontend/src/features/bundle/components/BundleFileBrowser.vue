@@ -41,7 +41,7 @@ function parts(path: string) {
           :title="f.path"
           :style="{ paddingLeft: `${8 + parts(f.path).depth * 14}px` }"
           :class="[
-            'flex w-full items-center justify-between px-2 py-1 text-left font-mono text-[11px] transition',
+            'flex w-full items-center justify-between px-2 py-1 text-left font-mono text-2xs transition',
             f.path === sel
               ? 'bg-accent text-primary'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -64,7 +64,7 @@ function parts(path: string) {
         读取失败：{{ (content.error.value as Error).message }}
       </div>
       <div v-else-if="content.data.value">
-        <div class="flex items-center justify-between border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
+        <div class="flex items-center justify-between border-b border-border px-3 py-2 text-2xs text-muted-foreground">
           <span class="font-mono">{{ content.data.value.path }}</span>
           <span class="flex gap-2">
             <span class="tabular-nums">{{ fmtBytes(content.data.value.size) }}</span>
@@ -78,7 +78,7 @@ function parts(path: string) {
         </div>
         <pre
           v-else
-          class="max-h-[400px] overflow-auto whitespace-pre p-3 font-mono text-[11px] leading-relaxed"
+          class="max-h-[400px] overflow-auto whitespace-pre p-3 font-mono text-2xs leading-relaxed"
         >{{ content.data.value.content }}</pre>
       </div>
     </div>

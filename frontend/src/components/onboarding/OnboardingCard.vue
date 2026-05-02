@@ -39,9 +39,9 @@ const STEPS: Step[] = [
         <p class="mt-3 flex-1 text-xs leading-relaxed text-muted-foreground">
           <template v-if="i === 0">
             在 worker 主机上配置
-            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10.5px] text-foreground">deploy/worker/.env</code>，
+            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-mini text-foreground">deploy/worker/.env</code>，
             <br />
-            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10.5px] text-foreground">docker compose up -d</code>
+            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-mini text-foreground">docker compose up -d</code>
             拉起即可注册。
           </template>
           <template v-else-if="i === 1">用户脚本入口、依赖、输入/输出契约。</template>

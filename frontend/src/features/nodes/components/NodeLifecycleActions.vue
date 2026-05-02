@@ -50,7 +50,7 @@ async function forget() {
       @click="toggle"
       :title="enabled ? (disableTitle ?? '禁用此节点') : '重新启用此节点'"
       :class="[
-        'rounded-md border px-2 py-0.5 text-[10.5px] font-medium transition disabled:opacity-50',
+        'rounded-md border px-2 py-0.5 text-mini font-medium transition disabled:opacity-50',
         enabled
           ? 'border-border bg-background text-muted-foreground hover:border-danger/40 hover:text-danger'
           : 'border-success/30 bg-success/10 text-success hover:bg-success/15',
@@ -64,7 +64,7 @@ async function forget() {
       :disabled="pending"
       @click="forget"
       :title="forgetTitle ?? '永久从注册表中删除'"
-      class="rounded-md border border-danger/30 bg-danger/10 px-2 py-0.5 text-[10.5px] font-medium text-danger transition hover:bg-danger/15 disabled:opacity-50"
+      class="rounded-md border border-danger/30 bg-danger/10 px-2 py-0.5 text-mini font-medium text-danger transition hover:bg-danger/15 disabled:opacity-50"
     >
       {{ pending ? "…" : "移除" }}
     </button>

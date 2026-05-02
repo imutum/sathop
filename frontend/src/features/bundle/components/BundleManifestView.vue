@@ -175,7 +175,7 @@ async function download() {
           v-for="n in sharedFiles"
           :key="n"
           to="/shared"
-          class="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 font-mono text-[11px] text-muted-foreground transition hover:bg-accent hover:text-primary"
+          class="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 font-mono text-2xs text-muted-foreground transition hover:bg-accent hover:text-primary"
           title="跳转到「共享文件」页"
         >
           {{ n }}

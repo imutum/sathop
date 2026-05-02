@@ -19,7 +19,7 @@ const rows = computed(() => q.data.value ?? []);
     <span
       v-for="r in rows"
       :key="r.id"
-      class="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1 font-mono text-[11px] shadow-soft"
+      class="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1 font-mono text-2xs shadow-soft"
     >
       <span class="text-muted-foreground">{{ TIMING_STAGE_ZH[r.stage] }}</span>
       <span class="text-foreground">{{ fmtMs(r.duration_ms) }}</span>

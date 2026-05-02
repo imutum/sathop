@@ -114,7 +114,7 @@ function onKey(e: KeyboardEvent) {
             <span class="truncate">{{ worker.worker_id }}</span>
             <CopyButton :value="worker.worker_id" title="复制节点 ID" />
           </div>
-          <div class="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" :title="worker.public_url ?? ''">
+          <div class="mt-0.5 truncate font-mono text-2xs text-muted-foreground" :title="worker.public_url ?? ''">
             {{ worker.public_url ?? "—" }}
           </div>
         </div>
@@ -152,7 +152,7 @@ function onKey(e: KeyboardEvent) {
         </div>
 
         <div>
-          <div class="mb-1.5 flex items-center justify-between text-[11px] text-muted-foreground">
+          <div class="mb-1.5 flex items-center justify-between text-2xs text-muted-foreground">
             <span class="font-medium uppercase tracking-[0.10em]">磁盘</span>
             <span class="tabular-nums">{{ fmtGB(worker.disk_used_gb) }} / {{ fmtGB(worker.disk_total_gb) }}</span>
           </div>
@@ -186,7 +186,7 @@ function onKey(e: KeyboardEvent) {
           </div>
         </div>
 
-        <div class="flex items-center justify-between border-t border-border/60 pt-3 text-[11px] text-muted-foreground">
+        <div class="flex items-center justify-between border-t border-border/60 pt-3 text-2xs text-muted-foreground">
           <span class="flex items-center gap-1.5">
             <span>容量 {{ effective }}/{{ worker.capacity }}</span>
             <template v-if="draft !== null">
@@ -200,19 +200,19 @@ function onKey(e: KeyboardEvent) {
                 @keydown="onKey"
                 :disabled="setCap.isPending.value"
                 placeholder="env"
-                class="w-14 text-[11px] tabular-nums"
+                class="w-14 text-2xs tabular-nums"
               />
               <button
                 @click="submitDraft"
                 :disabled="setCap.isPending.value"
-                class="rounded-md bg-primary/15 px-1.5 py-0.5 text-[10.5px] font-medium text-primary hover:bg-primary/25 disabled:opacity-50"
+                class="rounded-md bg-primary/15 px-1.5 py-0.5 text-mini font-medium text-primary hover:bg-primary/25 disabled:opacity-50"
               >
                 保存
               </button>
               <button
                 @click="draft = null"
                 :disabled="setCap.isPending.value"
-                class="text-[10.5px] text-muted-foreground hover:text-foreground"
+                class="text-mini text-muted-foreground hover:text-foreground"
               >
                 取消
               </button>
@@ -220,7 +220,7 @@ function onKey(e: KeyboardEvent) {
             <button
               v-else
               @click="startEdit"
-              class="rounded-md border border-border bg-background px-1.5 py-0.5 text-[10.5px] text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+              class="rounded-md border border-border bg-background px-1.5 py-0.5 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
               title="改实际并发上限（不超过容器启动设置的容量）"
             >
               {{ worker.desired_capacity != null ? "改" : "限流" }}
@@ -229,7 +229,7 @@ function onKey(e: KeyboardEvent) {
           <div class="flex items-center gap-3">
             <RouterLink
               :to="`/events?source=${encodeURIComponent(worker.worker_id)}`"
-              class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-[10.5px] text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+              class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-primary"
               title="查看该 worker 的事件流"
             >
               <Icon name="events" :size="11" />

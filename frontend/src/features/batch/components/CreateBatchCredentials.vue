@@ -74,7 +74,7 @@ function update(name: string, patch: Partial<CredDraft>) {
         <div class="flex items-center gap-2 whitespace-nowrap">
           <label
             :for="`cred-${name}-remember`"
-            class="flex items-center gap-1 text-[11px] text-muted-foreground"
+            class="flex items-center gap-1 text-2xs text-muted-foreground"
             title="勾选后，提交成功时把该凭证保存到本浏览器；下次新建任务自动填入。"
           >
             <input
@@ -90,7 +90,7 @@ function update(name: string, patch: Partial<CredDraft>) {
             v-if="hasCred(name)"
             type="button"
             @click="emit('forget', name)"
-            class="text-[11px] text-muted-foreground hover:text-danger"
+            class="text-2xs text-muted-foreground hover:text-danger"
             title="从本浏览器删除已保存的凭证"
           >
             清除
@@ -98,7 +98,7 @@ function update(name: string, patch: Partial<CredDraft>) {
         </div>
       </div>
     </div>
-    <div class="text-[11px] text-muted-foreground">
+    <div class="text-2xs text-muted-foreground">
       凭证仅保存于本批次数据库行；worker 在 lease 时一次性取用。轮换 = 创建新批次。
       勾选"记住"后，凭证会被保存在本浏览器的 localStorage（明文，与登录 token 同等级别），下次新建任务自动填入。
     </div>

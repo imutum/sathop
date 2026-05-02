@@ -23,7 +23,7 @@ const props = withDefaults(
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 
 const heightCls = computed(() =>
-  props.size === "sm" ? "h-7 text-[11px] px-2.5" : "h-8 text-xs px-3",
+  props.size === "sm" ? "h-7 text-2xs px-2.5" : "h-8 text-xs px-3",
 );
 
 const refs = ref<Array<HTMLButtonElement | null>>([]);
@@ -81,7 +81,7 @@ function onKeydown(e: KeyboardEvent, i: number) {
       <span
         v-if="o.count !== undefined"
         :class="[
-          'tabular-nums text-[10.5px]',
+          'tabular-nums text-mini',
           o.value === modelValue ? 'text-muted-foreground' : 'text-muted-foreground/70',
         ]"
       >

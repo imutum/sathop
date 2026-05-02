@@ -190,7 +190,7 @@ function fmtHours(h: number): string {
           <CardTitle>正在处理</CardTitle>
           <CardDescription>近 30 条非终态数据粒</CardDescription>
         </div>
-        <span class="rounded-full border border-border bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums">
+        <span class="rounded-full border border-border bg-muted px-2.5 py-0.5 text-2xs font-medium text-muted-foreground tabular-nums">
           {{ active.length > 0 ? `${active.length} 条` : "空闲" }}
         </span>
       </CardHeader>
@@ -249,7 +249,7 @@ function fmtHours(h: number): string {
           <CardDescription>非终态且 &gt; {{ stuckHours }} 小时未推进 · 最旧者优先</CardDescription>
         </div>
         <span
-          class="rounded-full border border-warning/40 bg-warning/10 px-2.5 py-0.5 text-[11px] font-medium text-warning tabular-nums"
+          class="rounded-full border border-warning/40 bg-warning/10 px-2.5 py-0.5 text-2xs font-medium text-warning tabular-nums"
         >
           {{ stuckRows.length }} / {{ stuckTotal }}
         </span>
