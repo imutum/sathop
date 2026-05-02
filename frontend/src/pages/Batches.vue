@@ -2,21 +2,21 @@
 import { computed, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
-import { API, IN_FLIGHT_STATES, type BatchSummary, type GranuleState } from "../api";
-import { fmtAge, fmtDuration } from "../i18n";
-import { requestConfirm } from "../composables/useConfirm";
-import { useToast } from "../composables/useToast";
-import ActionButton from "../ui/ActionButton.vue";
-import Badge from "../ui/Badge.vue";
-import Card from "../ui/Card.vue";
-import CopyButton from "../ui/CopyButton.vue";
-import EmptyState from "../ui/EmptyState.vue";
-import PageHeader from "../ui/PageHeader.vue";
-import ProgressBar from "../ui/ProgressBar.vue";
-import Segmented from "../ui/Segmented.vue";
-import TextInput from "../ui/TextInput.vue";
-import CreateBatchModal from "./CreateBatchModal.vue";
-import { Icon } from "../ui/Icon";
+import { API, IN_FLIGHT_STATES, type BatchSummary, type GranuleState } from "@/api";
+import { fmtAge, fmtDuration } from "@/i18n";
+import { requestConfirm } from "@/composables/useConfirm";
+import { useToast } from "@/composables/useToast";
+import ActionButton from "@/ui/ActionButton.vue";
+import Badge from "@/ui/Badge.vue";
+import Card from "@/ui/Card.vue";
+import CopyButton from "@/ui/CopyButton.vue";
+import EmptyState from "@/ui/EmptyState.vue";
+import PageHeader from "@/ui/PageHeader.vue";
+import ProgressBar from "@/ui/ProgressBar.vue";
+import Segmented from "@/ui/Segmented.vue";
+import TextInput from "@/ui/TextInput.vue";
+import CreateBatchModal from "@/features/batch/components/CreateBatchModal.vue";
+import { Icon } from "@/ui/Icon";
 
 const TERMINAL: GranuleState[] = ["acked", "deleted"];
 const ERRORED: GranuleState[] = ["failed", "blacklisted"];
@@ -225,8 +225,8 @@ function onCreated() {
           ]"
         />
       </div>
-      <div class="text-xs text-muted tabular-nums">
-        显示 <span class="font-medium text-text">{{ visible.length }}</span> / {{ allCount }}
+      <div class="text-xs text-legacy-muted tabular-nums">
+        显示 <span class="font-medium text-legacy-text">{{ visible.length }}</span> / {{ allCount }}
       </div>
     </div>
 
@@ -252,7 +252,7 @@ function onCreated() {
       </EmptyState>
       <div v-else class="overflow-x-auto">
         <table class="w-full min-w-[820px] text-sm">
-          <thead class="bg-subtle/50 th-row">
+          <thead class="bg-legacy-subtle/50 th-row">
             <tr>
               <th class="px-5 py-3">批次</th>
               <th class="px-2 py-3">处理包</th>
@@ -266,25 +266,25 @@ function onCreated() {
             <tr
               v-for="r in visible"
               :key="r.b.batch_id"
-              class="border-t border-border/60 transition hover:bg-subtle/40"
+              class="border-t border-border/60 transition hover:bg-legacy-subtle/40"
             >
               <td class="px-5 py-3.5">
                 <RouterLink :to="`/batches/${r.b.batch_id}`" class="block">
-                  <div class="font-medium text-text transition hover:text-accent">{{ r.b.name }}</div>
-                  <div class="mt-0.5 inline-flex items-center font-mono text-[11px] text-muted">
+                  <div class="font-medium text-legacy-text transition hover:text-legacy-accent">{{ r.b.name }}</div>
+                  <div class="mt-0.5 inline-flex items-center font-mono text-[11px] text-legacy-muted">
                     {{ r.b.batch_id }}
                     <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
                   </div>
                 </RouterLink>
               </td>
-              <td class="px-2 py-3.5 font-mono text-[11.5px] text-muted">
+              <td class="px-2 py-3.5 font-mono text-[11.5px] text-legacy-muted">
                 <RouterLink
                   v-if="r.bundleLink"
                   :to="{
                     path: '/bundles',
                     query: { name: r.bundleLink.name, version: r.bundleLink.version },
                   }"
-                  class="transition hover:text-accent"
+                  class="transition hover:text-legacy-accent"
                   title="在任务包页查看"
                 >
                   {{ r.b.bundle_ref }}
@@ -297,14 +297,14 @@ function onCreated() {
               <td class="w-[280px] px-2 py-3.5">
                 <div class="mb-1 flex items-center justify-between text-[11.5px]">
                   <span class="tabular-nums">
-                    <span class="font-medium text-text">{{ r.done }}</span>
-                    <span class="text-muted"> / {{ r.total }}</span>
-                    <span class="ml-1 text-muted">({{ r.pct }}%)</span>
+                    <span class="font-medium text-legacy-text">{{ r.done }}</span>
+                    <span class="text-legacy-muted"> / {{ r.total }}</span>
+                    <span class="ml-1 text-legacy-muted">({{ r.pct }}%)</span>
                   </span>
                   <span class="flex items-center gap-2">
                     <span
                       v-if="r.b.eta_seconds != null"
-                      class="text-muted tabular-nums"
+                      class="text-legacy-muted tabular-nums"
                       :title="`按当前吞吐外推剩余 ${r.inFlight} 条`"
                     >
                       ≈ {{ fmtDuration(r.b.eta_seconds * 1000) }}
@@ -325,7 +325,7 @@ function onCreated() {
                   :tone="r.errors > 0 || r.b.objects_exhausted > 0 ? 'warn' : 'good'"
                 />
               </td>
-              <td class="px-2 py-3.5 text-[11.5px] text-muted">{{ fmtAge(r.b.created_at) }}</td>
+              <td class="px-2 py-3.5 text-[11.5px] text-legacy-muted">{{ fmtAge(r.b.created_at) }}</td>
               <td class="space-x-1.5 whitespace-nowrap px-5 py-3.5 text-right">
                 <ActionButton
                   v-if="r.errors > 0"

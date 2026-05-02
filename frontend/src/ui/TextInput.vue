@@ -18,7 +18,7 @@ defineExpose({ focus: () => inputEl.value?.focus() });
   <div class="relative">
     <span
       v-if="$slots.leftIcon"
-      class="pointer-events-none absolute inset-y-0 left-2.5 grid place-items-center text-muted"
+      class="pointer-events-none absolute inset-y-0 left-2.5 grid place-items-center text-legacy-muted"
     >
       <slot name="leftIcon" />
     </span>
@@ -30,7 +30,7 @@ defineExpose({ focus: () => inputEl.value?.focus() });
       :placeholder="placeholder"
       :aria-label="ariaLabel"
       :class="[
-        'h-8 w-full rounded-lg border border-border bg-surface text-xs text-text outline-none transition placeholder:text-muted/70 hover:border-accent/40 focus:border-accent',
+        'h-8 w-full rounded-lg border border-border bg-legacy-surface text-xs text-legacy-text outline-none transition placeholder:text-legacy-muted/70 hover:border-legacy-accent/40 focus:border-legacy-accent',
         $slots.leftIcon ? 'pl-8 pr-3' : 'px-3',
       ]"
     />

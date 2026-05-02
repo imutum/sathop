@@ -2,17 +2,17 @@
 import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
-import { API, STATE_ORDER, type GranuleState } from "../api";
-import { fmtAge, levelLabel, stateLabel } from "../i18n";
-import Badge from "../ui/Badge.vue";
-import Card from "../ui/Card.vue";
-import EmptyState from "../ui/EmptyState.vue";
-import PageHeader from "../ui/PageHeader.vue";
-import Stat from "../ui/Stat.vue";
-import StateBarChart from "./StateBarChart.vue";
-import NodeStat from "./NodeStat.vue";
-import OnboardingCard from "./OnboardingCard.vue";
-import { Icon } from "../ui/Icon";
+import { API, STATE_ORDER, type GranuleState } from "@/api";
+import { fmtAge, levelLabel, stateLabel } from "@/i18n";
+import Badge from "@/ui/Badge.vue";
+import Card from "@/ui/Card.vue";
+import EmptyState from "@/ui/EmptyState.vue";
+import PageHeader from "@/ui/PageHeader.vue";
+import Stat from "@/ui/Stat.vue";
+import StateBarChart from "@/features/batch/components/StateBarChart.vue";
+import NodeStat from "@/features/nodes/components/NodeStat.vue";
+import OnboardingCard from "@/components/onboarding/OnboardingCard.vue";
+import { Icon } from "@/ui/Icon";
 
 const router = useRouter();
 
@@ -158,7 +158,7 @@ function fmtHours(h: number): string {
 
     <Card title="正在处理" description="近 30 条非终态数据粒" :padded="false">
       <template #action>
-        <span class="rounded-full border border-border bg-subtle px-2.5 py-0.5 text-[11px] font-medium text-muted tabular-nums">
+        <span class="rounded-full border border-border bg-legacy-subtle px-2.5 py-0.5 text-[11px] font-medium text-legacy-muted tabular-nums">
           {{ active.length > 0 ? `${active.length} 条` : "空闲" }}
         </span>
       </template>
@@ -169,7 +169,7 @@ function fmtHours(h: number): string {
       />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead class="bg-subtle/50 th-row">
+          <thead class="bg-legacy-subtle/50 th-row">
             <tr>
               <th class="px-5 py-2.5">数据粒</th>
               <th class="px-2 py-2.5">批次</th>
@@ -182,30 +182,30 @@ function fmtHours(h: number): string {
             <tr
               v-for="g in active"
               :key="g.granule_id"
-              class="cursor-pointer border-t border-border/70 transition hover:bg-subtle/50"
+              class="cursor-pointer border-t border-border/70 transition hover:bg-legacy-subtle/50"
               title="跳转到该数据粒详情"
               @click="gotoGranule(g.batch_id, g.granule_id)"
             >
               <td class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</td>
-              <td class="px-2 py-2.5 font-mono text-[11.5px] text-muted">{{ g.batch_id }}</td>
+              <td class="px-2 py-2.5 font-mono text-[11.5px] text-legacy-muted">{{ g.batch_id }}</td>
               <td class="px-2 py-2.5">
                 <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
               </td>
               <td
-                class="px-2 py-2.5 font-mono text-[11.5px] text-muted"
+                class="px-2 py-2.5 font-mono text-[11.5px] text-legacy-muted"
                 @click.stop
               >
                 <RouterLink
                   v-if="g.leased_by"
                   :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                  class="transition hover:text-accent"
+                  class="transition hover:text-legacy-accent"
                   title="跳转到该 worker 卡片"
                 >
                   {{ g.leased_by }}
                 </RouterLink>
                 <template v-else>—</template>
               </td>
-              <td class="px-5 py-2.5 text-[11.5px] text-muted">{{ fmtAge(g.updated_at) }}</td>
+              <td class="px-5 py-2.5 text-[11.5px] text-legacy-muted">{{ fmtAge(g.updated_at) }}</td>
             </tr>
           </tbody>
         </table>
@@ -227,7 +227,7 @@ function fmtHours(h: number): string {
       </template>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead class="bg-subtle/50 th-row">
+          <thead class="bg-legacy-subtle/50 th-row">
             <tr>
               <th class="px-5 py-2.5">数据粒</th>
               <th class="px-2 py-2.5">批次</th>
@@ -241,23 +241,23 @@ function fmtHours(h: number): string {
             <tr
               v-for="g in stuckRows"
               :key="g.granule_id"
-              class="cursor-pointer border-t border-border/70 transition hover:bg-subtle/50"
+              class="cursor-pointer border-t border-border/70 transition hover:bg-legacy-subtle/50"
               title="跳转到该数据粒详情"
               @click="gotoGranule(g.batch_id, g.granule_id)"
             >
               <td class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</td>
-              <td class="px-2 py-2.5 font-mono text-[11.5px] text-muted">{{ g.batch_id }}</td>
+              <td class="px-2 py-2.5 font-mono text-[11.5px] text-legacy-muted">{{ g.batch_id }}</td>
               <td class="px-2 py-2.5">
                 <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
               </td>
               <td
-                class="px-2 py-2.5 font-mono text-[11.5px] text-muted"
+                class="px-2 py-2.5 font-mono text-[11.5px] text-legacy-muted"
                 @click.stop
               >
                 <RouterLink
                   v-if="g.leased_by"
                   :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                  class="transition hover:text-accent"
+                  class="transition hover:text-legacy-accent"
                 >
                   {{ g.leased_by }}
                 </RouterLink>
@@ -280,12 +280,12 @@ function fmtHours(h: number): string {
         <div
           v-for="e in lastEvents"
           :key="e.id"
-          class="flex items-center gap-3 px-5 py-2.5 font-mono text-[11.5px] transition hover:bg-subtle/50"
+          class="flex items-center gap-3 px-5 py-2.5 font-mono text-[11.5px] transition hover:bg-legacy-subtle/50"
         >
-          <span class="w-20 shrink-0 text-muted">{{ fmtAge(e.ts) }}</span>
+          <span class="w-20 shrink-0 text-legacy-muted">{{ fmtAge(e.ts) }}</span>
           <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>
-          <span class="w-32 shrink-0 truncate text-muted">{{ e.source }}</span>
-          <span class="flex-1 truncate text-text">{{ e.message }}</span>
+          <span class="w-32 shrink-0 truncate text-legacy-muted">{{ e.source }}</span>
+          <span class="flex-1 truncate text-legacy-text">{{ e.message }}</span>
         </div>
         <EmptyState v-if="lastEvents.length === 0" title="暂无事件" />
       </div>

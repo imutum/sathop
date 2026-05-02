@@ -16,7 +16,7 @@ const props = withDefaults(
 const dotCls = computed(
   () =>
     ({
-      default: "bg-accent",
+      default: "bg-legacy-accent",
       good: "bg-success",
       warn: "bg-warning",
       bad: "bg-danger",
@@ -26,7 +26,7 @@ const dotCls = computed(
 const valueCls = computed(
   () =>
     ({
-      default: "text-text",
+      default: "text-legacy-text",
       good: "text-success",
       warn: "text-warning",
       bad: "text-danger",
@@ -35,19 +35,19 @@ const valueCls = computed(
 
 const baseCls = computed(
   () =>
-    "group relative block overflow-hidden rounded-lg border border-border bg-surface p-5 shadow-card transition" +
-    (props.to ? " hover:border-accent/40 hover:shadow-pop" : ""),
+    "group relative block overflow-hidden rounded-lg border border-border bg-legacy-surface p-5 shadow-card transition" +
+    (props.to ? " hover:border-legacy-accent/40 hover:shadow-pop" : ""),
 );
 </script>
 
 <template>
   <component :is="to ? RouterLink : 'div'" :to="to" :class="baseCls">
     <div class="flex items-center justify-between">
-      <span class="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted">
+      <span class="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.12em] text-legacy-muted">
         <span :class="['h-1.5 w-1.5 rounded-full', dotCls]" aria-hidden />
         {{ label }}
       </span>
-      <span v-if="$slots.icon" class="text-muted/70 transition group-hover:text-accent">
+      <span v-if="$slots.icon" class="text-legacy-muted/70 transition group-hover:text-legacy-accent">
         <slot name="icon" />
       </span>
     </div>
@@ -59,13 +59,13 @@ const baseCls = computed(
     >
       {{ value }}
     </div>
-    <div v-if="$slots.hint || hint" class="mt-2 text-xs text-muted">
+    <div v-if="$slots.hint || hint" class="mt-2 text-xs text-legacy-muted">
       <slot name="hint">{{ hint }}</slot>
     </div>
     <span
       v-if="to"
       aria-hidden
-      class="pointer-events-none absolute inset-x-0 -bottom-px h-px bg-accent/30 opacity-0 transition group-hover:opacity-100"
+      class="pointer-events-none absolute inset-x-0 -bottom-px h-px bg-legacy-accent/30 opacity-0 transition group-hover:opacity-100"
     />
   </component>
 </template>

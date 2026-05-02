@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import animate from "tailwindcss-animate";
 
 export default {
   content: ["./index.html", "./src/**/*.{ts,vue}"],
@@ -6,20 +7,63 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: "hsl(var(--bg) / <alpha-value>)",
-        surface: "hsl(var(--surface) / <alpha-value>)",
-        elevated: "hsl(var(--elevated) / <alpha-value>)",
+        // shadcn-vue standard tokens (slate baseColor).
+        background: "hsl(var(--background) / <alpha-value>)",
+        foreground: "hsl(var(--foreground) / <alpha-value>)",
+        card: {
+          DEFAULT: "hsl(var(--card) / <alpha-value>)",
+          foreground: "hsl(var(--card-foreground) / <alpha-value>)",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover) / <alpha-value>)",
+          foreground: "hsl(var(--popover-foreground) / <alpha-value>)",
+        },
+        primary: {
+          DEFAULT: "hsl(var(--primary) / <alpha-value>)",
+          foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary) / <alpha-value>)",
+          foreground: "hsl(var(--secondary-foreground) / <alpha-value>)",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted) / <alpha-value>)",
+          foreground: "hsl(var(--muted-foreground) / <alpha-value>)",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent) / <alpha-value>)",
+          foreground: "hsl(var(--accent-foreground) / <alpha-value>)",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive) / <alpha-value>)",
+          foreground: "hsl(var(--destructive-foreground) / <alpha-value>)",
+        },
         border: "hsl(var(--border) / <alpha-value>)",
+        input: "hsl(var(--input) / <alpha-value>)",
         ring: "hsl(var(--ring) / <alpha-value>)",
-        muted: "hsl(var(--muted) / <alpha-value>)",
-        subtle: "hsl(var(--subtle) / <alpha-value>)",
-        text: "hsl(var(--text) / <alpha-value>)",
-        accent: "hsl(var(--accent) / <alpha-value>)",
-        "accent-fg": "hsl(var(--accent-fg) / <alpha-value>)",
-        "accent-soft": "hsl(var(--accent-soft) / <alpha-value>)",
+
+        // Status tokens (no shadcn equivalent).
         success: "hsl(var(--success) / <alpha-value>)",
         warning: "hsl(var(--warning) / <alpha-value>)",
         danger: "hsl(var(--danger) / <alpha-value>)",
+
+        // Legacy tokens — temporary, removed once Phase 4 is done.
+        "legacy-bg": "hsl(var(--legacy-bg) / <alpha-value>)",
+        "legacy-surface": "hsl(var(--legacy-surface) / <alpha-value>)",
+        "legacy-elevated": "hsl(var(--legacy-elevated) / <alpha-value>)",
+        "legacy-subtle": "hsl(var(--legacy-subtle) / <alpha-value>)",
+        "legacy-muted": "hsl(var(--legacy-muted) / <alpha-value>)",
+        "legacy-text": "hsl(var(--legacy-text) / <alpha-value>)",
+        "legacy-accent": "hsl(var(--legacy-accent) / <alpha-value>)",
+        "legacy-accent-fg": "hsl(var(--legacy-accent-fg) / <alpha-value>)",
+        "legacy-accent-soft": "hsl(var(--legacy-accent-soft) / <alpha-value>)",
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+        xl: "0.5rem",
+        "2xl": "0.5rem",
       },
       fontFamily: {
         sans: [
@@ -45,11 +89,7 @@ export default {
         card: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
         pop: "0 10px 24px -12px hsl(var(--shadow) / 0.24), 0 4px 8px -6px hsl(var(--shadow) / 0.18)",
         glow: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
-        "ring-soft": "0 0 0 4px hsl(var(--accent) / 0.12)",
-      },
-      borderRadius: {
-        xl: "0.5rem",
-        "2xl": "0.5rem",
+        "ring-soft": "0 0 0 4px hsl(var(--primary) / 0.12)",
       },
       keyframes: {
         "fade-in": {
@@ -68,14 +108,24 @@ export default {
           "0%,100%": { opacity: "1" },
           "50%": { opacity: "0.55" },
         },
+        "accordion-down": {
+          from: { height: "0" },
+          to: { height: "var(--reka-accordion-content-height)" },
+        },
+        "accordion-up": {
+          from: { height: "var(--reka-accordion-content-height)" },
+          to: { height: "0" },
+        },
       },
       animation: {
         "fade-in": "fade-in 0.18s ease-out both",
         "scale-in": "scale-in 0.18s ease-out both",
         "slide-up": "slide-up 0.24s cubic-bezier(0.22,1,0.36,1) both",
         "pulse-soft": "pulse_soft 2.4s ease-in-out infinite",
+        "accordion-down": "accordion-down 0.2s ease-out",
+        "accordion-up": "accordion-up 0.2s ease-out",
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 } satisfies Config;

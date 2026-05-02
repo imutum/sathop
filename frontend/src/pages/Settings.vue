@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { useQuery } from "@tanstack/vue-query";
-import { API } from "../api";
-import Alert from "../ui/Alert.vue";
-import Card from "../ui/Card.vue";
-import Field from "../ui/Field.vue";
-import PageHeader from "../ui/PageHeader.vue";
+import { API } from "@/api";
+import Alert from "@/ui/Alert.vue";
+import Card from "@/ui/Card.vue";
+import Field from "@/ui/Field.vue";
+import PageHeader from "@/ui/PageHeader.vue";
 
 const info = useQuery({ queryKey: ["orch-info"], queryFn: API.orchestratorInfo });
 </script>
@@ -53,12 +53,12 @@ const info = useQuery({ queryKey: ["orch-info"], queryFn: API.orchestratorInfo }
           数据粒在非终态停留超过 {{ info.data.value.stuck_age_hours }} 小时计入"卡住"统计
         </Field>
       </div>
-      <div v-else class="py-6 text-sm text-muted">加载中…</div>
+      <div v-else class="py-6 text-sm text-legacy-muted">加载中…</div>
     </Card>
 
     <Card title="凭证说明">
-      <p class="text-sm leading-relaxed text-muted">
-        凭证已改为<strong class="text-text">按批次指定</strong>——在「新建任务」对话框里，基于任务包所需的凭证名称填入用户名/密码或 Token。
+      <p class="text-sm leading-relaxed text-legacy-muted">
+        凭证已改为<strong class="text-legacy-text">按批次指定</strong>——在「新建任务」对话框里，基于任务包所需的凭证名称填入用户名/密码或 Token。
         凭证随批次落库，随 lease 分发给 worker，一次性使用；不再有全局注册表。
         轮换 = 创建新批次。
       </p>

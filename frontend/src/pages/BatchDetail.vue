@@ -2,21 +2,21 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
-import { API, IN_FLIGHT_STATES, type GranuleRow, type GranuleState } from "../api";
-import { fmtAge, fmtDuration, stateLabel } from "../i18n";
-import { requestConfirm } from "../composables/useConfirm";
-import { useToast } from "../composables/useToast";
-import ActionButton from "../ui/ActionButton.vue";
-import Badge from "../ui/Badge.vue";
-import Card from "../ui/Card.vue";
-import CopyButton from "../ui/CopyButton.vue";
-import Field from "../ui/Field.vue";
-import PageHeader from "../ui/PageHeader.vue";
-import Segmented from "../ui/Segmented.vue";
-import BatchEventLog from "./BatchEventLog.vue";
-import BatchGranuleTable from "./BatchGranuleTable.vue";
-import BatchTimingCard from "./BatchTimingCard.vue";
-import { Icon } from "../ui/Icon";
+import { API, IN_FLIGHT_STATES, type GranuleRow, type GranuleState } from "@/api";
+import { fmtAge, fmtDuration, stateLabel } from "@/i18n";
+import { requestConfirm } from "@/composables/useConfirm";
+import { useToast } from "@/composables/useToast";
+import ActionButton from "@/ui/ActionButton.vue";
+import Badge from "@/ui/Badge.vue";
+import Card from "@/ui/Card.vue";
+import CopyButton from "@/ui/CopyButton.vue";
+import Field from "@/ui/Field.vue";
+import PageHeader from "@/ui/PageHeader.vue";
+import Segmented from "@/ui/Segmented.vue";
+import BatchEventLog from "@/features/batch/components/BatchEventLog.vue";
+import BatchGranuleTable from "@/features/batch/components/BatchGranuleTable.vue";
+import BatchTimingCard from "@/features/batch/components/BatchTimingCard.vue";
+import { Icon } from "@/ui/Icon";
 
 const STATE_FILTERS: { value: GranuleState | "all"; label: string }[] = [
   { value: "all", label: "全部" },
@@ -262,7 +262,7 @@ async function confirmDelete() {
     <div>
       <RouterLink
         to="/batches"
-        class="inline-flex items-center gap-1.5 text-xs text-muted transition hover:text-text"
+        class="inline-flex items-center gap-1.5 text-xs text-legacy-muted transition hover:text-legacy-text"
       >
         <Icon name="arrowLeft" :size="12" />
         批次列表
@@ -270,7 +270,7 @@ async function confirmDelete() {
       <div class="mt-2">
         <PageHeader :title="b?.name ?? batchId">
           <template #description>
-            <span class="inline-flex items-center font-mono text-[11.5px] text-muted">
+            <span class="inline-flex items-center font-mono text-[11.5px] text-legacy-muted">
               {{ batchId }}
               <CopyButton :value="batchId" title="复制批次 ID" />
             </span>
@@ -386,7 +386,7 @@ async function confirmDelete() {
     >
       <template #action>
         <div class="flex items-center gap-3">
-          <span class="text-[11px] text-muted tabular-nums">
+          <span class="text-[11px] text-legacy-muted tabular-nums">
             {{ eventCountLabel }}
           </span>
           <Segmented

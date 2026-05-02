@@ -14,7 +14,7 @@ const cls = computed(() => {
   if (t && Object.prototype.hasOwnProperty.call(BADGE_TONES, t)) {
     return BADGE_TONES[t as BadgeTone];
   }
-  return "bg-subtle text-muted ring-border";
+  return "bg-legacy-subtle text-legacy-muted ring-border";
 });
 </script>
 

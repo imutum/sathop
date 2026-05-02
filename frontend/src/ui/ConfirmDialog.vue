@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import ActionButton from "./ActionButton.vue";
 import TextInput from "./TextInput.vue";
-import { confirmInput, confirmRequest, resolveConfirm } from "../composables/useConfirm";
+import { confirmInput, confirmRequest, resolveConfirm } from "@/composables/useConfirm";
 
 const inputRef = ref<InstanceType<typeof TextInput> | null>(null);
 
@@ -27,21 +27,21 @@ watch(confirmRequest, (request) => {
       @keydown.esc="resolveConfirm(false)"
     >
       <div
-        class="w-full max-w-[420px] rounded-lg border border-border bg-elevated p-5 shadow-pop animate-scale-in"
+        class="w-full max-w-[420px] rounded-lg border border-border bg-legacy-elevated p-5 shadow-pop animate-scale-in"
         @click.stop
       >
-        <h2 class="font-display text-base font-semibold text-text">
+        <h2 class="font-display text-base font-semibold text-legacy-text">
           {{ confirmRequest.title }}
         </h2>
         <p
           v-if="confirmRequest.description"
-          class="mt-2 whitespace-pre-line text-sm leading-relaxed text-muted"
+          class="mt-2 whitespace-pre-line text-sm leading-relaxed text-legacy-muted"
         >
           {{ confirmRequest.description }}
         </p>
 
         <label v-if="confirmRequest.requireText" class="mt-4 block">
-          <span class="text-xs font-medium text-text">
+          <span class="text-xs font-medium text-legacy-text">
             {{ confirmRequest.inputLabel ?? `输入 ${confirmRequest.requireText} 确认` }}
           </span>
           <TextInput

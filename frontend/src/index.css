@@ -3,44 +3,85 @@
 @tailwind utilities;
 
 @layer base {
-  /* shadcn/dashboard-style neutral palette */
+  /* shadcn-vue slate baseColor — standard tokens. */
   :root {
-    --bg: 0 0% 100%;
-    --surface: 0 0% 100%;
-    --elevated: 0 0% 100%;
-    --subtle: 210 40% 96.1%;
-    --border: 214 31.8% 91.4%;
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
-    --muted: 215.4 16.3% 46.9%;
-    --text: 222.2 84% 4.9%;
-    --accent: 222.2 47.4% 11.2%;
-    --accent-fg: 0 0% 100%;
-    --accent-soft: 210 40% 96.1%;
+    --radius: 0.5rem;
+
+    /* Status tokens (shadcn has no equivalent — keep). */
     --success: 142 71% 35%;
     --warning: 38 92% 45%;
     --danger: 0 72% 50%;
     --shadow: 222.2 84% 4.9%;
     --surface-edge: 0 0% 100%;
+
+    /* Legacy tokens — kept verbatim for self-built ui/ until Phase 4 replaces them. */
+    --legacy-bg: 0 0% 100%;
+    --legacy-surface: 0 0% 100%;
+    --legacy-elevated: 0 0% 100%;
+    --legacy-subtle: 210 40% 96.1%;
+    --legacy-muted: 215.4 16.3% 46.9%;
+    --legacy-text: 222.2 84% 4.9%;
+    --legacy-accent: 222.2 47.4% 11.2%;
+    --legacy-accent-fg: 0 0% 100%;
+    --legacy-accent-soft: 210 40% 96.1%;
     color-scheme: light;
   }
 
   .dark {
-    --bg: 222.2 84% 4.9%;
-    --surface: 222.2 84% 4.9%;
-    --elevated: 222.2 47.4% 7.5%;
-    --subtle: 217.2 32.6% 17.5%;
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 47.4% 7.5%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 55%;
+    --destructive-foreground: 210 40% 98%;
     --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
-    --muted: 215 20.2% 65.1%;
-    --text: 210 40% 98%;
-    --accent: 210 40% 98%;
-    --accent-fg: 222.2 47.4% 11.2%;
-    --accent-soft: 217.2 32.6% 17.5%;
+
     --success: 142 69% 45%;
     --warning: 38 92% 55%;
     --danger: 0 62.8% 55%;
     --shadow: 0 0% 0%;
     --surface-edge: 217.2 32.6% 17.5%;
+
+    --legacy-bg: 222.2 84% 4.9%;
+    --legacy-surface: 222.2 84% 4.9%;
+    --legacy-elevated: 222.2 47.4% 7.5%;
+    --legacy-subtle: 217.2 32.6% 17.5%;
+    --legacy-muted: 215 20.2% 65.1%;
+    --legacy-text: 210 40% 98%;
+    --legacy-accent: 210 40% 98%;
+    --legacy-accent-fg: 222.2 47.4% 11.2%;
+    --legacy-accent-soft: 217.2 32.6% 17.5%;
     color-scheme: dark;
   }
 
@@ -51,39 +92,37 @@
   }
 
   body {
-    @apply bg-bg text-text font-sans antialiased;
+    @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "ss01", "cv11", "cv01";
     font-size: 14px;
     text-rendering: optimizeLegibility;
   }
 
   ::selection {
-    background: hsl(var(--accent) / 0.30);
-    color: hsl(var(--text));
+    background: hsl(var(--primary) / 0.30);
+    color: hsl(var(--foreground));
   }
 
   :where(button, a, input, select, textarea, [role="button"]):focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px hsl(var(--bg)), 0 0 0 4px hsl(var(--ring) / 0.55);
+    box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.55);
     border-radius: 0.5rem;
   }
 }
 
 @layer components {
+  /* Legacy component classes — used by self-built ui/ until Phase 4. */
   .input {
-    @apply w-full rounded-lg border border-border bg-bg px-3 py-2 outline-none transition hover:border-accent/40 focus:border-accent disabled:opacity-60;
+    @apply w-full rounded-lg border border-border bg-legacy-bg px-3 py-2 outline-none transition hover:border-legacy-accent/40 focus:border-legacy-accent disabled:opacity-60;
   }
-  /* Small uppercase muted label above a stat value (e.g. WorkerCard CPU/内存). */
   .stat-label {
-    @apply text-[10.5px] font-medium uppercase tracking-[0.10em] text-muted;
+    @apply text-[10.5px] font-medium uppercase tracking-[0.10em] text-legacy-muted;
   }
-  /* Inline keycap (Ctrl / Enter / Esc) used in shortcut hints. */
   .kbd {
-    @apply rounded-md border border-border bg-subtle px-1.5 py-0.5 font-mono text-[10.5px];
+    @apply rounded-md border border-border bg-legacy-subtle px-1.5 py-0.5 font-mono text-[10.5px];
   }
-  /* Standard table head typography. Pair with `bg-subtle/50` (or `/60`). */
   .th-row {
-    @apply text-left text-[10.5px] font-semibold uppercase tracking-[0.10em] text-muted;
+    @apply text-left text-[10.5px] font-semibold uppercase tracking-[0.10em] text-legacy-muted;
   }
 }
 
@@ -126,7 +165,7 @@
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted) / 0.6);
+  background: hsl(var(--muted-foreground) / 0.6);
   background-clip: content-box;
 }
 * {

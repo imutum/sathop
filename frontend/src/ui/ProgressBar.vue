@@ -17,7 +17,7 @@ const pct = computed(() =>
 const color = computed(
   () =>
     ({
-      accent: "bg-accent",
+      accent: "bg-legacy-accent",
       good: "bg-success",
       warn: "bg-warning",
       bad: "bg-danger",
@@ -26,7 +26,7 @@ const color = computed(
 </script>
 
 <template>
-  <div class="h-1.5 w-full overflow-hidden rounded-full bg-subtle">
+  <div class="h-1.5 w-full overflow-hidden rounded-full bg-legacy-subtle">
     <div
       :class="['h-full transition-[width] duration-500 ease-out', color]"
       :style="{ width: `${pct}%` }"

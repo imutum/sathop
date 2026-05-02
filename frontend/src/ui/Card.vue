@@ -13,7 +13,7 @@ withDefaults(
 
 <template>
   <section
-    :class="['rounded-lg border border-border bg-surface shadow-card', className]"
+    :class="['rounded-lg border border-border bg-legacy-surface shadow-card', className]"
   >
     <header
       v-if="title || description || $slots.title || $slots.description || $slots.action"
@@ -22,13 +22,13 @@ withDefaults(
       <div class="min-w-0">
         <h3
           v-if="$slots.title || title"
-          class="font-display text-[13.5px] font-semibold text-text"
+          class="font-display text-[13.5px] font-semibold text-legacy-text"
         >
           <slot name="title">{{ title }}</slot>
         </h3>
         <p
           v-if="$slots.description || description"
-          class="mt-0.5 text-xs text-muted"
+          class="mt-0.5 text-xs text-legacy-muted"
         >
           <slot name="description">{{ description }}</slot>
         </p>

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { toastItems, dismiss, type ToastKind } from "../composables/useToast";
+import { toastItems, dismiss, type ToastKind } from "@/composables/useToast";
 import { Icon, type IconName } from "./Icon";
 
 type Tone = { wrap: string; icon: string; name: IconName; stroke: number };
 const TONES: Record<ToastKind, Tone> = {
-  success: { wrap: "border-success/30 bg-success/10 text-text", icon: "text-success bg-success/15", name: "check", stroke: 2.4 },
-  error: { wrap: "border-danger/30 bg-danger/10 text-text", icon: "text-danger bg-danger/15", name: "alert", stroke: 2.2 },
-  info: { wrap: "border-border bg-surface/95 text-text", icon: "text-accent bg-accent/15", name: "info", stroke: 2.2 },
+  success: { wrap: "border-success/30 bg-success/10 text-legacy-text", icon: "text-success bg-success/15", name: "check", stroke: 2.4 },
+  error: { wrap: "border-danger/30 bg-danger/10 text-legacy-text", icon: "text-danger bg-danger/15", name: "alert", stroke: 2.2 },
+  info: { wrap: "border-border bg-legacy-surface/95 text-legacy-text", icon: "text-legacy-accent bg-legacy-accent/15", name: "info", stroke: 2.2 },
 };
 </script>
 
@@ -31,12 +31,12 @@ const TONES: Record<ToastKind, Tone> = {
       >
         <Icon :name="TONES[it.kind].name" :size="13" :stroke-width="TONES[it.kind].stroke" />
       </span>
-      <span class="flex-1 break-words whitespace-pre-wrap leading-relaxed text-text">
+      <span class="flex-1 break-words whitespace-pre-wrap leading-relaxed text-legacy-text">
         {{ it.text }}
       </span>
       <button
         @click="dismiss(it.id)"
-        class="grid h-5 w-5 place-items-center rounded text-muted transition hover:bg-subtle hover:text-text"
+        class="grid h-5 w-5 place-items-center rounded text-legacy-muted transition hover:bg-legacy-subtle hover:text-legacy-text"
         aria-label="关闭通知"
       >
         <Icon name="x" :size="12" :stroke-width="2.2" />

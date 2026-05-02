@@ -2,12 +2,12 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
-import { API } from "../api";
-import Card from "../ui/Card.vue";
-import EmptyState from "../ui/EmptyState.vue";
-import PageHeader from "../ui/PageHeader.vue";
-import WorkerCard from "./WorkerCard.vue";
-import { Icon } from "../ui/Icon";
+import { API } from "@/api";
+import Card from "@/ui/Card.vue";
+import EmptyState from "@/ui/EmptyState.vue";
+import PageHeader from "@/ui/PageHeader.vue";
+import WorkerCard from "@/features/nodes/components/WorkerCard.vue";
+import { Icon } from "@/ui/Icon";
 
 const workers = useQuery({ queryKey: ["workers"], queryFn: API.workers });
 const list = computed(() => workers.data.value ?? []);

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { useQuery } from "@tanstack/vue-query";
 import { computed } from "vue";
-import { API } from "../api";
-import Card from "../ui/Card.vue";
-import EmptyState from "../ui/EmptyState.vue";
-import PageHeader from "../ui/PageHeader.vue";
-import ReceiverCard from "./ReceiverCard.vue";
-import { Icon } from "../ui/Icon";
+import { API } from "@/api";
+import Card from "@/ui/Card.vue";
+import EmptyState from "@/ui/EmptyState.vue";
+import PageHeader from "@/ui/PageHeader.vue";
+import ReceiverCard from "@/features/nodes/components/ReceiverCard.vue";
+import { Icon } from "@/ui/Icon";
 
 const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
 const list = computed(() => receivers.data.value ?? []);

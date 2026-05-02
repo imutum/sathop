@@ -11,7 +11,7 @@ const cls = computed(
     ({
       danger: "border-danger/30 bg-danger/10 text-danger",
       warn: "border-warning/30 bg-warning/10 text-warning",
-      info: "border-border bg-subtle text-text",
+      info: "border-border bg-legacy-subtle text-legacy-text",
     })[props.tone],
 );
 </script>

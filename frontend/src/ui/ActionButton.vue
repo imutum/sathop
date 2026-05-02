@@ -22,12 +22,12 @@ const sizeCls = computed(() =>
 );
 
 const TONE_CLS: Record<ActionTone, string> = {
-  primary: "bg-accent text-accent-fg shadow-soft hover:bg-accent/90",
+  primary: "bg-legacy-accent text-legacy-accent-fg shadow-soft hover:bg-legacy-accent/90",
   default:
-    "border border-border bg-surface text-text hover:border-accent/40 hover:bg-subtle",
+    "border border-border bg-legacy-surface text-legacy-text hover:border-legacy-accent/40 hover:bg-legacy-subtle",
   danger: "border border-danger/30 bg-danger/10 text-danger hover:bg-danger/15",
-  ghost: "text-muted hover:bg-subtle hover:text-text",
-  outline: "border border-accent/40 bg-transparent text-accent hover:bg-accent-soft",
+  ghost: "text-legacy-muted hover:bg-legacy-subtle hover:text-legacy-text",
+  outline: "border border-legacy-accent/40 bg-transparent text-legacy-accent hover:bg-legacy-accent-soft",
 };
 
 const base =

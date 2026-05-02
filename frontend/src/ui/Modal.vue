@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from "vue";
-import { requestConfirm } from "../composables/useConfirm";
+import { requestConfirm } from "@/composables/useConfirm";
 
 const props = withDefaults(
   defineProps<{
@@ -51,7 +51,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeyDown));
       <div
         :class="[
           widthClass,
-          'relative max-h-[90vh] overflow-auto rounded-lg border border-border bg-elevated p-6 shadow-pop animate-scale-in',
+          'relative max-h-[90vh] overflow-auto rounded-lg border border-border bg-legacy-elevated p-6 shadow-pop animate-scale-in',
         ]"
         @click.stop
       >

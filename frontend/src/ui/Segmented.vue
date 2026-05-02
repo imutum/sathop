@@ -24,7 +24,7 @@ const heightCls = computed(() =>
 <template>
   <div
     role="tablist"
-    class="inline-flex items-center gap-0.5 rounded-lg border border-border bg-subtle p-0.5"
+    class="inline-flex items-center gap-0.5 rounded-lg border border-border bg-legacy-subtle p-0.5"
   >
     <button
       v-for="o in options"
@@ -37,10 +37,10 @@ const heightCls = computed(() =>
         heightCls,
         'inline-flex items-center gap-1.5 rounded-md font-medium transition',
         o.value === modelValue
-          ? 'bg-surface text-text shadow-soft'
+          ? 'bg-legacy-surface text-legacy-text shadow-soft'
           : o.dim
-            ? 'text-muted/50 hover:text-muted'
-            : 'text-muted hover:text-text',
+            ? 'text-legacy-muted/50 hover:text-legacy-muted'
+            : 'text-legacy-muted hover:text-legacy-text',
       ]"
     >
       {{ o.label }}
@@ -48,7 +48,7 @@ const heightCls = computed(() =>
         v-if="o.count !== undefined"
         :class="[
           'tabular-nums text-[10.5px]',
-          o.value === modelValue ? 'text-muted' : 'text-muted/70',
+          o.value === modelValue ? 'text-legacy-muted' : 'text-legacy-muted/70',
         ]"
       >
         {{ o.count }}

@@ -19,9 +19,9 @@ function onChange(e: Event) {
       type="file"
       :accept="accept"
       @change="onChange"
-      class="mt-2 block w-full cursor-pointer rounded-lg border border-dashed border-border bg-subtle/40 px-3 py-3 text-xs file:mr-3 file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-accent-fg hover:border-accent/40"
+      class="mt-2 block w-full cursor-pointer rounded-lg border border-dashed border-border bg-legacy-subtle/40 px-3 py-3 text-xs file:mr-3 file:rounded-md file:border-0 file:bg-legacy-accent file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-legacy-accent-fg hover:border-legacy-accent/40"
     />
-    <div v-if="modelValue" class="mt-1.5 text-[10.5px] text-muted">
+    <div v-if="modelValue" class="mt-1.5 text-[10.5px] text-legacy-muted">
       已选：<span class="font-mono">{{ modelValue.name }}</span> · {{ fmtBytes(modelValue.size) }}
     </div>
   </div>

@@ -4,7 +4,7 @@
 // without 401 the orchestrator runs without a token and we mark ready.
 
 import { onMounted, onBeforeUnmount, ref } from "vue";
-import { API, setToken, suspendAuthRecovery } from "../api";
+import { API, setToken, suspendAuthRecovery } from "@/api";
 
 const TOKEN_KEY = "sathop.token";
 

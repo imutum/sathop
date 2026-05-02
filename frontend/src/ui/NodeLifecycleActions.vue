@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { requestConfirm } from "../composables/useConfirm";
+import { requestConfirm } from "@/composables/useConfirm";
 
 const props = defineProps<{
   enabled: boolean;
@@ -52,7 +52,7 @@ async function forget() {
       :class="[
         'rounded-md border px-2 py-0.5 text-[10.5px] font-medium transition disabled:opacity-50',
         enabled
-          ? 'border-border bg-surface text-muted hover:border-danger/40 hover:text-danger'
+          ? 'border-border bg-legacy-surface text-legacy-muted hover:border-danger/40 hover:text-danger'
           : 'border-success/30 bg-success/10 text-success hover:bg-success/15',
       ]"
     >

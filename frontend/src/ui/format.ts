@@ -2,7 +2,7 @@
 // version so page-level tone strings (worker state enums, event levels) map
 // straight through.
 export const BADGE_TONES = {
-  pending: "bg-subtle text-muted ring-border",
+  pending: "bg-legacy-subtle text-legacy-muted ring-border",
   queued: "bg-amber-500/10 text-amber-600 ring-amber-500/25 dark:text-amber-300",
   downloading: "bg-sky-500/10 text-sky-500 ring-sky-500/25 dark:text-sky-300",
   downloaded: "bg-sky-500/10 text-sky-500 ring-sky-500/25 dark:text-sky-300",
@@ -13,7 +13,7 @@ export const BADGE_TONES = {
   deleted: "bg-success/10 text-success ring-success/25",
   failed: "bg-danger/10 text-danger ring-danger/25",
   blacklisted: "bg-danger/15 text-danger ring-danger/30",
-  info: "bg-subtle text-muted ring-border",
+  info: "bg-legacy-subtle text-legacy-muted ring-border",
   warn: "bg-warning/12 text-warning ring-warning/30",
   error: "bg-danger/12 text-danger ring-danger/30",
 } as const;
@@ -40,7 +40,7 @@ export function fmtRate(bps: number): string {
   return `${(bps / 1024 / 1024 / 1024).toFixed(2)} GB/s`;
 }
 
-import { useNow } from "../i18n";
+import { useNow } from "@/i18n";
 
 // Heartbeat freshness → badge tone/label, used by Workers + Receivers cards.
 // Reads the shared reactive `now` so callers that wrap this in computed()
