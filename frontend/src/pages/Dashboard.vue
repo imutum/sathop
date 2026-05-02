@@ -8,6 +8,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import Stat from "@/components/Stat.vue";
@@ -191,49 +199,47 @@ function fmtHours(h: number): string {
         title="当前没有正在处理的数据粒"
         description="新建批次后，活动条目会自动出现在这里。"
       />
-      <div v-else class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-muted/50 th-row">
-            <tr>
-              <th class="px-5 py-2.5">数据粒</th>
-              <th class="px-2 py-2.5">批次</th>
-              <th class="px-2 py-2.5">当前阶段</th>
-              <th class="px-2 py-2.5">工作节点</th>
-              <th class="px-5 py-2.5">更新</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="g in active"
-              :key="g.granule_id"
-              class="cursor-pointer border-t border-border/70 transition hover:bg-muted/50"
-              title="跳转到该数据粒详情"
-              @click="gotoGranule(g.batch_id, g.granule_id)"
+      <Table v-else>
+        <TableHeader class="bg-muted/50">
+          <TableRow>
+            <TableHead class="px-5">数据粒</TableHead>
+            <TableHead>批次</TableHead>
+            <TableHead>当前阶段</TableHead>
+            <TableHead>工作节点</TableHead>
+            <TableHead class="px-5">更新</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow
+            v-for="g in active"
+            :key="g.granule_id"
+            class="cursor-pointer"
+            title="跳转到该数据粒详情"
+            @click="gotoGranule(g.batch_id, g.granule_id)"
+          >
+            <TableCell class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</TableCell>
+            <TableCell class="py-2.5 font-mono text-[11.5px] text-muted-foreground">{{ g.batch_id }}</TableCell>
+            <TableCell class="py-2.5">
+              <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
+            </TableCell>
+            <TableCell
+              class="py-2.5 font-mono text-[11.5px] text-muted-foreground"
+              @click.stop
             >
-              <td class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</td>
-              <td class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground">{{ g.batch_id }}</td>
-              <td class="px-2 py-2.5">
-                <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
-              </td>
-              <td
-                class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground"
-                @click.stop
+              <RouterLink
+                v-if="g.leased_by"
+                :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
+                class="transition hover:text-primary"
+                title="跳转到该 worker 卡片"
               >
-                <RouterLink
-                  v-if="g.leased_by"
-                  :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                  class="transition hover:text-primary"
-                  title="跳转到该 worker 卡片"
-                >
-                  {{ g.leased_by }}
-                </RouterLink>
-                <template v-else>—</template>
-              </td>
-              <td class="px-5 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(g.updated_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                {{ g.leased_by }}
+              </RouterLink>
+              <template v-else>—</template>
+            </TableCell>
+            <TableCell class="px-5 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
     </Card>
 
     <Card v-if="stuckTotal > 0">
@@ -248,54 +254,52 @@ function fmtHours(h: number): string {
           {{ stuckRows.length }} / {{ stuckTotal }}
         </span>
       </CardHeader>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-muted/50 th-row">
-            <tr>
-              <th class="px-5 py-2.5">数据粒</th>
-              <th class="px-2 py-2.5">批次</th>
-              <th class="px-2 py-2.5">状态</th>
-              <th class="px-2 py-2.5">领取方</th>
-              <th class="px-2 py-2.5">滞留</th>
-              <th class="px-5 py-2.5">错误</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="g in stuckRows"
-              :key="g.granule_id"
-              class="cursor-pointer border-t border-border/70 transition hover:bg-muted/50"
-              title="跳转到该数据粒详情"
-              @click="gotoGranule(g.batch_id, g.granule_id)"
+      <Table>
+        <TableHeader class="bg-muted/50">
+          <TableRow>
+            <TableHead class="px-5">数据粒</TableHead>
+            <TableHead>批次</TableHead>
+            <TableHead>状态</TableHead>
+            <TableHead>领取方</TableHead>
+            <TableHead>滞留</TableHead>
+            <TableHead class="px-5">错误</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow
+            v-for="g in stuckRows"
+            :key="g.granule_id"
+            class="cursor-pointer"
+            title="跳转到该数据粒详情"
+            @click="gotoGranule(g.batch_id, g.granule_id)"
+          >
+            <TableCell class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</TableCell>
+            <TableCell class="py-2.5 font-mono text-[11.5px] text-muted-foreground">{{ g.batch_id }}</TableCell>
+            <TableCell class="py-2.5">
+              <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
+            </TableCell>
+            <TableCell
+              class="py-2.5 font-mono text-[11.5px] text-muted-foreground"
+              @click.stop
             >
-              <td class="px-5 py-2.5 font-mono text-[11.5px]">{{ g.granule_id }}</td>
-              <td class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground">{{ g.batch_id }}</td>
-              <td class="px-2 py-2.5">
-                <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
-              </td>
-              <td
-                class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground"
-                @click.stop
+              <RouterLink
+                v-if="g.leased_by"
+                :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
+                class="transition hover:text-primary"
               >
-                <RouterLink
-                  v-if="g.leased_by"
-                  :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                  class="transition hover:text-primary"
-                >
-                  {{ g.leased_by }}
-                </RouterLink>
-                <template v-else>—</template>
-              </td>
-              <td class="px-2 py-2.5 text-[11.5px] text-warning tabular-nums">
-                {{ fmtHours(g.age_hours) }}
-              </td>
-              <td class="max-w-[320px] truncate px-5 py-2.5 font-mono text-[11.5px] text-danger">
-                {{ g.error ?? "—" }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                {{ g.leased_by }}
+              </RouterLink>
+              <template v-else>—</template>
+            </TableCell>
+            <TableCell class="py-2.5 text-[11.5px] text-warning tabular-nums">
+              {{ fmtHours(g.age_hours) }}
+            </TableCell>
+            <TableCell class="max-w-[320px] truncate px-5 py-2.5 font-mono text-[11.5px] text-danger">
+              {{ g.error ?? "—" }}
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
     </Card>
 
     <Card>

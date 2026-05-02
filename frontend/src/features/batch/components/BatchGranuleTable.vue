@@ -3,6 +3,14 @@ import type { GranuleRow, ProgressRow, GranuleState } from "@/api";
 import { fmtAge, stateLabel } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import EmptyState from "@/components/EmptyState.vue";
 import ErrorCell from "@/features/batch/components/ErrorCell.vue";
 import GranuleEvents from "@/features/batch/components/GranuleEvents.vue";
@@ -126,29 +134,26 @@ function stripBatchPrefix(gid: string) {
   </ul>
 
   <!-- lg+ : original table. -->
-  <div class="hidden overflow-x-auto lg:block">
-    <table class="w-full text-sm">
-      <thead class="bg-muted/50 th-row">
-        <tr>
-          <th class="px-5 py-3">数据粒</th>
-          <th class="px-2 py-3">状态</th>
-          <th class="px-2 py-3">重试</th>
-          <th class="px-2 py-3">领取方</th>
-          <th class="px-2 py-3">更新</th>
-          <th class="px-2 py-3">错误</th>
-          <th class="px-5 py-3 text-right">操作</th>
-        </tr>
-      </thead>
-      <tbody>
+  <div class="hidden lg:block">
+    <Table>
+      <TableHeader class="bg-muted/50">
+        <TableRow>
+          <TableHead class="px-5">数据粒</TableHead>
+          <TableHead>状态</TableHead>
+          <TableHead>重试</TableHead>
+          <TableHead>领取方</TableHead>
+          <TableHead>更新</TableHead>
+          <TableHead>错误</TableHead>
+          <TableHead class="px-5 text-right">操作</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         <template v-for="g in rows" :key="g.granule_id">
-          <tr
+          <TableRow
             :ref="(el) => emit('rowRef', g.granule_id, el as Element | null)"
-            :class="[
-              'border-t border-border/60 align-top transition hover:bg-muted/40',
-              g.granule_id === highlight ? 'bg-accent/40' : '',
-            ]"
+            :class="['align-top', g.granule_id === highlight ? 'bg-accent/40' : '']"
           >
-            <td class="px-5 py-2.5 font-mono text-[11.5px]">
+            <TableCell class="px-5 py-2.5 font-mono text-[11.5px]">
               <button
                 @click="emit('toggle', g.granule_id)"
                 class="mr-1 inline-block w-3 text-muted-foreground hover:text-foreground"
@@ -161,8 +166,8 @@ function stripBatchPrefix(gid: string) {
                 v-if="latestProgress[g.granule_id]"
                 :row="latestProgress[g.granule_id]"
               />
-            </td>
-            <td class="px-2 py-2.5">
+            </TableCell>
+            <TableCell class="py-2.5">
               <div class="flex flex-wrap items-center gap-1">
                 <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
                 <span
@@ -172,9 +177,9 @@ function stripBatchPrefix(gid: string) {
                   <Badge tone="error">{{ g.objects_exhausted }} 已放弃</Badge>
                 </span>
               </div>
-            </td>
-            <td class="px-2 py-2.5 text-[11.5px] tabular-nums">{{ g.retry_count }}</td>
-            <td class="px-2 py-2.5 font-mono text-[11.5px] text-muted-foreground">
+            </TableCell>
+            <TableCell class="py-2.5 text-[11.5px] tabular-nums">{{ g.retry_count }}</TableCell>
+            <TableCell class="py-2.5 font-mono text-[11.5px] text-muted-foreground">
               <RouterLink
                 v-if="g.leased_by"
                 :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
@@ -184,12 +189,12 @@ function stripBatchPrefix(gid: string) {
                 {{ g.leased_by }}
               </RouterLink>
               <template v-else>—</template>
-            </td>
-            <td class="px-2 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(g.updated_at) }}</td>
-            <td class="max-w-[320px] px-2 py-2.5 font-mono text-[11.5px] text-danger">
+            </TableCell>
+            <TableCell class="py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
+            <TableCell class="max-w-[320px] py-2.5 font-mono text-[11.5px] text-danger">
               <ErrorCell :error="g.error" />
-            </td>
-            <td class="space-x-1 whitespace-nowrap px-5 py-2.5 text-right">
+            </TableCell>
+            <TableCell class="space-x-1 whitespace-nowrap px-5 py-2.5 text-right">
               <Button
                 v-if="cancellable.has(g.state)"
                 variant="destructive"
@@ -209,20 +214,20 @@ function stripBatchPrefix(gid: string) {
               >
                 重试
               </Button>
-            </td>
-          </tr>
-          <tr v-if="expanded === g.granule_id" class="bg-muted/40">
-            <td colspan="7" class="space-y-3 px-5 py-3">
+            </TableCell>
+          </TableRow>
+          <TableRow v-if="expanded === g.granule_id" class="bg-muted/40">
+            <TableCell colspan="7" class="space-y-3 px-5 py-3">
               <StageTimingStrip :granule-id="g.granule_id" />
               <ProgressTimeline :granule-id="g.granule_id" />
               <GranuleEvents :granule-id="g.granule_id" :batch-id="batchId" />
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         </template>
-        <tr v-if="rows.length === 0">
-          <td colspan="7"><EmptyState title="该筛选条件下没有数据粒" /></td>
-        </tr>
-      </tbody>
-    </table>
+        <TableRow v-if="rows.length === 0">
+          <TableCell colspan="7"><EmptyState title="该筛选条件下没有数据粒" /></TableCell>
+        </TableRow>
+      </TableBody>
+    </Table>
   </div>
 </template>

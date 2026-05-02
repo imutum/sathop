@@ -14,6 +14,14 @@ import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import BundleManifestView from "@/features/bundle/components/BundleManifestView.vue";
 import UploadBundleModal from "@/features/bundle/components/UploadBundleModal.vue";
 import { Icon } from "@/components/Icon";
@@ -138,42 +146,39 @@ function onUploaded(d: BundleDetail) {
               </li>
             </ul>
             <!-- sm+ : table. -->
-            <div class="hidden overflow-x-auto sm:block">
-              <table class="w-full text-sm">
-                <thead class="bg-muted/50 th-row">
-                  <tr>
-                    <th class="px-5 py-3">名称</th>
-                    <th class="px-2 py-3">版本</th>
-                    <th class="px-2 py-3">大小</th>
-                    <th class="px-2 py-3" title="引用此包的批次数">引用</th>
-                    <th class="px-5 py-3">上传</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="b in bundleRows"
-                    :key="`${b.name}@${b.version}`"
-                    @click="selected = { name: b.name, version: b.version }"
-                    :class="[
-                      'cursor-pointer border-t border-border/60 transition',
-                      isActive(b) ? 'bg-accent/60' : 'hover:bg-muted/50',
-                    ]"
-                  >
-                    <td class="px-5 py-2.5 font-mono text-[12px] font-medium">{{ b.name }}</td>
-                    <td class="px-2 py-2.5">
-                      <Badge tone="info">{{ b.version }}</Badge>
-                    </td>
-                    <td class="px-2 py-2.5 text-[11.5px] text-muted-foreground tabular-nums">{{ fmtBytes(b.size) }}</td>
-                    <td class="px-2 py-2.5 text-[11.5px] tabular-nums">
-                      <span v-if="b.in_use_count > 0" class="font-medium text-foreground">
-                        {{ b.in_use_count }}
-                      </span>
-                      <span v-else class="text-muted-foreground/60">0</span>
-                    </td>
-                    <td class="px-5 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(b.uploaded_at) }}</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div class="hidden sm:block">
+            <Table>
+              <TableHeader class="bg-muted/50">
+                <TableRow>
+                  <TableHead class="px-5">名称</TableHead>
+                  <TableHead>版本</TableHead>
+                  <TableHead>大小</TableHead>
+                  <TableHead title="引用此包的批次数">引用</TableHead>
+                  <TableHead class="px-5">上传</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow
+                  v-for="b in bundleRows"
+                  :key="`${b.name}@${b.version}`"
+                  @click="selected = { name: b.name, version: b.version }"
+                  :class="['cursor-pointer', isActive(b) ? 'bg-accent/60' : '']"
+                >
+                  <TableCell class="px-5 font-mono text-[12px] font-medium">{{ b.name }}</TableCell>
+                  <TableCell>
+                    <Badge tone="info">{{ b.version }}</Badge>
+                  </TableCell>
+                  <TableCell class="text-[11.5px] text-muted-foreground tabular-nums">{{ fmtBytes(b.size) }}</TableCell>
+                  <TableCell class="text-[11.5px] tabular-nums">
+                    <span v-if="b.in_use_count > 0" class="font-medium text-foreground">
+                      {{ b.in_use_count }}
+                    </span>
+                    <span v-else class="text-muted-foreground/60">0</span>
+                  </TableCell>
+                  <TableCell class="px-5 text-[11.5px] text-muted-foreground">{{ fmtAge(b.uploaded_at) }}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
             </div>
           </template>
         </QueryState>

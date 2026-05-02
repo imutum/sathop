@@ -11,6 +11,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import CopyButton from "@/components/CopyButton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
@@ -375,119 +383,115 @@ function onCreated() {
             </li>
           </ul>
           <!-- lg+ : original table. -->
-          <div class="hidden overflow-x-auto lg:block">
-        <table class="w-full min-w-[820px] text-sm">
-          <thead class="bg-muted/50 th-row">
-            <tr>
-              <th class="px-5 py-3">批次</th>
-              <th class="px-2 py-3">处理包</th>
-              <th class="px-2 py-3">目标接收端</th>
-              <th class="px-2 py-3">进度</th>
-              <th class="px-2 py-3">创建时间</th>
-              <th class="px-5 py-3 text-right">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="r in visible"
-              :key="r.b.batch_id"
-              class="border-t border-border/60 transition hover:bg-muted/40"
-            >
-              <td class="px-5 py-3.5">
-                <RouterLink :to="`/batches/${r.b.batch_id}`" class="block">
-                  <div class="font-medium text-foreground transition hover:text-primary">{{ r.b.name }}</div>
-                  <div class="mt-0.5 inline-flex items-center font-mono text-[11px] text-muted-foreground">
-                    {{ r.b.batch_id }}
-                    <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
-                  </div>
-                </RouterLink>
-              </td>
-              <td class="px-2 py-3.5 font-mono text-[11.5px] text-muted-foreground">
-                <RouterLink
-                  v-if="r.bundleLink"
-                  :to="{
-                    path: '/bundles',
-                    query: { name: r.bundleLink.name, version: r.bundleLink.version },
-                  }"
-                  class="transition hover:text-primary"
-                  title="在任务包页查看"
-                >
-                  {{ r.b.bundle_ref }}
-                </RouterLink>
-                <template v-else>{{ r.b.bundle_ref }}</template>
-              </td>
-              <td class="px-2 py-3.5">
-                <Badge tone="info">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
-              </td>
-              <td class="w-[280px] px-2 py-3.5">
-                <div class="mb-1 flex items-center justify-between text-[11.5px]">
-                  <span class="tabular-nums">
-                    <span class="font-medium text-foreground">{{ r.done }}</span>
-                    <span class="text-muted-foreground"> / {{ r.total }}</span>
-                    <span class="ml-1 text-muted-foreground">({{ r.pct }}%)</span>
-                  </span>
-                  <span class="flex items-center gap-2">
-                    <span
-                      v-if="r.b.eta_seconds != null"
-                      class="text-muted-foreground tabular-nums"
-                      :title="`按当前吞吐外推剩余 ${r.inFlight} 条`"
+          <div class="hidden lg:block">
+            <Table class="min-w-[820px]">
+              <TableHeader class="bg-muted/50">
+                <TableRow>
+                  <TableHead class="px-5">批次</TableHead>
+                  <TableHead>处理包</TableHead>
+                  <TableHead>目标接收端</TableHead>
+                  <TableHead>进度</TableHead>
+                  <TableHead>创建时间</TableHead>
+                  <TableHead class="px-5 text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="r in visible" :key="r.b.batch_id">
+                  <TableCell class="px-5 py-3.5">
+                    <RouterLink :to="`/batches/${r.b.batch_id}`" class="block">
+                      <div class="font-medium text-foreground transition hover:text-primary">{{ r.b.name }}</div>
+                      <div class="mt-0.5 inline-flex items-center font-mono text-[11px] text-muted-foreground">
+                        {{ r.b.batch_id }}
+                        <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
+                      </div>
+                    </RouterLink>
+                  </TableCell>
+                  <TableCell class="py-3.5 font-mono text-[11.5px] text-muted-foreground">
+                    <RouterLink
+                      v-if="r.bundleLink"
+                      :to="{
+                        path: '/bundles',
+                        query: { name: r.bundleLink.name, version: r.bundleLink.version },
+                      }"
+                      class="transition hover:text-primary"
+                      title="在任务包页查看"
                     >
-                      ≈ {{ fmtDuration(r.b.eta_seconds * 1000) }}
-                    </span>
-                    <span v-if="r.errors > 0" class="text-danger">失败 {{ r.errors }}</span>
-                    <span
-                      v-if="r.b.objects_exhausted > 0"
-                      class="text-danger"
-                      title="该批次有产物已超 receiver 拉取重试上限，停止派发"
+                      {{ r.b.bundle_ref }}
+                    </RouterLink>
+                    <template v-else>{{ r.b.bundle_ref }}</template>
+                  </TableCell>
+                  <TableCell class="py-3.5">
+                    <Badge tone="info">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
+                  </TableCell>
+                  <TableCell class="w-[280px] py-3.5">
+                    <div class="mb-1 flex items-center justify-between text-[11.5px]">
+                      <span class="tabular-nums">
+                        <span class="font-medium text-foreground">{{ r.done }}</span>
+                        <span class="text-muted-foreground"> / {{ r.total }}</span>
+                        <span class="ml-1 text-muted-foreground">({{ r.pct }}%)</span>
+                      </span>
+                      <span class="flex items-center gap-2">
+                        <span
+                          v-if="r.b.eta_seconds != null"
+                          class="text-muted-foreground tabular-nums"
+                          :title="`按当前吞吐外推剩余 ${r.inFlight} 条`"
+                        >
+                          ≈ {{ fmtDuration(r.b.eta_seconds * 1000) }}
+                        </span>
+                        <span v-if="r.errors > 0" class="text-danger">失败 {{ r.errors }}</span>
+                        <span
+                          v-if="r.b.objects_exhausted > 0"
+                          class="text-danger"
+                          title="该批次有产物已超 receiver 拉取重试上限，停止派发"
+                        >
+                          已放弃 {{ r.b.objects_exhausted }}
+                        </span>
+                      </span>
+                    </div>
+                    <ProgressBar
+                      :value="r.done"
+                      :max="r.total"
+                      :tone="r.errors > 0 || r.b.objects_exhausted > 0 ? 'warn' : 'good'"
+                    />
+                  </TableCell>
+                  <TableCell class="py-3.5 text-[11.5px] text-muted-foreground">{{ fmtAge(r.b.created_at) }}</TableCell>
+                  <TableCell class="space-x-1.5 whitespace-nowrap px-5 py-3.5 text-right">
+                    <Button
+                      v-if="r.errors > 0"
+                      size="sm"
+                      :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
+                      pending-label="重试中…"
+                      @click="retry.mutate(r.b.batch_id)"
                     >
-                      已放弃 {{ r.b.objects_exhausted }}
-                    </span>
-                  </span>
-                </div>
-                <ProgressBar
-                  :value="r.done"
-                  :max="r.total"
-                  :tone="r.errors > 0 || r.b.objects_exhausted > 0 ? 'warn' : 'good'"
-                />
-              </td>
-              <td class="px-2 py-3.5 text-[11.5px] text-muted-foreground">{{ fmtAge(r.b.created_at) }}</td>
-              <td class="space-x-1.5 whitespace-nowrap px-5 py-3.5 text-right">
-                <Button
-                  v-if="r.errors > 0"
-                  size="sm"
-                  :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
-                  pending-label="重试中…"
-                  @click="retry.mutate(r.b.batch_id)"
-                >
-                  重试失败 ({{ r.errors }})
-                </Button>
-                <Button
-                  v-if="r.inFlight > 0"
-                  variant="destructive"
-                  size="sm"
-                  :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
-                  pending-label="取消中…"
-                  @click="confirmCancel(r.b)"
-                >
-                  取消 ({{ r.inFlight }})
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  :pending="
-                    remove.isPending.value && remove.variables.value?.id === r.b.batch_id
-                  "
-                  pending-label="删除中…"
-                  @click="confirmDelete(r.b)"
-                  title="永久删除该批次及其所有数据粒、产物、进度、事件"
-                >
-                  删除
-                </Button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                      重试失败 ({{ r.errors }})
+                    </Button>
+                    <Button
+                      v-if="r.inFlight > 0"
+                      variant="destructive"
+                      size="sm"
+                      :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
+                      pending-label="取消中…"
+                      @click="confirmCancel(r.b)"
+                    >
+                      取消 ({{ r.inFlight }})
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      :pending="
+                        remove.isPending.value && remove.variables.value?.id === r.b.batch_id
+                      "
+                      pending-label="删除中…"
+                      @click="confirmDelete(r.b)"
+                      title="永久删除该批次及其所有数据粒、产物、进度、事件"
+                    >
+                      删除
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
           </template>
         </template>
       </QueryState>

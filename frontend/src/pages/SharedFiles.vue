@@ -10,6 +10,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import CopyButton from "@/components/CopyButton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
@@ -125,38 +133,34 @@ function onUploaded() {
             </li>
           </ul>
           <!-- sm+ : table. -->
-          <div class="hidden overflow-x-auto sm:block">
-            <table class="w-full text-sm">
-              <thead class="bg-muted/50 th-row">
-                <tr>
-                  <th class="px-5 py-3">名称</th>
-                  <th class="px-2 py-3">大小</th>
-                  <th class="px-2 py-3">SHA256</th>
-                  <th class="px-2 py-3">描述</th>
-                  <th class="px-2 py-3">上传</th>
-                  <th class="px-5 py-3 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="f in files"
-                  :key="f.name"
-                  class="border-t border-border/60 transition hover:bg-muted/40"
-                >
-                  <td class="px-5 py-3 font-mono text-[12px] font-medium">{{ f.name }}</td>
-                  <td class="px-2 py-3 text-[11.5px] text-muted-foreground tabular-nums">
+          <div class="hidden sm:block">
+            <Table>
+              <TableHeader class="bg-muted/50">
+                <TableRow>
+                  <TableHead class="px-5">名称</TableHead>
+                  <TableHead>大小</TableHead>
+                  <TableHead>SHA256</TableHead>
+                  <TableHead>描述</TableHead>
+                  <TableHead>上传</TableHead>
+                  <TableHead class="px-5 text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="f in files" :key="f.name">
+                  <TableCell class="px-5 py-3 font-mono text-[12px] font-medium">{{ f.name }}</TableCell>
+                  <TableCell class="py-3 text-[11.5px] text-muted-foreground tabular-nums">
                     {{ fmtBytes(f.size) }}
-                  </td>
-                  <td class="px-2 py-3 text-[11.5px]">
+                  </TableCell>
+                  <TableCell class="py-3 text-[11.5px]">
                     <span class="font-mono" :title="f.sha256">{{ f.sha256.slice(0, 12) }}…</span>
                     <CopyButton :value="f.sha256" title="复制完整 SHA256" />
-                  </td>
-                  <td class="px-2 py-3 text-[11.5px] text-muted-foreground">
+                  </TableCell>
+                  <TableCell class="py-3 text-[11.5px] text-muted-foreground">
                     <template v-if="f.description">{{ f.description }}</template>
                     <span v-else class="text-muted-foreground/50">—</span>
-                  </td>
-                  <td class="px-2 py-3 text-[11.5px] text-muted-foreground">{{ fmtAge(f.uploaded_at) }}</td>
-                  <td class="px-5 py-3 text-right">
+                  </TableCell>
+                  <TableCell class="py-3 text-[11.5px] text-muted-foreground">{{ fmtAge(f.uploaded_at) }}</TableCell>
+                  <TableCell class="px-5 py-3 text-right">
                     <div class="inline-flex gap-1.5">
                       <Button size="sm" @click="replaceTarget = f">替换</Button>
                       <Button
@@ -169,10 +173,10 @@ function onUploaded() {
                         删除
                       </Button>
                     </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
           </div>
         </template>
       </QueryState>

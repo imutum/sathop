@@ -4,6 +4,14 @@ import { useQuery } from "@tanstack/vue-query";
 import { API, type TimingStage } from "@/api";
 import { TIMING_STAGE_ZH, fmtDuration, fmtMs, fmtPerMinute } from "@/i18n";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import Field from "@/components/Field.vue";
 
 const props = defineProps<{ batchId: string; remaining: number; etaSeconds: number | null }>();
@@ -49,42 +57,40 @@ const doneCount = computed(() => data.value?.stages.upload.count ?? 0);
           <span class="tabular-nums">≈ {{ fmtDuration(etaSeconds * 1000) }}</span>
         </Field>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-muted/50 th-row">
-            <tr>
-              <th class="px-5 py-3">阶段</th>
-              <th class="px-2 py-3 text-right">样本数</th>
-              <th class="px-2 py-3 text-right">平均</th>
-              <th class="px-2 py-3 text-right">P50</th>
-              <th class="px-2 py-3 text-right">P95</th>
-              <th class="px-5 py-3 text-right">最大</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="st in STAGE_ORDER"
-              :key="st"
-              :class="['border-t border-border/60', data.stages[st].count === 0 ? 'text-muted-foreground' : '']"
-            >
-              <td class="px-5 py-2.5">{{ TIMING_STAGE_ZH[st] }}</td>
-              <td class="px-2 py-2.5 text-right tabular-nums">{{ data.stages[st].count }}</td>
-              <td class="px-2 py-2.5 text-right tabular-nums">
-                {{ data.stages[st].count === 0 ? "—" : fmtMs(data.stages[st].avg_ms) }}
-              </td>
-              <td class="px-2 py-2.5 text-right tabular-nums">
-                {{ data.stages[st].count === 0 ? "—" : fmtMs(data.stages[st].p50_ms) }}
-              </td>
-              <td class="px-2 py-2.5 text-right tabular-nums">
-                {{ data.stages[st].count === 0 ? "—" : fmtMs(data.stages[st].p95_ms) }}
-              </td>
-              <td class="px-5 py-2.5 text-right tabular-nums">
-                {{ data.stages[st].count === 0 ? "—" : fmtMs(data.stages[st].max_ms) }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <Table>
+        <TableHeader class="bg-muted/50">
+          <TableRow>
+            <TableHead class="px-5">阶段</TableHead>
+            <TableHead class="text-right">样本数</TableHead>
+            <TableHead class="text-right">平均</TableHead>
+            <TableHead class="text-right">P50</TableHead>
+            <TableHead class="text-right">P95</TableHead>
+            <TableHead class="px-5 text-right">最大</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow
+            v-for="st in STAGE_ORDER"
+            :key="st"
+            :class="data.stages[st].count === 0 ? 'text-muted-foreground' : ''"
+          >
+            <TableCell class="px-5">{{ TIMING_STAGE_ZH[st] }}</TableCell>
+            <TableCell class="text-right tabular-nums">{{ data.stages[st].count }}</TableCell>
+            <TableCell class="text-right tabular-nums">
+              {{ data.stages[st].count === 0 ? "—" : fmtMs(data.stages[st].avg_ms) }}
+            </TableCell>
+            <TableCell class="text-right tabular-nums">
+              {{ data.stages[st].count === 0 ? "—" : fmtMs(data.stages[st].p50_ms) }}
+            </TableCell>
+            <TableCell class="text-right tabular-nums">
+              {{ data.stages[st].count === 0 ? "—" : fmtMs(data.stages[st].p95_ms) }}
+            </TableCell>
+            <TableCell class="px-5 text-right tabular-nums">
+              {{ data.stages[st].count === 0 ? "—" : fmtMs(data.stages[st].max_ms) }}
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
     </template>
   </Card>
 </template>
