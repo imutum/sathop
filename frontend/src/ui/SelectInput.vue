@@ -1,8 +1,11 @@
 <script setup lang="ts">
-defineProps<{
-  modelValue: string;
-  ariaLabel?: string;
-}>();
+withDefaults(
+  defineProps<{
+    modelValue?: string;
+    ariaLabel?: string;
+  }>(),
+  { modelValue: "" },
+);
 
 defineEmits<{ "update:modelValue": [value: string] }>();
 defineOptions({ inheritAttrs: false });

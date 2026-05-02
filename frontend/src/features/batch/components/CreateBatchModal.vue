@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import { useMutation, useQuery } from "@tanstack/vue-query";
+import { useForm } from "vee-validate";
+import { toTypedSchema } from "@vee-validate/zod";
+import { z } from "zod";
 import { API } from "@/api";
 import { clearCred, hasCred, loadCred, saveCred } from "@/credCache";
 import { useToast } from "@/composables/useToast";
@@ -16,13 +19,19 @@ import {
   rowToGranule,
   validateRow,
 } from "@/features/batch/types";
-import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import FieldLabel from "@/components/FieldLabel.vue";
+import { Button } from "@/components/ui/button";
+import {
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import Modal from "@/ui/Modal.vue";
 import SelectInput from "@/ui/SelectInput.vue";
-import TextareaInput from "@/ui/TextareaInput.vue";
-import TextInput from "@/ui/TextInput.vue";
 import CreateBatchCredentials from "@/features/batch/components/CreateBatchCredentials.vue";
 import CreateBatchCsvModal from "@/features/batch/components/CreateBatchCsvModal.vue";
 import CreateBatchGranuleTable from "@/features/batch/components/CreateBatchGranuleTable.vue";
@@ -32,16 +41,50 @@ const emit = defineEmits<{ close: []; created: [] }>();
 
 const toast = useToast();
 
-const batchId = ref("");
-const name = ref("");
-const bundleSel = ref(props.initialBundle ?? "");
-const targetReceiver = ref("");
-const envText = ref("");
+// Header fields (vee-validate + zod). The granule rows and credentials
+// drafts have their own per-element validation patterns and stay
+// imperative; the submit gate combines all three layers below.
+const headerSchema = toTypedSchema(
+  z.object({
+    batchId: z.string().min(1, "请填批次 ID"),
+    name: z.string().min(1, "请填展示名称"),
+    bundleSel: z.string().min(1, "请选择任务包"),
+    targetReceiver: z.string().optional(),
+    envText: z
+      .string()
+      .optional()
+      .refine((v) => {
+        if (!v?.trim()) return true;
+        try {
+          const parsed = JSON.parse(v);
+          return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+        } catch {
+          return false;
+        }
+      }, "环境变量必须是 JSON 对象 {KEY: value}"),
+  }),
+);
+
+const { handleSubmit, meta: headerMeta, values: headerValues } = useForm({
+  validationSchema: headerSchema,
+  initialValues: {
+    batchId: "",
+    name: "",
+    bundleSel: props.initialBundle ?? "",
+    targetReceiver: "",
+    envText: "",
+  },
+});
+
 const rows = ref<Row[]>([]);
 const creds = reactive<Record<string, CredDraft>>({});
 const remember = reactive<Record<string, boolean>>({});
 const submitError = ref<string | null>(null);
 const showCsv = ref(false);
+
+// Reactive references into header form values, used by downstream queries
+// and watches without leaking the useForm internals.
+const bundleSel = computed(() => headerValues.bundleSel ?? "");
 
 const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
 const bundles = useQuery({ queryKey: ["bundles"], queryFn: API.bundles });
@@ -93,21 +136,17 @@ watch(
   { immediate: true },
 );
 
-const parsedEnv = computed<
-  { ok: true; value: Record<string, string> } | { ok: false; error: string }
->(() => {
-  const txt = envText.value.trim();
-  if (!txt) return { ok: true, value: {} };
+// JSON validity is enforced by the zod schema; this computed only converts
+// the validated string into the `Record<string, string>` payload shape.
+const parsedEnv = computed<Record<string, string>>(() => {
+  const txt = headerValues.envText?.trim() ?? "";
+  if (!txt) return {};
   try {
     const v = JSON.parse(txt);
-    if (typeof v !== "object" || v === null || Array.isArray(v)) {
-      return { ok: false, error: "必须是 JSON 对象 {KEY: value}" };
-    }
-    const out: Record<string, string> = {};
-    for (const [k, val] of Object.entries(v)) out[k] = String(val);
-    return { ok: true, value: out };
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    if (typeof v !== "object" || v === null || Array.isArray(v)) return {};
+    return Object.fromEntries(Object.entries(v).map(([k, val]) => [k, String(val)]));
+  } catch {
+    return {};
   }
 });
 
@@ -135,14 +174,14 @@ const credsValid = computed(() =>
 const create = useMutation({
   mutationFn: () =>
     API.createBatch({
-      batch_id: batchId.value,
-      name: name.value,
-      bundle_ref: `orch:${bundleSel.value}`,
-      target_receiver_id: targetReceiver.value || null,
+      batch_id: headerValues.batchId!,
+      name: headerValues.name!,
+      bundle_ref: `orch:${headerValues.bundleSel}`,
+      target_receiver_id: headerValues.targetReceiver || null,
       granules: rows.value.map((r) => rowToGranule(r, schema.value!.slots)),
-      execution_env: parsedEnv.value.ok ? parsedEnv.value.value : {},
+      execution_env: parsedEnv.value,
       credentials: credsPayload.value,
-  }),
+    }),
   onSuccess: (b) => {
     submitError.value = null;
     for (const n of requiredCreds.value) {
@@ -162,13 +201,13 @@ const create = useMutation({
   },
 });
 
+// Submit gate: header (vee-validate) + rows table + credentials drafts.
+// `disabledReason` is the user-facing tooltip when the submit button is
+// greyed; vee-validate covers header field errors via FormMessage.
 const disabledReason = computed<string | null>(() => {
   if (create.isPending.value) return null;
-  if (!batchId.value.trim()) return "请先填批次 ID";
-  if (!name.value.trim()) return "请先填展示名称";
-  if (!bundleSel.value) return "请先选择任务包";
+  if (!headerMeta.value.valid) return "请先完成顶部表单";
   if (!allRowsOk.value) return "数据粒表格有未填或不合法的字段";
-  if (!parsedEnv.value.ok) return "环境变量 JSON 不合法";
   if (!credsValid.value) return "凭证未填完";
   return null;
 });
@@ -187,30 +226,25 @@ function credentialsHaveDraftContent(drafts: Record<string, CredDraft>) {
   return Object.values(drafts).some((d) => d.username.trim() !== "" || d.secret.trim() !== "");
 }
 
-const dirty = computed(() => {
-  return (
-    batchId.value.trim() !== "" ||
-    name.value.trim() !== "" ||
-    bundleSel.value !== "" ||
-    targetReceiver.value !== "" ||
-    envText.value.trim() !== "" ||
+const dirty = computed(
+  () =>
+    headerMeta.value.dirty ||
     rows.value.some(rowHasDraftContent) ||
-    credentialsHaveDraftContent(creds)
-  );
-});
+    credentialsHaveDraftContent(creds),
+);
 
 function tryClose() {
   emit("close");
 }
 
-function submit() {
+const onSubmit = handleSubmit(() => {
   if (canSubmit.value) create.mutate();
-}
+});
 
 function onKeydown(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && canSubmit.value) {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
-    create.mutate();
+    void onSubmit();
   }
 }
 
@@ -248,64 +282,71 @@ function onForget(n: string) {
       <kbd class="kbd">Esc</kbd>
       <span>关闭</span>
     </div>
-    <form @submit.prevent="submit" @keydown="onKeydown" class="space-y-3 text-sm">
+    <form @submit.prevent="onSubmit" @keydown="onKeydown" class="space-y-3 text-sm">
       <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <label class="block">
-          <FieldLabel required>批次 ID</FieldLabel>
-          <TextInput
-            required
-            v-model="batchId"
-            placeholder="如 mod09a1-2024001"
-            class="mt-1.5 font-mono text-xs"
-          />
-        </label>
-        <label class="block">
-          <FieldLabel required>展示名称</FieldLabel>
-          <TextInput
-            required
-            v-model="name"
-            placeholder="MOD09A1 2024 第 1 天"
-            class="mt-1.5"
-          />
-        </label>
-        <label class="block">
-          <FieldLabel>目标接收端</FieldLabel>
-          <SelectInput
-            v-model="targetReceiver"
-            class="mt-1.5"
-          >
-            <option value="">任意（由调度器决定）</option>
-            <option
-              v-for="r in receivers.data.value ?? []"
-              :key="r.receiver_id"
-              :value="r.receiver_id"
-            >
-              {{ r.receiver_id }}
-            </option>
-          </SelectInput>
-        </label>
+        <FormField v-slot="{ componentField }" name="batchId">
+          <FormItem>
+            <FormLabel>批次 ID</FormLabel>
+            <FormControl>
+              <Input
+                v-bind="componentField"
+                placeholder="如 mod09a1-2024001"
+                class="font-mono text-xs"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+        <FormField v-slot="{ componentField }" name="name">
+          <FormItem>
+            <FormLabel>展示名称</FormLabel>
+            <FormControl>
+              <Input v-bind="componentField" placeholder="MOD09A1 2024 第 1 天" />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
+        <FormField v-slot="{ componentField }" name="targetReceiver">
+          <FormItem>
+            <FormLabel>目标接收端</FormLabel>
+            <FormControl>
+              <SelectInput v-bind="componentField">
+                <option value="">任意（由调度器决定）</option>
+                <option
+                  v-for="r in receivers.data.value ?? []"
+                  :key="r.receiver_id"
+                  :value="r.receiver_id"
+                >
+                  {{ r.receiver_id }}
+                </option>
+              </SelectInput>
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
       </div>
 
-      <label class="block">
-        <FieldLabel required>任务包</FieldLabel>
-        <SelectInput
-          required
-          v-model="bundleSel"
-          class="mt-1.5 font-mono text-xs"
-        >
-          <option value="">-- 选择任务包 --</option>
-          <option
-            v-for="b in bundles.data.value ?? []"
-            :key="`${b.name}@${b.version}`"
-            :value="`${b.name}@${b.version}`"
-          >
-            {{ b.name }}@{{ b.version }}{{ b.description ? ` — ${b.description}` : "" }}
-          </option>
-        </SelectInput>
-        <div v-if="(bundles.data.value ?? []).length === 0" class="mt-1 text-[11px] text-warning">
-          尚无已注册任务包。先到"任务包"页上传一个 ZIP。
-        </div>
-      </label>
+      <FormField v-slot="{ componentField }" name="bundleSel">
+        <FormItem>
+          <FormLabel>任务包</FormLabel>
+          <FormControl>
+            <SelectInput v-bind="componentField" class="font-mono text-xs">
+              <option value="">-- 选择任务包 --</option>
+              <option
+                v-for="b in bundles.data.value ?? []"
+                :key="`${b.name}@${b.version}`"
+                :value="`${b.name}@${b.version}`"
+              >
+                {{ b.name }}@{{ b.version }}{{ b.description ? ` — ${b.description}` : "" }}
+              </option>
+            </SelectInput>
+          </FormControl>
+          <FormMessage />
+          <div v-if="(bundles.data.value ?? []).length === 0" class="text-[11px] text-warning">
+            尚无已注册任务包。先到"任务包"页上传一个 ZIP。
+          </div>
+        </FormItem>
+      </FormField>
 
       <div
         v-if="bundleDetail.data.value && schema"
@@ -348,15 +389,19 @@ function onForget(n: string) {
         <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition hover:text-foreground">
           高级：环境变量覆盖（可选，JSON 对象）
         </summary>
-        <TextareaInput
-          v-model="envText"
-          :placeholder="'{\n  &quot;SATHOP_FACTOR&quot;: &quot;4&quot;\n}'"
-          rows="3"
-          class="mt-2 font-mono text-xs"
-        />
-        <div v-if="!parsedEnv.ok" class="mt-1 text-[11px] text-danger">
-          JSON 错误：{{ parsedEnv.error }}
-        </div>
+        <FormField v-slot="{ componentField }" name="envText">
+          <FormItem class="mt-2">
+            <FormControl>
+              <Textarea
+                v-bind="componentField"
+                :placeholder="'{\n  &quot;SATHOP_FACTOR&quot;: &quot;4&quot;\n}'"
+                rows="3"
+                class="font-mono text-xs"
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        </FormField>
       </details>
 
       <Alert v-if="submitError" variant="destructive">
