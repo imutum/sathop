@@ -8,6 +8,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from sathop import __version__
+
 from .api import router as api_router
 from .background import run_lease_sweeper, run_retention
 from .config import settings
@@ -15,7 +17,6 @@ from .db import init_db, shutdown_db
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WEB_DIST = PROJECT_ROOT / "frontend" / "dist"
-VERSION = "0.2.1"
 
 
 def _print_banner() -> None:
@@ -28,7 +29,7 @@ def _print_banner() -> None:
     token = "set ✓" if settings.token else "OPEN — anyone on the network can call /api/*"
     lines = [
         "",
-        f"  SatHop Orchestrator v{VERSION}",
+        f"  SatHop Orchestrator v{__version__}",
         f"    Listen   {settings.host}:{settings.port}",
         f"    API      {base}/api",
         f"    Web UI   {base}/   ({web})",
@@ -62,13 +63,13 @@ async def lifespan(app: FastAPI):
         await shutdown_db()
 
 
-app = FastAPI(title="SatHop Orchestrator", version=VERSION, lifespan=lifespan)
+app = FastAPI(title="SatHop Orchestrator", version=__version__, lifespan=lifespan)
 app.include_router(api_router)
 
 
 @app.get("/api/health")
 async def health() -> dict:
-    return {"status": "ok", "version": VERSION}
+    return {"status": "ok", "version": __version__}
 
 
 if WEB_DIST.is_dir():
