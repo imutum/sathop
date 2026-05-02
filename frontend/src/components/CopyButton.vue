@@ -33,5 +33,7 @@ function onCopy(e: MouseEvent) {
       :size="11"
       :stroke-width="copied ? 2.4 : 2"
     />
+    <!-- Live-region announcement so screen readers confirm the copy. -->
+    <span class="sr-only" aria-live="polite">{{ copied ? "已复制" : "" }}</span>
   </button>
 </template>
