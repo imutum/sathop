@@ -10,6 +10,11 @@ const TOKEN_KEY = "sathop.token";
 
 const ready = ref(!!localStorage.getItem(TOKEN_KEY));
 
+// Singleton view of the auth state, readable outside of a setup() context
+// (router guards, directives). Mirrors `ready` exactly today; if the
+// backend later ships a richer auth model, this is where to extend.
+export const isAuthenticated = ready;
+
 function markReady() {
   ready.value = true;
 }

@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router";
+import { hasPermission } from "@/composables/usePermissions";
 
 // Route-level code splitting keeps the initial page small while the default
 // dashboard stays at the root path.
@@ -39,4 +40,21 @@ const routes: RouteRecordRaw[] = [
 export const router = createRouter({
   history: createWebHistory(),
   routes,
+});
+
+// Permission guard. Routes can declare `meta: { permission: 'name' }` (or an
+// array, with an optional `permissionMode: 'any'` for OR semantics). When the
+// check fails, push the user back to '/' rather than rendering a 403 — there
+// is no permission UI today; the guard exists for future role-based features.
+//
+// Auth gating itself stays at the App.vue level (Login splash on !ready),
+// which preserves the OPEN-mode probe UX without flashing /login during
+// orchestrator-without-token boots.
+router.beforeEach((to) => {
+  const perm = to.meta.permission as string | string[] | undefined;
+  const mode = (to.meta.permissionMode as "all" | "any" | undefined) ?? "all";
+  if (perm && !hasPermission(perm, mode)) {
+    return { path: "/", replace: true };
+  }
+  return true;
 });
