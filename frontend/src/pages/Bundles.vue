@@ -79,13 +79,11 @@ function onUploaded(d: BundleDetail) {
 <template>
   <div class="space-y-6">
     <PageHeader
-      n="03"
-      kicker="PAYLOAD · BUNDLES"
       title="任务包"
       description="用户脚本注册表 · 批次通过 orch:<name>@<version> 引用"
     >
       <template #actions>
-        <Button variant="default" @click="showUpload = true">
+        <Button variant="default" @click="showUpload = true" title="上传含 manifest.yaml + 入口脚本的 ZIP 包">
           <Icon name="upload" :size="13" />
           上传 ZIP
         </Button>
@@ -113,9 +111,20 @@ function onUploaded(d: BundleDetail) {
           <template #empty>
             <EmptyState
               title="还没有任务包"
-              description='点击上方"上传 ZIP"开始添加。'
               illustration="inbox"
-            />
+            >
+              <template #description>
+                <div class="space-y-2 text-left">
+                  <p>用户脚本以 ZIP 形式上传，批次通过 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">orch:&lt;name&gt;@&lt;version&gt;</code> 引用。</p>
+                  <p>ZIP 结构示例：</p>
+                  <pre class="rounded bg-muted px-3 py-2 text-mini font-mono text-foreground/80">my-bundle/
+├── manifest.yaml      # 版本、入口、依赖、输入/输出
+├── entrypoint.py      # 处理脚本
+└── requirements.txt   # 可选 pip 依赖</pre>
+                  <p>本地用 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">sathop-upload-bundle</code> 命令上传更方便（自带 manifest 校验）。</p>
+                </div>
+              </template>
+            </EmptyState>
           </template>
           <template #default="{ data: bundleRows }">
             <!-- Narrow: card list. Each row collapses into a stacked card. -->

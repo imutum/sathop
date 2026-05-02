@@ -145,15 +145,12 @@ function highlight(text: string, n: string): HighlightSeg[] {
 <template>
   <div class="space-y-6">
     <PageHeader
-      n="07"
-      kicker="SYSTEM · SIGNAL LOG"
       title="事件日志"
       description="所有 Orchestrator / Worker / Receiver 上报事件的合并视图"
     >
       <template #actions>
-        <span class="readout inline-flex items-center gap-1.5 rounded-sm border border-border bg-muted px-2.5 py-1 text-3xs font-semibold uppercase tracking-section text-muted-foreground tabular-nums">
-          <span class="text-foreground">{{ visible.length }}</span>/<span>{{ rows.length }}</span>
-          <span class="text-muted-foreground/70">EVENTS</span>
+        <span class="rounded-full border border-border bg-muted px-3 py-1 text-2xs font-medium tabular-nums text-muted-foreground">
+          <span class="text-foreground">{{ visible.length }}</span> / {{ rows.length }} 条
         </span>
       </template>
     </PageHeader>
@@ -201,8 +198,26 @@ function highlight(text: string, n: string): HighlightSeg[] {
           @click="clearAll"
           class="h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
         >
-          清除
+          清除筛选
         </button>
+      </div>
+      <!-- Level legend — explains the dot colors so first-time users don't
+           have to decode them. Only shown when there's actually a list to read. -->
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-border/60 bg-muted/30 px-5 py-2 text-2xs text-muted-foreground">
+        <span class="font-medium">图例</span>
+        <span class="inline-flex items-center gap-1.5">
+          <span class="h-1.5 w-1.5 rounded-full bg-muted-foreground/70" aria-hidden />
+          <span>信息</span>
+        </span>
+        <span class="inline-flex items-center gap-1.5">
+          <span class="h-1.5 w-1.5 rounded-full bg-warning" aria-hidden />
+          <span>警告（值得关注但未失败）</span>
+        </span>
+        <span class="inline-flex items-center gap-1.5">
+          <span class="h-1.5 w-1.5 rounded-full bg-danger" aria-hidden />
+          <span>错误（处理失败 / 异常）</span>
+        </span>
+        <span class="ml-auto text-muted-foreground/70">长消息可点击展开</span>
       </div>
 
       <div class="max-h-[70vh] overflow-auto font-mono">

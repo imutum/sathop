@@ -11,11 +11,7 @@ const info = useQuery({ queryKey: ["orch-info"], queryFn: API.orchestratorInfo }
 
 <template>
   <div class="space-y-6">
-    <PageHeader n="08" kicker="SYSTEM · CONFIG" title="设置" description="Orchestrator 当前运行时配置（只读）">
-      <template #meta>
-        <span v-if="info.data.value">v{{ info.data.value.version }} · {{ info.data.value.python_version }}</span>
-      </template>
-    </PageHeader>
+    <PageHeader title="设置" description="Orchestrator 当前运行时配置（只读）" />
 
     <Alert v-if="info.data.value?.auth_open" variant="warning">
       <AlertDescription>

@@ -7,6 +7,7 @@ export default {
   theme: {
     extend: {
       colors: {
+        // shadcn-vue standard tokens (slate baseColor).
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",
         card: {
@@ -41,35 +42,36 @@ export default {
         input: "hsl(var(--input) / <alpha-value>)",
         ring: "hsl(var(--ring) / <alpha-value>)",
 
+        // Status tokens (no shadcn equivalent).
         success: "hsl(var(--success) / <alpha-value>)",
         warning: "hsl(var(--warning) / <alpha-value>)",
         danger: "hsl(var(--danger) / <alpha-value>)",
-        signal: "hsl(var(--signal) / <alpha-value>)",
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
-        xl: "0.5rem",
-        "2xl": "0.5rem",
+        xl: "0.75rem",
+        "2xl": "1rem",
       },
       fontSize: {
-        // Sub-text-xs scale for the dense ops UI. Names match Shadboard's
-        // mini convention but tuned for tabular density.
+        // Sub-text-xs scale for the dense admin UI. Adding a literal here
+        // is preferred over `text-[NNpx]` so future tweaks happen in one
+        // file.
         //
-        //   3xs   10px    smallest captions (corner coords, footer credits)
+        //   3xs   10px    smallest captions
         //   mini  10.5px  uppercase mini-labels (Field / Stat / kbd)
         //   2xs   11px    dense small UI
         //   cell  11.5px  mono table cells / row metadata
-        "3xs": ["10px", "13px"],
+        "3xs": ["10px", "14px"],
         mini: ["10.5px", "14px"],
         "2xs": ["11px", "15px"],
         cell: ["11.5px", "16px"],
       },
       letterSpacing: {
-        label: "0.14em",
-        brand: "0.22em",
-        section: "0.20em",
+        // Two project-specific tracking values; the rest come from Tailwind defaults.
+        label: "0.12em", // mini-labels: Field / Stat / sidebar section headings
+        brand: "0.18em", // app brand mark (AppLayout / Login)
       },
       fontFamily: {
         sans: [
@@ -81,22 +83,19 @@ export default {
           "sans-serif",
         ],
         mono: [
-          '"JetBrains Mono"',
           '"Geist Mono"',
+          '"JetBrains Mono"',
           "ui-monospace",
           "SFMono-Regular",
           "Menlo",
           "monospace",
         ],
-        display: ['"Fraunces"', '"Times New Roman"', "serif"],
       },
       boxShadow: {
-        soft: "0 1px 2px 0 hsl(var(--shadow) / 0.06)",
-        card: "0 1px 0 0 hsl(var(--shadow) / 0.04), 0 1px 2px 0 hsl(var(--shadow) / 0.05)",
-        pop: "0 12px 32px -16px hsl(var(--shadow) / 0.30), 0 4px 10px -6px hsl(var(--shadow) / 0.18)",
-        glow: "0 0 0 1px hsl(var(--primary) / 0.18), 0 0 24px -4px hsl(var(--primary) / 0.20)",
-        "ring-soft": "0 0 0 4px hsl(var(--primary) / 0.14)",
-        "inset-rule": "inset 0 -1px 0 0 hsl(var(--rule-soft))",
+        soft: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
+        card: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
+        pop: "0 10px 24px -12px hsl(var(--shadow) / 0.24), 0 4px 8px -6px hsl(var(--shadow) / 0.18)",
+        "ring-soft": "0 0 0 4px hsl(var(--primary) / 0.12)",
       },
       keyframes: {
         "fade-in": {
@@ -115,10 +114,6 @@ export default {
           "0%,100%": { opacity: "1" },
           "50%": { opacity: "0.55" },
         },
-        sweep: {
-          "0%": { transform: "translateX(-100%)" },
-          "100%": { transform: "translateX(100%)" },
-        },
         "accordion-down": {
           from: { height: "0" },
           to: { height: "var(--reka-accordion-content-height)" },
@@ -133,7 +128,6 @@ export default {
         "scale-in": "scale-in 0.18s ease-out both",
         "slide-up": "slide-up 0.24s cubic-bezier(0.22,1,0.36,1) both",
         "pulse-soft": "pulse_soft 2.4s ease-in-out infinite",
-        sweep: "sweep 1.6s linear infinite",
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
       },

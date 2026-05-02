@@ -60,15 +60,15 @@ function onUploaded() {
 
 <template>
   <div class="space-y-6">
-    <PageHeader n="04" kicker="PAYLOAD · SHARED" title="共享文件">
+    <PageHeader title="共享文件">
       <template #description>
         被任务包通过
-        <code class="rounded bg-muted px-1.5 py-0.5 readout text-2xs">shared_files</code>
-        引用的辅助资源，Worker 按需拉取到
-        <code class="rounded bg-muted px-1.5 py-0.5 readout text-2xs">$SATHOP_SHARED_DIR</code>。
+        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs">shared_files</code>
+        引用的辅助资源（掩膜、DEM、查找表等），Worker 按需拉取到
+        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs">$SATHOP_SHARED_DIR</code>。
       </template>
       <template #actions>
-        <Button variant="default" @click="showUpload = true">
+        <Button variant="default" @click="showUpload = true" title="上传一个新的共享文件，需在任务包 manifest.shared_files 中引用">
           <Icon name="upload" :size="13" />
           上传文件
         </Button>

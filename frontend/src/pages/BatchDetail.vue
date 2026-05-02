@@ -264,15 +264,15 @@ async function confirmDelete() {
     <div>
       <RouterLink
         to="/batches"
-        class="readout inline-flex items-center gap-1.5 text-3xs uppercase tracking-section text-muted-foreground transition hover:text-foreground"
+        class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground"
       >
-        <Icon name="arrowLeft" :size="11" />
-        BATCHES · INDEX
+        <Icon name="arrowLeft" :size="12" />
+        返回批次列表
       </RouterLink>
-      <div class="mt-3">
-        <PageHeader kicker="MISSION · DETAIL" :title="b?.name ?? batchId">
+      <div class="mt-2">
+        <PageHeader :title="b?.name ?? batchId">
           <template #description>
-            <span class="readout inline-flex items-center text-cell text-muted-foreground">
+            <span class="inline-flex items-center font-mono text-cell text-muted-foreground">
               {{ batchId }}
               <CopyButton :value="batchId" title="复制批次 ID" />
             </span>

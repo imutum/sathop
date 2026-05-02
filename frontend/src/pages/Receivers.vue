@@ -15,11 +15,7 @@ const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
 
 <template>
   <div class="space-y-6">
-    <PageHeader n="06" kicker="FLEET · RECEIVERS" title="接收端" description="拉取 Worker 已上传产物的下游消费者">
-      <template #meta>
-        <span>{{ receivers.data.value?.length ?? 0 }} · ENDPOINTS</span>
-      </template>
-    </PageHeader>
+    <PageHeader title="接收端" description="拉取 Worker 已上传产物的下游消费者" />
 
     <QueryState :query="receivers">
       <template #loading>

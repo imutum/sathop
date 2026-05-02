@@ -40,11 +40,7 @@ function setRef(id: string, el: Element | null) {
 
 <template>
   <div class="space-y-6">
-    <PageHeader n="05" kicker="FLEET · WORKERS" title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列">
-      <template #meta>
-        <span>{{ list.length }} · NODES REGISTERED</span>
-      </template>
-    </PageHeader>
+    <PageHeader title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列" />
 
     <QueryState :query="workers">
       <template #loading>

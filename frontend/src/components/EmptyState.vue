@@ -3,8 +3,8 @@ withDefaults(
   defineProps<{
     title: string;
     description?: string;
-    /** `inbox` for genuine "no items" silence; `signal` is mission-control
-        themed (a small antenna with a soft amber sweep). */
+    /** `inbox` for genuine "no items" silence; `signal` is a soft antenna
+        — used when the queue is intentionally empty (idle but healthy). */
     illustration?: "none" | "inbox" | "signal";
   }>(),
   { illustration: "none" },
@@ -13,7 +13,7 @@ withDefaults(
 
 <template>
   <div class="flex flex-col items-center justify-center gap-4 py-14 text-center">
-    <!-- Inbox: papered tray, neutral. -->
+    <!-- Inbox: a paper sheet behind, open inbox in front. Neutral. -->
     <svg
       v-if="illustration === 'inbox'"
       width="92"
@@ -48,7 +48,7 @@ withDefaults(
       />
     </svg>
 
-    <!-- Signal: little antenna with concentric arcs — mission-themed. -->
+    <!-- Signal: little antenna with concentric arcs. -->
     <svg
       v-else-if="illustration === 'signal'"
       width="92"
@@ -60,22 +60,22 @@ withDefaults(
     >
       <path d="M60 70 L60 32" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
       <path d="M48 84 L72 84 L66 70 L54 70 Z" fill="hsl(var(--muted))" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" />
-      <circle cx="60" cy="30" r="3" fill="hsl(var(--primary))" />
-      <path d="M40 30 a20 20 0 0 1 40 0" stroke="hsl(var(--primary) / 0.5)" stroke-width="1.4" fill="none" />
-      <path d="M28 30 a32 32 0 0 1 64 0" stroke="hsl(var(--primary) / 0.3)" stroke-width="1.2" fill="none" />
-      <path d="M16 30 a44 44 0 0 1 88 0" stroke="hsl(var(--primary) / 0.18)" stroke-width="1" fill="none" />
+      <circle cx="60" cy="30" r="3" fill="currentColor" />
+      <path d="M40 30 a20 20 0 0 1 40 0" stroke="currentColor" stroke-width="1.4" fill="none" opacity="0.55" />
+      <path d="M28 30 a32 32 0 0 1 64 0" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35" />
+      <path d="M16 30 a44 44 0 0 1 88 0" stroke="currentColor" stroke-width="1" fill="none" opacity="0.2" />
     </svg>
 
     <div
       v-else-if="$slots.icon"
-      class="grid h-12 w-12 place-items-center rounded-md border border-border bg-muted text-muted-foreground"
+      class="grid h-12 w-12 place-items-center rounded-lg border border-border bg-muted text-muted-foreground"
     >
       <slot name="icon" />
     </div>
 
     <div class="space-y-1">
-      <div class="text-[13px] font-medium text-foreground">{{ title }}</div>
-      <div v-if="$slots.description || description" class="readout max-w-md text-3xs text-muted-foreground">
+      <div class="text-sm font-medium text-foreground">{{ title }}</div>
+      <div v-if="$slots.description || description" class="max-w-md text-xs text-muted-foreground">
         <slot name="description">{{ description }}</slot>
       </div>
     </div>

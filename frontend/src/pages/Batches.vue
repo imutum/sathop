@@ -204,19 +204,14 @@ function onCreated() {
 <template>
   <div class="space-y-6">
     <PageHeader
-      n="02"
-      kicker="MISSIONS"
       title="批次"
       description="管线提交单元 · 一个批次承载一组数据粒、统一的任务包与凭证"
     >
       <template #actions>
-        <Button variant="default" @click="showCreate = true">
+        <Button variant="default" @click="showCreate = true" title="提交一组数据粒，绑定任务包与凭证">
           <Icon name="plus" :size="13" />
           新建任务
         </Button>
-      </template>
-      <template #meta>
-        <span>{{ allCount }} · BATCHES TRACKED</span>
       </template>
     </PageHeader>
 

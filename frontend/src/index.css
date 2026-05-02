@@ -2,81 +2,66 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ──────────────────────────────────────────────────────────────────────
-   ORBITAL OPS — design tokens
-   Light:  paper cream + ink accents, tactical amber signature.
-   Dark :  ink-blue stratosphere + warm cream type, signature amber lifted.
-   The amber is a single, unmistakable accent for "active / live"; warning
-   is a desaturated cousin so they coexist without competing.
-   ────────────────────────────────────────────────────────────────────── */
+/* Tokens follow shadcn-vue's slate baseColor verbatim. We add `success` /
+   `warning` (shadcn ships only destructive) so status semantics are typed
+   instead of literal Tailwind palette colors. Nothing else is bespoke. */
 @layer base {
   :root {
-    --background: 38 36% 95%;
-    --foreground: 220 35% 9%;
-    --card: 36 28% 98%;
-    --card-foreground: 220 35% 9%;
-    --popover: 36 28% 98%;
-    --popover-foreground: 220 35% 9%;
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
 
-    --primary: 28 88% 48%;          /* tactical amber */
-    --primary-foreground: 36 28% 98%;
-    --secondary: 38 22% 90%;
-    --secondary-foreground: 220 35% 12%;
-    --muted: 38 22% 92%;
-    --muted-foreground: 220 14% 36%;
-    --accent: 28 88% 48%;
-    --accent-foreground: 36 28% 98%;
-    --destructive: 4 72% 47%;
-    --destructive-foreground: 36 28% 98%;
-
-    --border: 30 16% 84%;
-    --input: 30 16% 84%;
-    --ring: 28 88% 48%;
-    --radius: 0.375rem;
-
-    --success: 152 48% 35%;
-    --warning: 35 78% 46%;
-    --danger: 4 72% 47%;
-    --signal: 28 88% 48%;           /* live / telemetry */
-    --shadow: 220 35% 12%;
-    --surface-edge: 36 28% 98%;
-    --rule: 220 14% 36%;            /* hairline ruling color */
-    --rule-soft: 30 16% 84%;
+    /* Status tokens — typed extras on top of the slate base. */
+    --success: 142 71% 35%;
+    --warning: 38 92% 45%;
+    --danger: 0 72% 50%;
+    --shadow: 222.2 84% 4.9%;
 
     color-scheme: light;
   }
 
   .dark {
-    --background: 220 35% 6%;
-    --foreground: 36 30% 92%;
-    --card: 220 30% 8%;
-    --card-foreground: 36 30% 92%;
-    --popover: 220 32% 9%;
-    --popover-foreground: 36 30% 92%;
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 47.4% 7.5%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 55%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
 
-    --primary: 32 95% 60%;
-    --primary-foreground: 220 35% 6%;
-    --secondary: 220 22% 14%;
-    --secondary-foreground: 36 30% 92%;
-    --muted: 220 22% 13%;
-    --muted-foreground: 36 12% 65%;
-    --accent: 32 95% 60%;
-    --accent-foreground: 220 35% 6%;
-    --destructive: 4 78% 60%;
-    --destructive-foreground: 36 30% 96%;
-
-    --border: 220 18% 18%;
-    --input: 220 18% 18%;
-    --ring: 32 95% 60%;
-
-    --success: 150 55% 55%;
-    --warning: 38 90% 60%;
-    --danger: 4 78% 60%;
-    --signal: 32 95% 60%;
-    --shadow: 220 60% 1%;
-    --surface-edge: 220 22% 14%;
-    --rule: 36 12% 65%;
-    --rule-soft: 220 18% 18%;
+    --success: 142 69% 45%;
+    --warning: 38 92% 55%;
+    --danger: 0 62.8% 55%;
+    --shadow: 0 0% 0%;
 
     color-scheme: dark;
   }
@@ -89,22 +74,9 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-feature-settings: "ss01", "ss02", "cv11", "cv01";
+    font-feature-settings: "ss01", "cv11", "cv01";
     font-size: 14px;
     text-rendering: optimizeLegibility;
-    /* Subtle layered atmosphere — light: warm paper grain; dark: starfield. */
-    background-image:
-      radial-gradient(
-        ellipse 1200px 800px at 8% -10%,
-        hsl(var(--primary) / 0.06),
-        transparent 60%
-      ),
-      radial-gradient(
-        ellipse 800px 600px at 110% 110%,
-        hsl(var(--primary) / 0.04),
-        transparent 60%
-      );
-    background-attachment: fixed;
   }
 
   ::selection {
@@ -115,7 +87,7 @@
   :where(button, a, input, select, textarea, [role="button"]):focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.55);
-    border-radius: 0.375rem;
+    border-radius: 0.5rem;
   }
 }
 
@@ -124,101 +96,30 @@
     @apply text-mini font-medium uppercase tracking-label text-muted-foreground;
   }
   .kbd {
-    @apply rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10.5px];
-  }
-  /* Hairline horizontal rule — used between row groups, baseline anchors. */
-  .rule {
-    height: 1px;
-    background: linear-gradient(
-      to right,
-      transparent,
-      hsl(var(--rule) / 0.30) 8%,
-      hsl(var(--rule) / 0.30) 92%,
-      transparent
-    );
-  }
-  /* Mono numerical readout — for tabular IDs, timestamps, counters. */
-  .readout {
-    font-family: "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
-    font-feature-settings: "ss01", "ss02", "ss03", "zero";
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
-  }
-  /* Display serif — Fraunces tuned for "instrumented" look. */
-  .display {
-    font-family: "Fraunces", "Times New Roman", serif;
-    font-optical-sizing: auto;
-    font-variation-settings: "opsz" 96, "SOFT" 30;
-    letter-spacing: -0.025em;
-  }
-  /* Signal LED — a 6px dot with breathing glow. */
-  .signal-led {
-    position: relative;
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: 9999px;
-    background: hsl(var(--signal));
-    box-shadow: 0 0 0 0 hsl(var(--signal) / 0.6);
-    animation: signal-pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-  .signal-led--idle {
-    background: hsl(var(--muted-foreground));
-    animation: none;
-    box-shadow: none;
+    @apply rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10.5px];
   }
 }
 
 @layer utilities {
-  .font-display {
-    font-family: "Fraunces", "Times New Roman", serif;
-    font-optical-sizing: auto;
-    font-variation-settings: "opsz" 96, "SOFT" 30;
-    letter-spacing: -0.025em;
-  }
   .text-balance {
     text-wrap: balance;
   }
-  /* Coordinate / grid background — extremely subtle, sits behind content. */
   .bg-grid {
     background-image:
-      linear-gradient(to right, hsl(var(--rule-soft) / 0.55) 1px, transparent 1px),
-      linear-gradient(to bottom, hsl(var(--rule-soft) / 0.55) 1px, transparent 1px);
+      linear-gradient(to right, hsl(var(--border) / 0.6) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.6) 1px, transparent 1px);
     background-size: 32px 32px;
     background-position: -1px -1px;
   }
   .bg-dotgrid {
     background-image: radial-gradient(
-      hsl(var(--rule-soft) / 0.85) 1px,
+      hsl(var(--border) / 0.85) 1px,
       transparent 1px
     );
     background-size: 18px 18px;
   }
-  /* Light starfield — only meaningful in dark mode (cream paper invisible). */
-  .bg-starfield {
-    background-image:
-      radial-gradient(circle at 12% 22%, hsl(var(--foreground) / 0.10) 0.6px, transparent 1.2px),
-      radial-gradient(circle at 78% 38%, hsl(var(--foreground) / 0.08) 0.5px, transparent 1px),
-      radial-gradient(circle at 42% 76%, hsl(var(--foreground) / 0.10) 0.6px, transparent 1.2px),
-      radial-gradient(circle at 88% 88%, hsl(var(--foreground) / 0.06) 0.5px, transparent 1px),
-      radial-gradient(circle at 30% 92%, hsl(var(--foreground) / 0.07) 0.5px, transparent 1px);
-  }
-  /* Hairline rule applied as a top/bottom divider via class. */
-  .rule-t {
-    border-top: 1px solid hsl(var(--rule-soft));
-  }
-  .rule-b {
-    border-bottom: 1px solid hsl(var(--rule-soft));
-  }
-  /* Tabular-baseline mono numeric — convenience class. */
-  .num {
-    font-family: "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
-    font-variant-numeric: tabular-nums;
-    font-feature-settings: "ss01", "ss02", "ss03", "zero";
-  }
 }
 
-/* Scrollbar — thin, ink-tone, signature amber thumb on hover. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -227,46 +128,16 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--rule-soft));
+  background: hsl(var(--border));
   border: 2px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--primary) / 0.70);
+  background: hsl(var(--muted-foreground) / 0.6);
   background-clip: content-box;
 }
 * {
-  scrollbar-color: hsl(var(--rule-soft)) transparent;
+  scrollbar-color: hsl(var(--border)) transparent;
   scrollbar-width: thin;
-}
-
-/* Signal LED breathing animation. */
-@keyframes signal-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 hsl(var(--signal) / 0.55);
-    transform: scale(1);
-  }
-  50% {
-    box-shadow: 0 0 0 5px hsl(var(--signal) / 0);
-    transform: scale(1.08);
-  }
-}
-
-/* Marching ants — used on "live capture" rows / streaming markers. */
-@keyframes marching {
-  to {
-    background-position: 12px 0;
-  }
-}
-
-/* Telemetry sweep — a thin amber line that traverses left → right, used on
-   loading bars and live indicators. Honors prefers-reduced-motion. */
-@keyframes sweep {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .signal-led { animation: none !important; }
 }
