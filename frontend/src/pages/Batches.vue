@@ -275,7 +275,107 @@ function onCreated() {
             v-if="visible.length === 0"
             title="当前筛选条件下没有匹配"
           />
-          <div v-else class="overflow-x-auto">
+          <template v-else>
+          <!-- Narrow: card list. min-w-[820px] table needs lg+ to feel right. -->
+          <ul class="divide-y divide-border/60 lg:hidden">
+            <li v-for="r in visible" :key="r.b.batch_id" class="space-y-3 p-4">
+              <div class="flex items-start justify-between gap-3">
+                <RouterLink :to="`/batches/${r.b.batch_id}`" class="min-w-0 flex-1">
+                  <div class="truncate font-medium text-foreground transition hover:text-primary">
+                    {{ r.b.name }}
+                  </div>
+                  <div class="mt-0.5 inline-flex items-center font-mono text-[11px] text-muted-foreground">
+                    {{ r.b.batch_id }}
+                    <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
+                  </div>
+                </RouterLink>
+                <Badge tone="info" class="shrink-0">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
+              </div>
+              <RouterLink
+                v-if="r.bundleLink"
+                :to="{
+                  path: '/bundles',
+                  query: { name: r.bundleLink.name, version: r.bundleLink.version },
+                }"
+                class="block truncate font-mono text-[11px] text-muted-foreground transition hover:text-primary"
+                title="在任务包页查看"
+              >
+                {{ r.b.bundle_ref }}
+              </RouterLink>
+              <div v-else class="truncate font-mono text-[11px] text-muted-foreground">
+                {{ r.b.bundle_ref }}
+              </div>
+              <div>
+                <div class="mb-1 flex flex-wrap items-center justify-between gap-2 text-[11.5px]">
+                  <span class="tabular-nums">
+                    <span class="font-medium text-foreground">{{ r.done }}</span>
+                    <span class="text-muted-foreground"> / {{ r.total }}</span>
+                    <span class="ml-1 text-muted-foreground">({{ r.pct }}%)</span>
+                  </span>
+                  <span class="flex items-center gap-2">
+                    <span
+                      v-if="r.b.eta_seconds != null"
+                      class="text-muted-foreground tabular-nums"
+                      :title="`按当前吞吐外推剩余 ${r.inFlight} 条`"
+                    >
+                      ≈ {{ fmtDuration(r.b.eta_seconds * 1000) }}
+                    </span>
+                    <span v-if="r.errors > 0" class="text-danger">失败 {{ r.errors }}</span>
+                    <span
+                      v-if="r.b.objects_exhausted > 0"
+                      class="text-danger"
+                      title="该批次有产物已超 receiver 拉取重试上限，停止派发"
+                    >
+                      已放弃 {{ r.b.objects_exhausted }}
+                    </span>
+                  </span>
+                </div>
+                <ProgressBar
+                  :value="r.done"
+                  :max="r.total"
+                  :tone="r.errors > 0 || r.b.objects_exhausted > 0 ? 'warn' : 'good'"
+                />
+              </div>
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-[11px] text-muted-foreground">{{ fmtAge(r.b.created_at) }}</span>
+                <div class="flex flex-wrap gap-1.5">
+                  <Button
+                    v-if="r.errors > 0"
+                    size="sm"
+                    :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
+                    pending-label="重试中…"
+                    @click="retry.mutate(r.b.batch_id)"
+                  >
+                    重试失败 ({{ r.errors }})
+                  </Button>
+                  <Button
+                    v-if="r.inFlight > 0"
+                    variant="destructive"
+                    size="sm"
+                    :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
+                    pending-label="取消中…"
+                    @click="confirmCancel(r.b)"
+                  >
+                    取消 ({{ r.inFlight }})
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    :pending="
+                      remove.isPending.value && remove.variables.value?.id === r.b.batch_id
+                    "
+                    pending-label="删除中…"
+                    @click="confirmDelete(r.b)"
+                    title="永久删除该批次及其所有数据粒、产物、进度、事件"
+                  >
+                    删除
+                  </Button>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <!-- lg+ : original table. -->
+          <div class="hidden overflow-x-auto lg:block">
         <table class="w-full min-w-[820px] text-sm">
           <thead class="bg-muted/50 th-row">
             <tr>
@@ -388,6 +488,7 @@ function onCreated() {
           </tbody>
         </table>
       </div>
+          </template>
         </template>
       </QueryState>
     </Card>

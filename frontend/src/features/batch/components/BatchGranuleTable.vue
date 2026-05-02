@@ -35,7 +35,98 @@ function stripBatchPrefix(gid: string) {
 </script>
 
 <template>
-  <div class="overflow-x-auto">
+  <!-- Narrow: stacked card per granule (lg+ uses the table below). -->
+  <ul class="divide-y divide-border/60 lg:hidden">
+    <li v-if="rows.length === 0" class="p-5">
+      <EmptyState title="该筛选条件下没有数据粒" />
+    </li>
+    <template v-for="g in rows" :key="g.granule_id">
+      <li
+        :ref="(el) => emit('rowRef', g.granule_id, el as Element | null)"
+        :class="[
+          'space-y-3 p-4 transition',
+          g.granule_id === highlight ? 'bg-accent/40' : '',
+        ]"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0 flex-1">
+            <button
+              @click="emit('toggle', g.granule_id)"
+              class="mr-1 text-muted-foreground hover:text-foreground"
+              :title="expanded === g.granule_id ? '收起进度' : '展开进度'"
+            >
+              {{ expanded === g.granule_id ? "▾" : "▸" }}
+            </button>
+            <span class="break-all font-mono text-[11.5px]">{{ stripBatchPrefix(g.granule_id) }}</span>
+            <LatestProgressLine
+              v-if="latestProgress[g.granule_id]"
+              :row="latestProgress[g.granule_id]"
+            />
+          </div>
+          <div class="flex shrink-0 flex-wrap items-center gap-1">
+            <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
+            <span
+              v-if="g.objects_exhausted > 0"
+              :title="`${g.objects_exhausted} 个产物超出 receiver 拉取重试上限，已停止派发`"
+            >
+              <Badge tone="error">{{ g.objects_exhausted }} 已放弃</Badge>
+            </span>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          <span class="tabular-nums">重试 {{ g.retry_count }}</span>
+          <span class="font-mono">
+            领取方:
+            <RouterLink
+              v-if="g.leased_by"
+              :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
+              class="transition hover:text-primary"
+              title="跳转到该 worker 卡片"
+            >
+              {{ g.leased_by }}
+            </RouterLink>
+            <template v-else>—</template>
+          </span>
+          <span>{{ fmtAge(g.updated_at) }}</span>
+        </div>
+        <div v-if="g.error" class="font-mono text-[11.5px] text-danger">
+          <ErrorCell :error="g.error" />
+        </div>
+        <div
+          v-if="cancellable.has(g.state) || retryable.has(g.state)"
+          class="flex justify-end gap-1.5"
+        >
+          <Button
+            v-if="cancellable.has(g.state)"
+            variant="destructive"
+            size="sm"
+            :pending="cancellingId === g.granule_id"
+            pending-label="取消"
+            @click="emit('cancel', g)"
+          >
+            取消
+          </Button>
+          <Button
+            v-if="retryable.has(g.state)"
+            size="sm"
+            :pending="retryingId === g.granule_id"
+            pending-label="重试"
+            @click="emit('retry', g.granule_id)"
+          >
+            重试
+          </Button>
+        </div>
+        <div v-if="expanded === g.granule_id" class="space-y-3 rounded-md bg-muted/40 p-3">
+          <StageTimingStrip :granule-id="g.granule_id" />
+          <ProgressTimeline :granule-id="g.granule_id" />
+          <GranuleEvents :granule-id="g.granule_id" :batch-id="batchId" />
+        </div>
+      </li>
+    </template>
+  </ul>
+
+  <!-- lg+ : original table. -->
+  <div class="hidden overflow-x-auto lg:block">
     <table class="w-full text-sm">
       <thead class="bg-muted/50 th-row">
         <tr>
