@@ -69,6 +69,12 @@ export default {
         "2xs": ["11px", "15px"],
         cell: ["11.5px", "16px"],
       },
+      letterSpacing: {
+        // 0.10em already covered by Tailwind's built-in `tracking-widest`.
+        // These two cover the remaining uppercase-label tracking values.
+        label: "0.12em", // mini-labels: Field / Stat / sidebar section headings
+        brand: "0.18em", // app brand mark (AppLayout / Login "Mission Console")
+      },
       fontFamily: {
         sans: [
           '"Geist"',

@@ -58,12 +58,12 @@ const isDark = computed(() => effective.value === "dark");
         </div>
         <div v-if="!collapsed" class="min-w-0">
           <div class="font-display text-[15px] font-semibold leading-none">SatHop</div>
-          <div class="mt-1 text-mini uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
+          <div class="mt-1 text-mini uppercase tracking-brand text-muted-foreground">Mission Console</div>
         </div>
       </div>
 
       <nav class="flex-1 overflow-y-auto px-3 py-3">
-        <div v-if="!collapsed" class="mb-2 px-2 text-3xs font-semibold uppercase tracking-[0.12em] text-muted-foreground/80">
+        <div v-if="!collapsed" class="mb-2 px-2 text-3xs font-semibold uppercase tracking-label text-muted-foreground/80">
           控制台
         </div>
         <ul class="space-y-0.5">
@@ -142,11 +142,11 @@ const isDark = computed(() => effective.value === "dark");
           </div>
           <div class="min-w-0">
             <div class="font-display text-[15px] font-semibold leading-none">SatHop</div>
-            <div class="mt-1 text-mini uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
+            <div class="mt-1 text-mini uppercase tracking-brand text-muted-foreground">Mission Console</div>
           </div>
         </div>
         <nav class="flex-1 overflow-y-auto px-3 py-3">
-          <div class="mb-2 px-2 text-3xs font-semibold uppercase tracking-[0.12em] text-muted-foreground/80">
+          <div class="mb-2 px-2 text-3xs font-semibold uppercase tracking-label text-muted-foreground/80">
             控制台
           </div>
           <ul class="space-y-0.5">

@@ -4,7 +4,7 @@ defineProps<{ title: string; count?: number }>();
 
 <template>
   <section class="border-t border-border/60 pt-4">
-    <div class="mb-2.5 flex items-center gap-1.5 text-mini font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+    <div class="mb-2.5 flex items-center gap-1.5 text-mini font-semibold uppercase tracking-label text-muted-foreground">
       <span>{{ title }}</span>
       <span
         v-if="count !== undefined"

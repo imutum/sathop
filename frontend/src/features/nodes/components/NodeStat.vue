@@ -36,7 +36,7 @@ const colorCls = computed(
         <slot name="icon" />
       </span>
       <div>
-        <div class="text-2xs font-medium uppercase tracking-[0.10em] text-muted-foreground">{{ label }}</div>
+        <div class="text-2xs font-medium uppercase tracking-widest text-muted-foreground">{{ label }}</div>
         <div class="mt-1 text-[13px] text-foreground">在线 / 已注册</div>
       </div>
     </div>

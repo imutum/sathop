@@ -153,7 +153,7 @@ function onKey(e: KeyboardEvent) {
 
         <div>
           <div class="mb-1.5 flex items-center justify-between text-2xs text-muted-foreground">
-            <span class="font-medium uppercase tracking-[0.10em]">磁盘</span>
+            <span class="font-medium uppercase tracking-widest">磁盘</span>
             <span class="tabular-nums">{{ fmtGB(worker.disk_used_gb) }} / {{ fmtGB(worker.disk_total_gb) }}</span>
           </div>
           <ProgressBar :value="worker.disk_used_gb" :max="worker.disk_total_gb" :tone="diskTone" />

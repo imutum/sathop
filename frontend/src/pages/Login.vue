@@ -55,7 +55,7 @@ const year = new Date().getFullYear();
           </div>
           <div>
             <div class="font-display text-lg font-semibold">SatHop</div>
-            <div class="text-2xs uppercase tracking-[0.18em] text-muted-foreground">Mission Console</div>
+            <div class="text-2xs uppercase tracking-brand text-muted-foreground">Mission Console</div>
           </div>
         </div>
 
