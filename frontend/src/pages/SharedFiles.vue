@@ -95,7 +95,37 @@ function onUploaded() {
           </EmptyState>
         </template>
         <template #default="{ data: files }">
-          <div class="overflow-x-auto">
+          <!-- Narrow: card list per file. -->
+          <ul class="divide-y divide-border/60 sm:hidden">
+            <li v-for="f in files" :key="f.name" class="space-y-2 p-4">
+              <div class="font-mono text-[12px] font-medium">{{ f.name }}</div>
+              <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span class="tabular-nums">{{ fmtBytes(f.size) }}</span>
+                <span class="tabular-nums">{{ fmtAge(f.uploaded_at) }}</span>
+              </div>
+              <div class="flex items-center text-[11px]">
+                <span class="font-mono text-muted-foreground" :title="f.sha256">
+                  {{ f.sha256.slice(0, 12) }}…
+                </span>
+                <CopyButton :value="f.sha256" title="复制完整 SHA256" />
+              </div>
+              <div v-if="f.description" class="text-[11px] text-muted-foreground">{{ f.description }}</div>
+              <div class="flex justify-end gap-1.5">
+                <Button size="sm" @click="replaceTarget = f">替换</Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  :pending="del.isPending.value && del.variables.value === f.name"
+                  pending-label="删除中…"
+                  @click="confirmDelete(f)"
+                >
+                  删除
+                </Button>
+              </div>
+            </li>
+          </ul>
+          <!-- sm+ : table. -->
+          <div class="hidden overflow-x-auto sm:block">
             <table class="w-full text-sm">
               <thead class="bg-muted/50 th-row">
                 <tr>

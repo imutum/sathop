@@ -111,7 +111,34 @@ function onUploaded(d: BundleDetail) {
             </EmptyState>
           </template>
           <template #default="{ data: bundleRows }">
-            <div class="overflow-x-auto">
+            <!-- Narrow: card list. Each row collapses into a stacked card. -->
+            <ul class="divide-y divide-border/60 sm:hidden">
+              <li
+                v-for="b in bundleRows"
+                :key="`${b.name}@${b.version}`"
+                @click="selected = { name: b.name, version: b.version }"
+                :class="[
+                  'cursor-pointer p-4 transition',
+                  isActive(b) ? 'bg-accent/60' : 'hover:bg-muted/50',
+                ]"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1 truncate font-mono text-[12px] font-medium">{{ b.name }}</div>
+                  <Badge tone="info">{{ b.version }}</Badge>
+                </div>
+                <div class="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span class="tabular-nums">{{ fmtBytes(b.size) }}</span>
+                  <span class="tabular-nums">
+                    <span v-if="b.in_use_count > 0" class="font-medium text-foreground">{{ b.in_use_count }}</span>
+                    <span v-else class="text-muted-foreground/60">0</span>
+                    <span class="ml-0.5">引用</span>
+                  </span>
+                  <span>{{ fmtAge(b.uploaded_at) }}</span>
+                </div>
+              </li>
+            </ul>
+            <!-- sm+ : table. -->
+            <div class="hidden overflow-x-auto sm:block">
               <table class="w-full text-sm">
                 <thead class="bg-muted/50 th-row">
                   <tr>
