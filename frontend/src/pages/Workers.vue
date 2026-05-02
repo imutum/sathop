@@ -4,8 +4,12 @@ import { useQuery } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
 import { API } from "@/api";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
+import QueryState from "@/components/QueryState.vue";
 import WorkerCard from "@/features/nodes/components/WorkerCard.vue";
 import { Icon } from "@/components/Icon";
 
@@ -39,20 +43,38 @@ function setRef(id: string, el: Element | null) {
   <div class="space-y-6">
     <PageHeader title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列" />
 
-    <Card v-if="list.length === 0">
-      <CardContent class="pt-6">
-        <EmptyState title="暂无已注册的工作节点" description="启动 worker 容器后会自动出现在此。">
-          <template #icon>
-            <Icon name="workers" :size="20" />
-          </template>
-        </EmptyState>
-      </CardContent>
-    </Card>
-
-    <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-      <div v-for="w in list" :key="w.worker_id" :ref="(el) => setRef(w.worker_id, el as Element | null)">
-        <WorkerCard :worker="w" :focused="focusId === w.worker_id" />
-      </div>
-    </div>
+    <QueryState :query="workers">
+      <template #loading>
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <Skeleton v-for="n in 3" :key="n" class="h-48 w-full" />
+        </div>
+      </template>
+      <template #error="{ error, retry }">
+        <Alert variant="destructive">
+          <AlertDescription class="flex items-center justify-between gap-3">
+            <span>加载工作节点失败：{{ error.message }}</span>
+            <Button size="sm" variant="outline" @click="retry">重试</Button>
+          </AlertDescription>
+        </Alert>
+      </template>
+      <template #empty>
+        <Card>
+          <CardContent class="pt-6">
+            <EmptyState title="暂无已注册的工作节点" description="启动 worker 容器后会自动出现在此。">
+              <template #icon>
+                <Icon name="workers" :size="20" />
+              </template>
+            </EmptyState>
+          </CardContent>
+        </Card>
+      </template>
+      <template #default>
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div v-for="w in list" :key="w.worker_id" :ref="(el) => setRef(w.worker_id, el as Element | null)">
+            <WorkerCard :worker="w" :focused="focusId === w.worker_id" />
+          </div>
+        </div>
+      </template>
+    </QueryState>
   </div>
 </template>

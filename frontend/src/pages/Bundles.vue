@@ -11,6 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
+import QueryState from "@/components/QueryState.vue";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import BundleManifestView from "@/features/bundle/components/BundleManifestView.vue";
 import UploadBundleModal from "@/features/bundle/components/UploadBundleModal.vue";
 import { Icon } from "@/components/Icon";
@@ -54,8 +57,6 @@ const del = useMutation({
   onError: (e: Error) => toast.error(`删除失败：${e.message}`),
 });
 
-const rows = computed(() => list.data.value ?? []);
-
 function isActive(b: BundleSummary) {
   return selected.value?.name === b.name && selected.value?.version === b.version;
 }
@@ -83,52 +84,72 @@ function onUploaded(d: BundleDetail) {
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       <Card>
-        <EmptyState
-          v-if="rows.length === 0"
-          title="还没有任务包"
-          description='点击上方"上传 ZIP"开始添加。'
-        >
-          <template #icon>
-            <Icon name="bundles" :size="20" />
+        <QueryState :query="list">
+          <template #loading>
+            <div class="space-y-2 p-5">
+              <Skeleton v-for="n in 5" :key="n" class="h-10 w-full" />
+            </div>
           </template>
-        </EmptyState>
-        <div v-else class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead class="bg-muted/50 th-row">
-              <tr>
-                <th class="px-5 py-3">名称</th>
-                <th class="px-2 py-3">版本</th>
-                <th class="px-2 py-3">大小</th>
-                <th class="px-2 py-3" title="引用此包的批次数">引用</th>
-                <th class="px-5 py-3">上传</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="b in rows"
-                :key="`${b.name}@${b.version}`"
-                @click="selected = { name: b.name, version: b.version }"
-                :class="[
-                  'cursor-pointer border-t border-border/60 transition',
-                  isActive(b) ? 'bg-accent/60' : 'hover:bg-muted/50',
-                ]"
-              >
-                <td class="px-5 py-2.5 font-mono text-[12px] font-medium">{{ b.name }}</td>
-                <td class="px-2 py-2.5">
-                  <Badge tone="info">{{ b.version }}</Badge>
-                </td>
-                <td class="px-2 py-2.5 text-[11.5px] text-muted-foreground tabular-nums">{{ fmtBytes(b.size) }}</td>
-                <td class="px-2 py-2.5 text-[11.5px] tabular-nums">
-                  <span v-if="b.in_use_count > 0" class="font-medium text-foreground">
-                    {{ b.in_use_count }}
-                  </span>
-                  <span v-else class="text-muted-foreground/60">0</span>
-                </td>
-                <td class="px-5 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(b.uploaded_at) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+          <template #error="{ error, retry }">
+            <div class="p-5">
+              <Alert variant="destructive">
+                <AlertDescription class="flex items-center justify-between gap-3">
+                  <span>加载失败：{{ error.message }}</span>
+                  <Button size="sm" variant="outline" @click="retry">重试</Button>
+                </AlertDescription>
+              </Alert>
+            </div>
+          </template>
+          <template #empty>
+            <EmptyState
+              title="还没有任务包"
+              description='点击上方"上传 ZIP"开始添加。'
+            >
+              <template #icon>
+                <Icon name="bundles" :size="20" />
+              </template>
+            </EmptyState>
+          </template>
+          <template #default="{ data: bundleRows }">
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-muted/50 th-row">
+                  <tr>
+                    <th class="px-5 py-3">名称</th>
+                    <th class="px-2 py-3">版本</th>
+                    <th class="px-2 py-3">大小</th>
+                    <th class="px-2 py-3" title="引用此包的批次数">引用</th>
+                    <th class="px-5 py-3">上传</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="b in bundleRows"
+                    :key="`${b.name}@${b.version}`"
+                    @click="selected = { name: b.name, version: b.version }"
+                    :class="[
+                      'cursor-pointer border-t border-border/60 transition',
+                      isActive(b) ? 'bg-accent/60' : 'hover:bg-muted/50',
+                    ]"
+                  >
+                    <td class="px-5 py-2.5 font-mono text-[12px] font-medium">{{ b.name }}</td>
+                    <td class="px-2 py-2.5">
+                      <Badge tone="info">{{ b.version }}</Badge>
+                    </td>
+                    <td class="px-2 py-2.5 text-[11.5px] text-muted-foreground tabular-nums">{{ fmtBytes(b.size) }}</td>
+                    <td class="px-2 py-2.5 text-[11.5px] tabular-nums">
+                      <span v-if="b.in_use_count > 0" class="font-medium text-foreground">
+                        {{ b.in_use_count }}
+                      </span>
+                      <span v-else class="text-muted-foreground/60">0</span>
+                    </td>
+                    <td class="px-5 py-2.5 text-[11.5px] text-muted-foreground">{{ fmtAge(b.uploaded_at) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </QueryState>
       </Card>
 
       <Card>
