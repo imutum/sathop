@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
+import { useForm } from "vee-validate";
+import { toTypedSchema } from "@vee-validate/zod";
+import { z } from "zod";
 import { type Row, type Schema, emptyRow } from "@/features/batch/types";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  FormControl,
+  FormField,
+  FormItem,
+  FormMessage,
+} from "@/components/ui/form";
+import { Textarea } from "@/components/ui/textarea";
 import Modal from "@/ui/Modal.vue";
-import TextareaInput from "@/ui/TextareaInput.vue";
 
 const props = defineProps<{ schema: Schema }>();
 const emit = defineEmits<{ close: []; import: [rows: Row[]] }>();
@@ -25,24 +33,14 @@ const headers = computed(() => {
 
 const OPTIONAL_SUFFIXES = [".credential", ".size", ".checksum"];
 
-const text = ref(headers.value.join(",") + "\n");
-const parseErr = ref<string | null>(null);
-
-const dirty = computed(() => text.value.split(/\r?\n/).length > 2);
-
-function doImport() {
-  parseErr.value = null;
-  const lines = text.value.split(/\r?\n/).filter((l) => l.trim() !== "");
-  if (lines.length < 2) {
-    parseErr.value = "至少需要一行表头 + 一行数据";
-    return;
-  }
+function parseCsv(text: string): { rows?: Row[]; error?: string } {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length < 2) return { error: "至少需要一行表头 + 一行数据" };
   const delim = lines[0].includes("\t") ? "\t" : ",";
   const head = lines[0].split(delim).map((x) => x.trim());
   const missing = headers.value.filter((h) => !head.includes(h));
   if (missing.length && !missing.every((h) => OPTIONAL_SUFFIXES.some((suf) => h.endsWith(suf)))) {
-    parseErr.value = `表头缺少：${missing.join(", ")}`;
-    return;
+    return { error: `表头缺少：${missing.join(", ")}` };
   }
   const rows: Row[] = [];
   for (let i = 1; i < lines.length; i++) {
@@ -66,30 +64,64 @@ function doImport() {
     }
     rows.push(row);
   }
-  if (rows.length === 0) {
-    parseErr.value = "没有解析到任何数据行";
-    return;
-  }
-  emit("import", rows);
+  if (rows.length === 0) return { error: "没有解析到任何数据行" };
+  return { rows };
 }
+
+const validationSchema = computed(() =>
+  toTypedSchema(
+    z.object({
+      text: z
+        .string()
+        .min(1, "请粘贴 CSV / TSV 内容")
+        .superRefine((val, ctx) => {
+          const r = parseCsv(val);
+          if (r.error) {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, message: r.error });
+          }
+        }),
+    }),
+  ),
+);
+
+const { handleSubmit, meta } = useForm({
+  validationSchema,
+  initialValues: { text: headers.value.join(",") + "\n" },
+  // Validate only on submit/blur — re-parsing on every keystroke is wasteful
+  // for the multi-line CSV blob this textarea typically holds.
+  validateOnMount: false,
+});
+
+const onSubmit = handleSubmit((vals) => {
+  const r = parseCsv(vals.text);
+  if (r.rows) emit("import", r.rows);
+});
 </script>
 
 <template>
-  <Modal width-class="w-[720px]" :z-index="60" :dirty="dirty" @close="emit('close')">
+  <Modal width-class="w-[720px]" :z-index="60" :dirty="meta.dirty" @close="emit('close')">
     <h3 class="font-display mb-2 text-base font-semibold">粘贴 CSV / TSV</h3>
     <div class="mb-3 text-[11px] text-muted-foreground">
       第一行必须是表头，列顺序不限。自动识别逗号或 Tab 分隔。
       <code class="font-mono text-[10px] text-muted-foreground">.size / .checksum / .credential</code> 列可选。
     </div>
-    <TextareaInput
-      v-model="text"
-      rows="14"
-      class="font-mono text-[11px]"
-    />
-    <div v-if="parseErr" class="mt-2"><Alert variant="destructive"><AlertDescription>{{ parseErr }}</AlertDescription></Alert></div>
-    <div class="mt-3 flex justify-end gap-2">
-      <Button @click="emit('close')">取消</Button>
-      <Button variant="default" @click="doImport">导入</Button>
-    </div>
+    <form @submit.prevent="onSubmit">
+      <FormField v-slot="{ componentField }" name="text">
+        <FormItem>
+          <FormControl>
+            <Textarea
+              v-bind="componentField"
+              rows="14"
+              class="font-mono text-[11px]"
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+      <div class="mt-3 flex justify-end gap-2">
+        <Button type="button" @click="emit('close')">取消</Button>
+        <Button type="submit" variant="default">导入</Button>
+      </div>
+    </form>
   </Modal>
 </template>
