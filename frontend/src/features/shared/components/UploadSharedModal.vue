@@ -3,8 +3,8 @@ import { ref } from "vue";
 import { useMutation } from "@tanstack/vue-query";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
-import { z } from "zod";
 import { API, type SharedFileInfo } from "@/api";
+import { uploadSharedSchema } from "@/features/shared/schemas";
 import { useToast } from "@/composables/useToast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -20,8 +20,6 @@ import { Input } from "@/components/ui/input";
 import FilePicker from "@/components/FilePicker.vue";
 import Modal from "@/ui/Modal.vue";
 
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/;
-
 const props = withDefaults(
   defineProps<{ lockName?: string; currentDescription?: string }>(),
   { currentDescription: "" },
@@ -32,16 +30,7 @@ const emit = defineEmits<{ close: []; uploaded: [d: SharedFileInfo] }>();
 const toast = useToast();
 const submitError = ref<string | null>(null);
 
-const schema = toTypedSchema(
-  z.object({
-    name: z
-      .string()
-      .min(1, "请填写名称")
-      .regex(NAME_RE, "名称不合法：仅允许字母数字和 . _ -，不能以点开头，最长 255 字节"),
-    file: z.custom<File>((v) => v instanceof File, "请选择文件"),
-    description: z.string().optional(),
-  }),
-);
+const schema = toTypedSchema(uploadSharedSchema);
 
 const { handleSubmit, meta, setFieldValue, values } = useForm({
   validationSchema: schema,

@@ -3,8 +3,8 @@ import { computed, reactive, ref, watch } from "vue";
 import { useMutation, useQuery } from "@tanstack/vue-query";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
-import { z } from "zod";
 import { API } from "@/api";
+import { createBatchHeaderSchema } from "@/features/batch/schemas";
 import { clearCred, hasCred, loadCred, saveCred } from "@/credCache";
 import { useToast } from "@/composables/useToast";
 import {
@@ -44,29 +44,8 @@ const toast = useToast();
 // Header fields (vee-validate + zod). The granule rows and credentials
 // drafts have their own per-element validation patterns and stay
 // imperative; the submit gate combines all three layers below.
-const headerSchema = toTypedSchema(
-  z.object({
-    batchId: z.string().min(1, "请填批次 ID"),
-    name: z.string().min(1, "请填展示名称"),
-    bundleSel: z.string().min(1, "请选择任务包"),
-    targetReceiver: z.string().optional(),
-    envText: z
-      .string()
-      .optional()
-      .refine((v) => {
-        if (!v?.trim()) return true;
-        try {
-          const parsed = JSON.parse(v);
-          return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
-        } catch {
-          return false;
-        }
-      }, "环境变量必须是 JSON 对象 {KEY: value}"),
-  }),
-);
-
 const { handleSubmit, meta: headerMeta, values: headerValues } = useForm({
-  validationSchema: headerSchema,
+  validationSchema: toTypedSchema(createBatchHeaderSchema),
   initialValues: {
     batchId: "",
     name: "",

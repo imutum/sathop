@@ -3,8 +3,8 @@ import { ref } from "vue";
 import { useMutation } from "@tanstack/vue-query";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
-import { z } from "zod";
 import { API, type BundleDetail } from "@/api";
+import { uploadBundleSchema } from "@/features/bundle/schemas";
 import { useToast } from "@/composables/useToast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -24,14 +24,7 @@ const emit = defineEmits<{ close: []; uploaded: [d: BundleDetail] }>();
 const toast = useToast();
 const submitError = ref<string | null>(null);
 
-const schema = toTypedSchema(
-  z.object({
-    file: z
-      .custom<File>((v) => v instanceof File, "请选择一个 ZIP 文件")
-      .refine((f) => f.name.toLowerCase().endsWith(".zip"), "文件需为 .zip 格式"),
-    description: z.string().optional(),
-  }),
-);
+const schema = toTypedSchema(uploadBundleSchema);
 
 const { handleSubmit, meta } = useForm({
   validationSchema: schema,
