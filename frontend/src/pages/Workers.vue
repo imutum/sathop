@@ -11,7 +11,6 @@ import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
 import WorkerCard from "@/features/nodes/components/WorkerCard.vue";
-import { Icon } from "@/components/Icon";
 
 const workers = useQuery({ queryKey: ["workers"], queryFn: API.workers });
 const list = computed(() => workers.data.value ?? []);
@@ -41,7 +40,11 @@ function setRef(id: string, el: Element | null) {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列" />
+    <PageHeader n="05" kicker="FLEET · WORKERS" title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列">
+      <template #meta>
+        <span>{{ list.length }} · NODES REGISTERED</span>
+      </template>
+    </PageHeader>
 
     <QueryState :query="workers">
       <template #loading>
@@ -60,11 +63,11 @@ function setRef(id: string, el: Element | null) {
       <template #empty>
         <Card>
           <CardContent class="pt-6">
-            <EmptyState title="暂无已注册的工作节点" description="启动 worker 容器后会自动出现在此。">
-              <template #icon>
-                <Icon name="workers" :size="20" />
-              </template>
-            </EmptyState>
+            <EmptyState
+              title="暂无已注册的工作节点"
+              description="启动 worker 容器后会自动出现在此。"
+              illustration="inbox"
+            />
           </CardContent>
         </Card>
       </template>

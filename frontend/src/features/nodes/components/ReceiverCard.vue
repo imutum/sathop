@@ -5,9 +5,9 @@ import { fmtGB, fmtRate, nodeStatusBadge } from "@/lib/format";
 import { PLATFORM_ZH, fmtAge } from "@/i18n";
 import { useToast } from "@/composables/useToast";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import CopyButton from "@/components/CopyButton.vue";
 import NodeLifecycleActions from "@/features/nodes/components/NodeLifecycleActions.vue";
+import Crosshair from "@/components/chrome/Crosshair.vue";
 import { Icon } from "@/components/Icon";
 import { computed } from "vue";
 
@@ -38,51 +38,60 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
 </script>
 
 <template>
-  <Card>
-    <div class="flex items-start justify-between gap-2 border-b border-border/60 px-5 py-4">
-      <div class="min-w-0">
-        <div class="flex items-center gap-1 font-mono text-[13px] font-semibold">
+  <div class="relative overflow-hidden rounded-md border border-border bg-card text-card-foreground shadow-card">
+    <Crosshair tone="muted" :inset="5" :size="9" />
+
+    <div class="flex items-start justify-between gap-3 border-b border-border px-5 py-3.5">
+      <div class="min-w-0 space-y-1.5">
+        <div class="flex items-center gap-2 text-3xs uppercase tracking-section text-muted-foreground readout">
+          <span class="text-primary">RCV</span>
+          <span aria-hidden class="h-2 w-px bg-border" />
+          <span>ENDPOINT</span>
+        </div>
+        <div class="flex items-center gap-1 readout text-[13px] font-semibold">
           <span class="truncate">{{ receiver.receiver_id }}</span>
           <CopyButton :value="receiver.receiver_id" title="复制接收端 ID" />
         </div>
-        <div class="mt-0.5 text-2xs text-muted-foreground">
-          平台 · {{ PLATFORM_ZH[receiver.platform] ?? receiver.platform }}
+        <div class="readout text-3xs text-muted-foreground">
+          PLATFORM · {{ PLATFORM_ZH[receiver.platform] ?? receiver.platform }}
         </div>
       </div>
       <Badge :tone="status.tone" dot>{{ status.label }}</Badge>
     </div>
 
-    <div class="grid grid-cols-2 gap-4 px-5 py-4">
-      <div>
-        <div class="stat-label">剩余磁盘</div>
-        <div class="font-display mt-1 text-base font-semibold tabular-nums">
+    <div class="grid grid-cols-2 gap-px bg-border">
+      <div class="space-y-0.5 bg-card px-4 py-3.5">
+        <div class="text-3xs uppercase tracking-section text-muted-foreground readout">DISK · FREE</div>
+        <div class="font-display text-[20px] font-medium leading-none tabular-nums">
           {{ fmtGB(receiver.disk_free_gb) }}
         </div>
       </div>
-      <div>
-        <div class="stat-label">心跳</div>
-        <div class="mt-1 text-[12.5px]">{{ fmtAge(receiver.last_seen) }}</div>
+      <div class="space-y-0.5 bg-card px-4 py-3.5">
+        <div class="text-3xs uppercase tracking-section text-muted-foreground readout">HEARTBEAT</div>
+        <div class="readout text-[13px] tabular-nums">↻ {{ fmtAge(receiver.last_seen) }}</div>
       </div>
-      <div>
-        <div class="stat-label">拉取中</div>
-        <div class="font-display mt-1 text-base font-semibold tabular-nums">
+      <div class="space-y-0.5 bg-card px-4 py-3.5">
+        <div class="text-3xs uppercase tracking-section text-muted-foreground readout">PULLING</div>
+        <div class="font-display text-[20px] font-medium leading-none tabular-nums">
           {{ receiver.queue_pulling }}
         </div>
       </div>
-      <div>
-        <div class="stat-label" title="过去约 60 秒的拉取吞吐">速率</div>
-        <div class="mt-1 text-[12.5px] tabular-nums">{{ fmtRate(receiver.recent_pull_bps) }}</div>
+      <div class="space-y-0.5 bg-card px-4 py-3.5">
+        <div class="text-3xs uppercase tracking-section text-muted-foreground readout" title="过去约 60 秒的拉取吞吐">
+          THROUGHPUT
+        </div>
+        <div class="readout text-[13px] tabular-nums">{{ fmtRate(receiver.recent_pull_bps) }}</div>
       </div>
     </div>
 
-    <div class="flex items-center justify-end gap-3 border-t border-border/60 px-5 py-2.5">
+    <div class="flex items-center justify-end gap-3 border-t border-border px-5 py-2.5">
       <RouterLink
         :to="`/events?source=${encodeURIComponent(receiver.receiver_id)}`"
-        class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+        class="readout inline-flex h-6 items-center gap-1 rounded-sm border border-border bg-background px-2 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-primary"
         title="查看该接收端的事件流"
       >
         <Icon name="events" :size="11" />
-        事件
+        LOG
       </RouterLink>
       <NodeLifecycleActions
         :enabled="receiver.enabled"
@@ -95,5 +104,5 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
         forget-title="永久从注册表中删除（仅在已禁用时允许）"
       />
     </div>
-  </Card>
+  </div>
 </template>

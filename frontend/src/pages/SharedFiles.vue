@@ -60,12 +60,12 @@ function onUploaded() {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="共享文件">
+    <PageHeader n="04" kicker="PAYLOAD · SHARED" title="共享文件">
       <template #description>
         被任务包通过
-        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs">shared_files</code>
+        <code class="rounded bg-muted px-1.5 py-0.5 readout text-2xs">shared_files</code>
         引用的辅助资源，Worker 按需拉取到
-        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs">$SATHOP_SHARED_DIR</code>。
+        <code class="rounded bg-muted px-1.5 py-0.5 readout text-2xs">$SATHOP_SHARED_DIR</code>。
       </template>
       <template #actions>
         <Button variant="default" @click="showUpload = true">
@@ -96,11 +96,8 @@ function onUploaded() {
           <EmptyState
             title="还没有共享文件"
             description='点击上方"上传文件"添加第一个。'
-          >
-            <template #icon>
-              <Icon name="shared" :size="20" />
-            </template>
-          </EmptyState>
+            illustration="inbox"
+          />
         </template>
         <template #default="{ data: files }">
           <!-- Narrow: card list per file. -->

@@ -204,6 +204,8 @@ function onCreated() {
 <template>
   <div class="space-y-6">
     <PageHeader
+      n="02"
+      kicker="MISSIONS"
       title="批次"
       description="管线提交单元 · 一个批次承载一组数据粒、统一的任务包与凭证"
     >
@@ -212,6 +214,9 @@ function onCreated() {
           <Icon name="plus" :size="13" />
           新建任务
         </Button>
+      </template>
+      <template #meta>
+        <span>{{ allCount }} · BATCHES TRACKED</span>
       </template>
     </PageHeader>
 
@@ -269,6 +274,7 @@ function onCreated() {
           <EmptyState
             title="还没有任何批次"
             description="通过页面右上角“新建任务”创建第一个批次。"
+            illustration="inbox"
           >
             <template #action>
               <Button variant="default" @click="showCreate = true">

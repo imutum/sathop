@@ -9,14 +9,17 @@ import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
 import ReceiverCard from "@/features/nodes/components/ReceiverCard.vue";
-import { Icon } from "@/components/Icon";
 
 const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
 </script>
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="接收端" description="拉取 Worker 已上传产物的下游消费者" />
+    <PageHeader n="06" kicker="FLEET · RECEIVERS" title="接收端" description="拉取 Worker 已上传产物的下游消费者">
+      <template #meta>
+        <span>{{ receivers.data.value?.length ?? 0 }} · ENDPOINTS</span>
+      </template>
+    </PageHeader>
 
     <QueryState :query="receivers">
       <template #loading>
@@ -35,11 +38,11 @@ const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
       <template #empty>
         <Card>
           <CardContent class="pt-6">
-            <EmptyState title="暂无已注册的接收端" description="启动 receiver 容器后会自动出现在此。">
-              <template #icon>
-                <Icon name="receivers" :size="20" />
-              </template>
-            </EmptyState>
+            <EmptyState
+              title="暂无已注册的接收端"
+              description="启动 receiver 容器后会自动出现在此。"
+              illustration="inbox"
+            />
           </CardContent>
         </Card>
       </template>

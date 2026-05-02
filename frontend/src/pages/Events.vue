@@ -145,12 +145,15 @@ function highlight(text: string, n: string): HighlightSeg[] {
 <template>
   <div class="space-y-6">
     <PageHeader
+      n="07"
+      kicker="SYSTEM · SIGNAL LOG"
       title="事件日志"
       description="所有 Orchestrator / Worker / Receiver 上报事件的合并视图"
     >
       <template #actions>
-        <span class="rounded-full border border-border bg-muted px-3 py-1 text-2xs font-medium tabular-nums text-muted-foreground">
-          <span class="text-foreground">{{ visible.length }}</span> / {{ rows.length }} 条
+        <span class="readout inline-flex items-center gap-1.5 rounded-sm border border-border bg-muted px-2.5 py-1 text-3xs font-semibold uppercase tracking-section text-muted-foreground tabular-nums">
+          <span class="text-foreground">{{ visible.length }}</span>/<span>{{ rows.length }}</span>
+          <span class="text-muted-foreground/70">EVENTS</span>
         </span>
       </template>
     </PageHeader>
@@ -220,7 +223,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
             </div>
           </template>
           <template #empty>
-            <EmptyState title="暂无事件" />
+            <EmptyState title="暂无事件" illustration="inbox" />
           </template>
           <template #default>
         <EmptyState

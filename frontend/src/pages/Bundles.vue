@@ -79,6 +79,8 @@ function onUploaded(d: BundleDetail) {
 <template>
   <div class="space-y-6">
     <PageHeader
+      n="03"
+      kicker="PAYLOAD · BUNDLES"
       title="任务包"
       description="用户脚本注册表 · 批次通过 orch:<name>@<version> 引用"
     >
@@ -112,11 +114,8 @@ function onUploaded(d: BundleDetail) {
             <EmptyState
               title="还没有任务包"
               description='点击上方"上传 ZIP"开始添加。'
-            >
-              <template #icon>
-                <Icon name="bundles" :size="20" />
-              </template>
-            </EmptyState>
+              illustration="inbox"
+            />
           </template>
           <template #default="{ data: bundleRows }">
             <!-- Narrow: card list. Each row collapses into a stacked card. -->
@@ -190,11 +189,8 @@ function onUploaded(d: BundleDetail) {
             v-if="!selected"
             title="未选择任务包"
             description="选择左侧任意任务包查看清单 / 文件浏览。"
-          >
-            <template #icon>
-              <Icon name="bundles" :size="20" />
-            </template>
-          </EmptyState>
+            illustration="inbox"
+          />
           <div v-else-if="detail.isLoading.value" class="py-8 text-center text-sm text-muted-foreground">
             加载中…
           </div>
