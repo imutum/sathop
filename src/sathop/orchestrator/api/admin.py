@@ -5,12 +5,14 @@ from __future__ import annotations
 import platform
 import sys
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sathop import __version__
 from sathop.shared.protocol import NON_TERMINAL_STATES, GranuleState
 
 from ..config import require_token, settings
@@ -32,6 +34,63 @@ ACTIVE = {
 }
 
 STUCK_AGE_HOURS = 6
+
+
+def _clamp_limit(limit: int, *, min_value: int = 1, max_value: int = 200) -> int:
+    return max(min_value, min(max_value, limit))
+
+
+def _stuck_threshold(now: datetime) -> datetime:
+    return now - timedelta(hours=STUCK_AGE_HOURS)
+
+
+def _event_summary(e: Event) -> dict[str, Any]:
+    return {
+        "id": e.id,
+        "ts": e.ts.isoformat(),
+        "level": e.level,
+        "source": e.source,
+        "message": e.message,
+    }
+
+
+def _granule_activity_row(g: Granule) -> dict[str, Any]:
+    return {
+        "granule_id": g.granule_id,
+        "batch_id": g.batch_id,
+        "state": g.state,
+        "leased_by": g.leased_by,
+        "retry_count": g.retry_count,
+        "updated_at": g.updated_at.isoformat(),
+    }
+
+
+def _stuck_granule_row(g: Granule, *, now: datetime) -> dict[str, Any]:
+    return {
+        **_granule_activity_row(g),
+        "error": g.error,
+        "age_hours": (now - g.updated_at).total_seconds() / 3600,
+    }
+
+
+async def _old_stuck_granules(
+    s: AsyncSession,
+    *,
+    now: datetime,
+    state: str | None = None,
+    limit: int,
+) -> list[Granule]:
+    stmt = (
+        select(Granule)
+        .where(Granule.updated_at < _stuck_threshold(now))
+        .order_by(Granule.updated_at.asc())
+        .limit(limit)
+    )
+    if state is None:
+        stmt = stmt.where(Granule.state.in_(list(NON_TERMINAL)))
+    else:
+        stmt = stmt.where(Granule.state == state)
+    return (await s.execute(stmt)).scalars().all()
 
 
 @router.get("/overview")
@@ -56,10 +115,7 @@ async def overview(s: AsyncSession = Depends(session)) -> dict:
         "state_counts": state_counts,
         "stuck_over_hours": STUCK_AGE_HOURS,
         "stuck_by_state": stuck,
-        "last_events": [
-            {"id": e.id, "ts": e.ts.isoformat(), "level": e.level, "source": e.source, "message": e.message}
-            for e in last_events
-        ],
+        "last_events": [_event_summary(e) for e in last_events],
     }
 
 
@@ -71,7 +127,7 @@ async def list_in_flight(
     """Granules the fleet is actively working on right now. Most-recently-updated
     first, which tracks the pipeline's pulse better than by-id or by-created.
     pending is excluded — queued, not running."""
-    limit = max(1, min(200, limit))
+    limit = _clamp_limit(limit, max_value=200)
     rows = (
         (
             await s.execute(
@@ -84,17 +140,7 @@ async def list_in_flight(
         .scalars()
         .all()
     )
-    return [
-        {
-            "granule_id": g.granule_id,
-            "batch_id": g.batch_id,
-            "state": g.state,
-            "leased_by": g.leased_by,
-            "retry_count": g.retry_count,
-            "updated_at": g.updated_at.isoformat(),
-        }
-        for g in rows
-    ]
+    return [_granule_activity_row(g) for g in rows]
 
 
 @router.get("/stuck/{state}")
@@ -102,33 +148,8 @@ async def list_stuck(state: str, s: AsyncSession = Depends(session)) -> list[dic
     if state not in NON_TERMINAL:
         return []
     now = datetime.now(UTC)
-    threshold = now - timedelta(hours=STUCK_AGE_HOURS)
-    rows = (
-        (
-            await s.execute(
-                select(Granule)
-                .where(Granule.state == state)
-                .where(Granule.updated_at < threshold)
-                .order_by(Granule.updated_at.asc())
-                .limit(100)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return [
-        {
-            "granule_id": g.granule_id,
-            "batch_id": g.batch_id,
-            "state": g.state,
-            "leased_by": g.leased_by,
-            "retry_count": g.retry_count,
-            "error": g.error,
-            "updated_at": g.updated_at.isoformat(),
-            "age_hours": (now - g.updated_at).total_seconds() / 3600,
-        }
-        for g in rows
-    ]
+    rows = await _old_stuck_granules(s, now=now, state=state, limit=100)
+    return [_stuck_granule_row(g, now=now) for g in rows]
 
 
 @router.get("/stuck")
@@ -139,35 +160,10 @@ async def list_stuck_all(
     """Top-N oldest stuck granules across every non-terminal state. Powers the
     Dashboard's drill-down — operator sees count → clicks → sees the actual
     rows to investigate without paging through every state separately."""
-    limit = max(1, min(500, limit))
+    limit = _clamp_limit(limit, max_value=500)
     now = datetime.now(UTC)
-    threshold = now - timedelta(hours=STUCK_AGE_HOURS)
-    rows = (
-        (
-            await s.execute(
-                select(Granule)
-                .where(Granule.state.in_(list(NON_TERMINAL)))
-                .where(Granule.updated_at < threshold)
-                .order_by(Granule.updated_at.asc())
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return [
-        {
-            "granule_id": g.granule_id,
-            "batch_id": g.batch_id,
-            "state": g.state,
-            "leased_by": g.leased_by,
-            "retry_count": g.retry_count,
-            "error": g.error,
-            "updated_at": g.updated_at.isoformat(),
-            "age_hours": (now - g.updated_at).total_seconds() / 3600,
-        }
-        for g in rows
-    ]
+    rows = await _old_stuck_granules(s, now=now, limit=limit)
+    return [_stuck_granule_row(g, now=now) for g in rows]
 
 
 class OrchestratorInfo(BaseModel):
@@ -189,7 +185,7 @@ class OrchestratorInfo(BaseModel):
 @router.get("/settings/info", response_model=OrchestratorInfo)
 async def orchestrator_info() -> OrchestratorInfo:
     return OrchestratorInfo(
-        version="0.1.0",
+        version=__version__,
         python_version=sys.version.split()[0],
         platform=platform.platform(),
         db_path=str(settings.db_path),

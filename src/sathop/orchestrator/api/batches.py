@@ -14,6 +14,7 @@ from sathop.shared.protocol import (
     BatchCreate,
     BatchSummary,
     GranuleBulkAdd,
+    GranuleCreate,
     GranuleRow,
     GranuleState,
 )
@@ -58,6 +59,56 @@ def _compose_gid(batch_id: str, user_gid: str) -> str:
     that already enforces global uniqueness, so collisions are impossible
     across batches and the UI can strip it for display."""
     return f"{batch_id}:{user_gid}"
+
+
+async def _get_batch_or_404(s: AsyncSession, batch_id: str) -> Batch:
+    batch = await s.get(Batch, batch_id)
+    if batch is None:
+        raise HTTPException(404, "batch not found")
+    return batch
+
+
+def _batch_summary(
+    batch: Batch,
+    *,
+    counts: dict[str, int],
+    objects_exhausted: int = 0,
+    eta_seconds: int | None = None,
+) -> BatchSummary:
+    return BatchSummary(
+        batch_id=batch.batch_id,
+        name=batch.name,
+        bundle_ref=batch.bundle_ref,
+        target_receiver_id=batch.target_receiver_id,
+        status=batch.status,
+        created_at=batch.created_at,
+        counts=counts,
+        objects_exhausted=objects_exhausted,
+        eta_seconds=eta_seconds,
+    )
+
+
+def _new_granule(batch_id: str, granule: GranuleCreate) -> Granule:
+    return Granule(
+        granule_id=_compose_gid(batch_id, granule.granule_id),
+        batch_id=batch_id,
+        state=GranuleState.PENDING.value,
+        inputs_json=json.dumps([i.model_dump() for i in granule.inputs]),
+        meta_json=json.dumps(granule.meta, ensure_ascii=False),
+    )
+
+
+def _granule_row(granule: Granule, *, objects_exhausted: int = 0) -> GranuleRow:
+    return GranuleRow(
+        granule_id=granule.granule_id,
+        batch_id=granule.batch_id,
+        state=granule.state,
+        retry_count=granule.retry_count,
+        leased_by=granule.leased_by,
+        error=granule.error,
+        updated_at=granule.updated_at,
+        objects_exhausted=objects_exhausted,
+    )
 
 
 async def _counts(s: AsyncSession, batch_id: str) -> dict[str, int]:
@@ -149,6 +200,24 @@ async def _exhausted_objects_bulk(s: AsyncSession, batch_ids: list[str]) -> dict
     return dict((await s.execute(stmt)).all())
 
 
+async def _exhausted_objects_by_granule(s: AsyncSession, granule_ids: list[str]) -> dict[str, int]:
+    if not granule_ids:
+        return {}
+    stmt = (
+        select(GranuleObject.granule_id, func.count(GranuleObject.id))
+        .where(GranuleObject.granule_id.in_(granule_ids))
+        .where(GranuleObject.acked_at.is_(None))
+        .where(GranuleObject.deleted_at.is_(None))
+        .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
+        .group_by(GranuleObject.granule_id)
+    )
+    return dict((await s.execute(stmt)).all())
+
+
+async def _batch_granule_ids(s: AsyncSession, batch_id: str) -> list[str]:
+    return (await s.execute(select(Granule.granule_id).where(Granule.batch_id == batch_id))).scalars().all()
+
+
 @router.post("", response_model=BatchSummary)
 async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchSummary:
     existing = await s.get(Batch, req.batch_id)
@@ -207,32 +276,14 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
     s.add(b)
 
     for g in req.granules:
-        s.add(
-            Granule(
-                granule_id=_compose_gid(req.batch_id, g.granule_id),
-                batch_id=req.batch_id,
-                state=GranuleState.PENDING.value,
-                inputs_json=json.dumps([i.model_dump() for i in g.inputs]),
-                meta_json=json.dumps(g.meta, ensure_ascii=False),
-            )
-        )
+        s.add(_new_granule(req.batch_id, g))
     await log(s, "orchestrator", f"created batch {req.batch_id} with {len(req.granules)} granules")
     for w in all_warnings[:20]:
         await log(s, "orchestrator", w, level="warn")
     await s.commit()
     publish({"scope": "batches"})
 
-    return BatchSummary(
-        batch_id=b.batch_id,
-        name=b.name,
-        bundle_ref=b.bundle_ref,
-        target_receiver_id=b.target_receiver_id,
-        status=b.status,
-        created_at=b.created_at,
-        counts=await _counts(s, b.batch_id),
-        objects_exhausted=0,
-        eta_seconds=None,
-    )
+    return _batch_summary(b, counts=await _counts(s, b.batch_id))
 
 
 @router.get("", response_model=list[BatchSummary])
@@ -243,13 +294,8 @@ async def list_batches(s: AsyncSession = Depends(session)) -> list[BatchSummary]
     exh_map = await _exhausted_objects_bulk(s, ids)
     eta_map = await _eta_seconds_bulk(s, counts_map)
     return [
-        BatchSummary(
-            batch_id=b.batch_id,
-            name=b.name,
-            bundle_ref=b.bundle_ref,
-            target_receiver_id=b.target_receiver_id,
-            status=b.status,
-            created_at=b.created_at,
+        _batch_summary(
+            b,
             counts=counts_map[b.batch_id],
             objects_exhausted=exh_map.get(b.batch_id, 0),
             eta_seconds=eta_map.get(b.batch_id),
@@ -260,18 +306,11 @@ async def list_batches(s: AsyncSession = Depends(session)) -> list[BatchSummary]
 
 @router.get("/{batch_id}", response_model=BatchSummary)
 async def detail(batch_id: str, s: AsyncSession = Depends(session)) -> BatchSummary:
-    b = await s.get(Batch, batch_id)
-    if b is None:
-        raise HTTPException(404, "batch not found")
+    b = await _get_batch_or_404(s, batch_id)
     counts = await _counts(s, batch_id)
     eta_map = await _eta_seconds_bulk(s, {batch_id: counts})
-    return BatchSummary(
-        batch_id=b.batch_id,
-        name=b.name,
-        bundle_ref=b.bundle_ref,
-        target_receiver_id=b.target_receiver_id,
-        status=b.status,
-        created_at=b.created_at,
+    return _batch_summary(
+        b,
         counts=counts,
         objects_exhausted=await _exhausted_objects(s, batch_id),
         eta_seconds=eta_map.get(batch_id),
@@ -280,9 +319,7 @@ async def detail(batch_id: str, s: AsyncSession = Depends(session)) -> BatchSumm
 
 @router.post("/{batch_id}/granules")
 async def add_granules(batch_id: str, req: GranuleBulkAdd, s: AsyncSession = Depends(session)) -> dict:
-    b = await s.get(Batch, batch_id)
-    if b is None:
-        raise HTTPException(404, "batch not found")
+    await _get_batch_or_404(s, batch_id)
 
     existing = set(
         (await s.execute(select(Granule.granule_id).where(Granule.batch_id == batch_id))).scalars().all()
@@ -295,15 +332,7 @@ async def add_granules(batch_id: str, req: GranuleBulkAdd, s: AsyncSession = Dep
         if gid in existing:
             skipped += 1
             continue
-        s.add(
-            Granule(
-                granule_id=gid,
-                batch_id=batch_id,
-                state=GranuleState.PENDING.value,
-                inputs_json=json.dumps([i.model_dump() for i in g.inputs]),
-                meta_json=json.dumps(g.meta, ensure_ascii=False),
-            )
-        )
+        s.add(_new_granule(batch_id, g))
         added += 1
     await s.commit()
     if added:
@@ -319,9 +348,7 @@ async def list_granules(
     offset: int = Query(default=0, ge=0),
     s: AsyncSession = Depends(session),
 ) -> list[GranuleRow]:
-    b = await s.get(Batch, batch_id)
-    if b is None:
-        raise HTTPException(404, "batch not found")
+    await _get_batch_or_404(s, batch_id)
     stmt = select(Granule).where(Granule.batch_id == batch_id)
     if state:
         wanted = [x.strip() for x in state.split(",") if x.strip()]
@@ -329,34 +356,9 @@ async def list_granules(
     stmt = stmt.order_by(Granule.updated_at.desc()).limit(limit).offset(offset)
     rows = (await s.execute(stmt)).scalars().all()
 
-    # One grouped query for exhausted-object counts → avoid N+1. Only granules
-    # that actually have any exhausted objects appear in the dict; others map
-    # to the default 0 below.
     gids = [g.granule_id for g in rows]
-    exh_map: dict[str, int] = {}
-    if gids:
-        exh_stmt = (
-            select(GranuleObject.granule_id, func.count(GranuleObject.id))
-            .where(GranuleObject.granule_id.in_(gids))
-            .where(GranuleObject.acked_at.is_(None))
-            .where(GranuleObject.deleted_at.is_(None))
-            .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
-            .group_by(GranuleObject.granule_id)
-        )
-        exh_map = dict((await s.execute(exh_stmt)).all())
-    return [
-        GranuleRow(
-            granule_id=g.granule_id,
-            batch_id=g.batch_id,
-            state=g.state,
-            retry_count=g.retry_count,
-            leased_by=g.leased_by,
-            error=g.error,
-            updated_at=g.updated_at,
-            objects_exhausted=exh_map.get(g.granule_id, 0),
-        )
-        for g in rows
-    ]
+    exh_map = await _exhausted_objects_by_granule(s, gids)
+    return [_granule_row(g, objects_exhausted=exh_map.get(g.granule_id, 0)) for g in rows]
 
 
 @router.post("/{batch_id}/reset-exhausted-objects")
@@ -365,8 +367,7 @@ async def reset_exhausted_objects(batch_id: str, s: AsyncSession = Depends(sessi
     hit the pull-failure cap. Use after fixing the upstream cause (worker
     restored, network healed). Already-acked or already-deleted objects are
     untouched."""
-    if await s.get(Batch, batch_id) is None:
-        raise HTTPException(404, "batch not found")
+    await _get_batch_or_404(s, batch_id)
     granule_ids_subq = select(Granule.granule_id).where(Granule.batch_id == batch_id).scalar_subquery()
     result = await s.execute(
         update(GranuleObject)
@@ -417,7 +418,7 @@ _RETRYABLE = {
 }
 
 
-async def _cancel_one(g: Granule, now) -> bool:
+def _cancel_one(g: Granule, now) -> bool:
     if g.state not in _CANCELLABLE:
         return False
     g.state = GranuleState.BLACKLISTED.value
@@ -427,7 +428,7 @@ async def _cancel_one(g: Granule, now) -> bool:
     return True
 
 
-async def _retry_one(g: Granule, now) -> bool:
+def _retry_one(g: Granule, now) -> bool:
     if g.state not in _RETRYABLE:
         return False
     g.state = GranuleState.PENDING.value
@@ -444,7 +445,7 @@ async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depen
     g = await s.get(Granule, granule_id)
     if g is None or g.batch_id != batch_id:
         raise HTTPException(404, "granule not found in batch")
-    if not await _cancel_one(g, utcnow()):
+    if not _cancel_one(g, utcnow()):
         raise HTTPException(409, f"cannot cancel granule in state {g.state!r}")
     await log(s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id)
     await s.commit()
@@ -457,7 +458,7 @@ async def retry_granule(batch_id: str, granule_id: str, s: AsyncSession = Depend
     g = await s.get(Granule, granule_id)
     if g is None or g.batch_id != batch_id:
         raise HTTPException(404, "granule not found in batch")
-    if not await _retry_one(g, utcnow()):
+    if not _retry_one(g, utcnow()):
         raise HTTPException(409, f"cannot retry granule in state {g.state!r}")
     await log(s, "admin", f"retried granule {granule_id}", granule_id=granule_id)
     await s.commit()
@@ -468,9 +469,7 @@ async def retry_granule(batch_id: str, granule_id: str, s: AsyncSession = Depend
 @router.post("/{batch_id}/cancel")
 async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dict:
     """Bulk cancel: every granule in a cancellable state → blacklisted."""
-    b = await s.get(Batch, batch_id)
-    if b is None:
-        raise HTTPException(404, "batch not found")
+    await _get_batch_or_404(s, batch_id)
     now = utcnow()
     rows = (
         (
@@ -484,7 +483,7 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
         .all()
     )
     for g in rows:
-        await _cancel_one(g, now)
+        _cancel_one(g, now)
     if rows:
         await log(s, "admin", f"cancelled batch {batch_id}: {len(rows)} granules blacklisted", level="warn")
     await s.commit()
@@ -509,9 +508,7 @@ async def delete_batch(
     Already-uploaded objects on worker storage are not cleaned up here; the
     operator drops them via the worker's own retention or by hand. This
     endpoint only removes orchestrator state."""
-    b = await s.get(Batch, batch_id)
-    if b is None:
-        raise HTTPException(404, "batch not found")
+    b = await _get_batch_or_404(s, batch_id)
 
     if not force:
         active = (
@@ -527,9 +524,7 @@ async def delete_batch(
                 f"{active} granules are mid-flight on workers; cancel the batch first or pass ?force=true",
             )
 
-    granule_ids = (
-        (await s.execute(select(Granule.granule_id).where(Granule.batch_id == batch_id))).scalars().all()
-    )
+    granule_ids = await _batch_granule_ids(s, batch_id)
 
     counts = {"granules": 0, "objects": 0, "progress": 0, "stage_timings": 0, "events": 0}
     if granule_ids:

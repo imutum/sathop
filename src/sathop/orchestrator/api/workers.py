@@ -64,6 +64,74 @@ async def _count_inflight(s: AsyncSession, worker_id: str) -> int:
     return int(pre or 0) + int(post or 0)
 
 
+async def _lease_limit(s: AsyncSession, worker: Worker, req: LeaseRequest) -> int:
+    """Effective lease size after orchestrator backpressure and runtime override."""
+    limit = req.capacity
+    if settings.max_inflight_per_worker > 0:
+        holding = await _count_inflight(s, req.worker_id)
+        limit = min(limit, max(0, settings.max_inflight_per_worker - holding))
+    if worker.desired_capacity is not None:
+        limit = min(limit, max(0, worker.desired_capacity))
+    return limit
+
+
+def _json_dict_or_empty(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _credential_map(raw: str | None) -> dict[str, Credential]:
+    try:
+        return {k: Credential.model_validate(v) for k, v in _json_dict_or_empty(raw).items()}
+    except ValueError:
+        return {}
+
+
+def _lease_item(granule: Granule, batch: Batch | None) -> LeaseItem:
+    return LeaseItem(
+        granule_id=granule.granule_id,
+        batch_id=granule.batch_id,
+        bundle_ref=batch.bundle_ref if batch else "",
+        inputs=json.loads(granule.inputs_json),
+        meta=json.loads(granule.meta_json or "{}"),
+        execution_env=_json_dict_or_empty(batch.execution_env_json if batch else None),
+        credentials=_credential_map(batch.credentials_json if batch else None),
+    )
+
+
+async def _held_granule_sample(s: AsyncSession, worker_id: str, limit: int = 5) -> list[str]:
+    leased = (
+        (
+            await s.execute(
+                select(Granule.granule_id)
+                .where(Granule.leased_by == worker_id)
+                .where(Granule.state.in_(LEASED_STATES))
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    uploaded = (
+        (
+            await s.execute(
+                select(distinct(GranuleObject.granule_id))
+                .where(GranuleObject.worker_id == worker_id)
+                .where(GranuleObject.deleted_at.is_(None))
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list({*leased, *uploaded})[:limit]
+
+
 @router.post("/register", response_model=WorkerRegisterResponse)
 async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> WorkerRegisterResponse:
     w = await s.get(Worker, req.worker_id)
@@ -121,12 +189,7 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     # Two clamps below req.capacity: queue-based backpressure (0 disables) and
     # per-worker runtime override (belt-and-braces against an old worker that
     # doesn't self-clamp).
-    limit = req.capacity
-    if settings.max_inflight_per_worker > 0:
-        holding = await _count_inflight(s, req.worker_id)
-        limit = min(limit, max(0, settings.max_inflight_per_worker - holding))
-    if w.desired_capacity is not None:
-        limit = min(limit, max(0, w.desired_capacity))
+    limit = await _lease_limit(s, w, req)
     if limit <= 0:
         return LeaseResponse(items=[], lease_expires_at=expires)
 
@@ -147,34 +210,8 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
         g.leased_by = req.worker_id
         g.lease_expires_at = expires
         g.updated_at = now
-        inputs = json.loads(g.inputs_json)
-        meta = json.loads(g.meta_json or "{}")
         batch = await s.get(Batch, g.batch_id)
-        env: dict[str, str] = {}
-        creds_map: dict[str, Credential] = {}
-        if batch:
-            if batch.execution_env_json:
-                try:
-                    env = json.loads(batch.execution_env_json) or {}
-                except json.JSONDecodeError:
-                    env = {}
-            if batch.credentials_json:
-                try:
-                    raw = json.loads(batch.credentials_json) or {}
-                    creds_map = {k: Credential.model_validate(v) for k, v in raw.items()}
-                except (json.JSONDecodeError, ValueError):
-                    creds_map = {}
-        items.append(
-            LeaseItem(
-                granule_id=g.granule_id,
-                batch_id=g.batch_id,
-                bundle_ref=batch.bundle_ref if batch else "",
-                inputs=inputs,
-                meta=meta,
-                execution_env=env,
-                credentials=creds_map,
-            )
-        )
+        items.append(_lease_item(g, batch))
 
     if items:
         await log(s, req.worker_id, f"leased {len(items)} granules")
@@ -378,31 +415,7 @@ async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> d
         raise HTTPException(409, "worker is still enabled — disable it first")
     inflight = await _count_inflight(s, worker_id)
     if inflight > 0:
-        sample_pre = (
-            (
-                await s.execute(
-                    select(Granule.granule_id)
-                    .where(Granule.leased_by == worker_id)
-                    .where(Granule.state.in_(LEASED_STATES))
-                    .limit(5)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        sample_post = (
-            (
-                await s.execute(
-                    select(distinct(GranuleObject.granule_id))
-                    .where(GranuleObject.worker_id == worker_id)
-                    .where(GranuleObject.deleted_at.is_(None))
-                    .limit(5)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        sample = list({*sample_pre, *sample_post})[:5]
+        sample = await _held_granule_sample(s, worker_id)
         more = f" (+{inflight - len(sample)} more)" if inflight > len(sample) else ""
         raise HTTPException(
             409,
