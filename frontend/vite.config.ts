@@ -34,6 +34,7 @@ export default defineConfig({
             "lucide-vue-next",
             "vue-sonner",
           ],
+          forms: ["vee-validate", "@vee-validate/zod", "zod"],
         },
       },
     },

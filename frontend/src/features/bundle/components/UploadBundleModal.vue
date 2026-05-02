@@ -1,24 +1,47 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { useMutation } from "@tanstack/vue-query";
+import { useForm } from "vee-validate";
+import { toTypedSchema } from "@vee-validate/zod";
+import { z } from "zod";
 import { API, type BundleDetail } from "@/api";
 import { useToast } from "@/composables/useToast";
-import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import FieldLabel from "@/components/FieldLabel.vue";
+import { Button } from "@/components/ui/button";
+import {
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import FilePicker from "@/components/FilePicker.vue";
 import Modal from "@/ui/Modal.vue";
-import TextInput from "@/ui/TextInput.vue";
 
 const emit = defineEmits<{ close: []; uploaded: [d: BundleDetail] }>();
 
 const toast = useToast();
-const file = ref<File | null>(null);
-const description = ref("");
 const submitError = ref<string | null>(null);
 
+const schema = toTypedSchema(
+  z.object({
+    file: z
+      .custom<File>((v) => v instanceof File, "请选择一个 ZIP 文件")
+      .refine((f) => f.name.toLowerCase().endsWith(".zip"), "文件需为 .zip 格式"),
+    description: z.string().optional(),
+  }),
+);
+
+const { handleSubmit, meta } = useForm({
+  validationSchema: schema,
+  // File starts unset; zod's `instanceof(File)` rejects null at submit time.
+  initialValues: { file: null as unknown as File, description: "" },
+});
+
 const upload = useMutation({
-  mutationFn: () => API.uploadBundle(file.value!, description.value || undefined),
+  mutationFn: (input: { file: File; description?: string }) =>
+    API.uploadBundle(input.file, input.description),
   onSuccess: (d) => {
     toast.success(`已上传 ${d.name}@${d.version}`);
     emit("uploaded", d);
@@ -29,46 +52,58 @@ const upload = useMutation({
   },
 });
 
-const dirty = computed(() => !!file.value || description.value.trim() !== "");
-
-function submit() {
+const onSubmit = handleSubmit((vals) => {
   submitError.value = null;
-  if (!file.value) {
-    submitError.value = "请先选择一个 ZIP 文件";
-    return;
-  }
-  upload.mutate();
-}
+  upload.mutate({
+    file: vals.file as File,
+    description: vals.description?.trim() || undefined,
+  });
+});
 </script>
 
 <template>
-  <Modal :dirty="dirty" @close="emit('close')">
+  <Modal :dirty="meta.dirty" @close="emit('close')">
     <h2 class="font-display mb-5 text-lg font-semibold">上传任务包</h2>
-    <div class="space-y-4 text-sm">
-      <label class="block">
-        <FieldLabel required>ZIP 文件 · 内含 manifest.yaml</FieldLabel>
-        <FilePicker v-model="file" accept=".zip" />
-      </label>
-      <label class="block">
-        <FieldLabel>描述（可选）</FieldLabel>
-        <TextInput
-          v-model="description"
-          placeholder="简短说明这个 bundle 做什么"
-          class="mt-2"
-        />
-      </label>
-      <Alert v-if="submitError" variant="destructive"><AlertDescription>{{ submitError }}</AlertDescription></Alert>
+    <form class="space-y-4 text-sm" @submit.prevent="onSubmit">
+      <FormField v-slot="{ value, handleChange }" name="file">
+        <FormItem>
+          <FormLabel>ZIP 文件 · 内含 manifest.yaml</FormLabel>
+          <FormControl>
+            <FilePicker
+              :model-value="(value as File | null) ?? null"
+              accept=".zip"
+              @update:model-value="handleChange"
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+      <FormField v-slot="{ componentField }" name="description">
+        <FormItem>
+          <FormLabel>描述（可选）</FormLabel>
+          <FormControl>
+            <Input
+              v-bind="componentField"
+              placeholder="简短说明这个 bundle 做什么"
+            />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      </FormField>
+      <Alert v-if="submitError" variant="destructive">
+        <AlertDescription>{{ submitError }}</AlertDescription>
+      </Alert>
       <div class="flex justify-end gap-2 pt-2">
-        <Button @click="emit('close')">取消</Button>
+        <Button type="button" @click="emit('close')">取消</Button>
         <Button
+          type="submit"
           variant="default"
-          @click="submit"
           :pending="upload.isPending.value"
           pending-label="上传中…"
         >
           上传
         </Button>
       </div>
-    </div>
+    </form>
   </Modal>
 </template>
