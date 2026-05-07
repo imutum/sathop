@@ -136,3 +136,28 @@ async def test_add_granules_same_short_id_other_batch_is_independent(client):
     )
     assert r.status_code == 200, r.text
     assert r.json() == {"added": 1, "skipped": 0}
+
+
+# ─── batch_id 缺省时 orchestrator 自动生成 ────────────────────────────────
+
+
+async def test_create_without_batch_id_auto_generates(client):
+    """Web UI 路径：用户只填 name，orchestrator 派 8 字符 URL-safe ID。"""
+    await _register_bundle()
+    r = client.post(
+        "/api/batches",
+        json={
+            "name": "MOD09A1 第 1 天",
+            "bundle_ref": "orch:b@1.0",
+            "granules": [_granule("0240")],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    auto_id = body["batch_id"]
+    assert isinstance(auto_id, str) and len(auto_id) == 8
+    assert body["name"] == "MOD09A1 第 1 天"
+
+    async with orch_db._session_maker() as s:
+        ids = (await s.execute(select(Granule.granule_id))).scalars().all()
+        assert ids == [f"{auto_id}:0240"]

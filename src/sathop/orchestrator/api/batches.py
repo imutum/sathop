@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, delete, func, select, update
@@ -220,9 +221,20 @@ async def _batch_granule_ids(s: AsyncSession, batch_id: str) -> list[str]:
 
 @router.post("", response_model=BatchSummary)
 async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchSummary:
-    existing = await s.get(Batch, req.batch_id)
-    if existing is not None:
-        raise HTTPException(409, "batch_id already exists")
+    # 客户端没指定 ID ⇒ 生成 8 字符 URL-safe 随机串。secrets.token_urlsafe(6)
+    # 给 6 字节随机熵 ≈ 281T 组合，重试 10 次即可在百万级批次量下保证唯一。
+    if req.batch_id is None:
+        for _ in range(10):
+            candidate = secrets.token_urlsafe(6)
+            if await s.get(Batch, candidate) is None:
+                batch_id = candidate
+                break
+        else:
+            raise HTTPException(500, "failed to generate unique batch_id")
+    else:
+        if await s.get(Batch, req.batch_id) is not None:
+            raise HTTPException(409, "batch_id already exists")
+        batch_id = req.batch_id
 
     name, version = _parse_orch_ref(req.bundle_ref)
     bundle = await s.get(Bundle, (name, version))
@@ -264,7 +276,7 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
         )
 
     b = Batch(
-        batch_id=req.batch_id,
+        batch_id=batch_id,
         name=req.name,
         bundle_ref=req.bundle_ref,
         target_receiver_id=req.target_receiver_id,
@@ -276,8 +288,8 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
     s.add(b)
 
     for g in req.granules:
-        s.add(_new_granule(req.batch_id, g))
-    await log(s, "orchestrator", f"created batch {req.batch_id} with {len(req.granules)} granules")
+        s.add(_new_granule(batch_id, g))
+    await log(s, "orchestrator", f"created batch {batch_id} with {len(req.granules)} granules")
     for w in all_warnings[:20]:
         await log(s, "orchestrator", w, level="warn")
     await s.commit()

@@ -155,7 +155,9 @@ class GranuleCreate(BaseModel):
 
 
 class BatchCreate(BaseModel):
-    batch_id: str
+    # 可选：None ⇒ orchestrator 自动生成 8 字符 URL-safe 随机 ID。Web UI 走这条
+    # 路径（用户只填 name 展示名）；CLI 或脚本仍可显式指定 ID 做幂等创建。
+    batch_id: str | None = None
     name: str
     bundle_ref: str
     target_receiver_id: str | None = None

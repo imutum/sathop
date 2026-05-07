@@ -4,7 +4,6 @@ import { z } from "zod";
 // have dynamic shape (driven by the bundle manifest) and stay imperative
 // in CreateBatchModal.vue — see validateRow / credsValid there.
 export const createBatchHeaderSchema = z.object({
-  batchId: z.string().min(1, "请填批次 ID"),
   name: z.string().min(1, "请填展示名称"),
   bundleSel: z.string().min(1, "请选择任务包"),
   targetReceiver: z.string().optional(),

@@ -47,7 +47,6 @@ const toast = useToast();
 const { handleSubmit, meta: headerMeta, values: headerValues } = useForm({
   validationSchema: toTypedSchema(createBatchHeaderSchema),
   initialValues: {
-    batchId: "",
     name: "",
     bundleSel: props.initialBundle ?? "",
     targetReceiver: "",
@@ -153,7 +152,6 @@ const credsValid = computed(() =>
 const create = useMutation({
   mutationFn: () =>
     API.createBatch({
-      batch_id: headerValues.batchId!,
       name: headerValues.name!,
       bundle_ref: `orch:${headerValues.bundleSel}`,
       target_receiver_id: headerValues.targetReceiver || null,
@@ -262,20 +260,7 @@ function onForget(n: string) {
       <span>关闭</span>
     </div>
     <form @submit.prevent="onSubmit" @keydown="onKeydown" class="space-y-3 text-sm">
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <FormField v-slot="{ componentField }" name="batchId">
-          <FormItem>
-            <FormLabel>批次 ID</FormLabel>
-            <FormControl>
-              <Input
-                v-bind="componentField"
-                placeholder="如 mod09a1-2024001"
-                class="font-mono text-xs"
-              />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <FormField v-slot="{ componentField }" name="name">
           <FormItem>
             <FormLabel>展示名称</FormLabel>
