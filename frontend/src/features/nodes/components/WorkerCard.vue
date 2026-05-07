@@ -280,7 +280,6 @@ function onKey(e: KeyboardEvent) {
               :pending="lifecyclePending"
               @set-enabled="onSetEnabled"
               @forget="onForget"
-              :forget-confirm="`从注册表中移除 ${worker.worker_id}？\n\n仅删除元数据；如果它仍持有任务会被服务端拒绝。`"
               disable-title="禁用此节点（在手任务继续，可点启用恢复）"
               forget-title="永久从注册表中删除（仅在已禁用且无任务时允许）"
             />
