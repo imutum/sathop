@@ -80,10 +80,11 @@ class Worker:
         # 限并发到核数后单粒应回落到 ~1 min）。capacity 控制 in-flight 总数
         # 仍然 > process 并发，所以下载/上传可以与处理重叠。
         self._process_sem = asyncio.Semaphore(s.process_concurrency)
-        # Strong refs for handler tasks: asyncio.create_task() only weak-refs
-        # tasks, so without this set Python's GC may collect a long-running
-        # _handle() mid-flight and silently cancel it. See asyncio docs.
-        self._handlers: set[asyncio.Task[None]] = set()
+        # Granule ID → handler task. Keyed lookup lets the heartbeat loop
+        # cancel ghost tasks (lease revoked by orchestrator) by gid; the
+        # mapping also doubles as the strong-ref keepalive that asyncio
+        # docs warn about (create_task is weakly referenced).
+        self._handlers: dict[str, asyncio.Task[None]] = {}
         # Updated from heartbeat replies; orchestrator may clamp below s.capacity.
         self._effective_capacity = s.capacity
         # Same pattern for the in-flight pressure multiplier — orchestrator
@@ -165,8 +166,19 @@ class Worker:
                         queue_processing=self.stage["processing"],
                         queue_uploading=self.stage["uploading"],
                         paused=self._pause_lease,
+                        active_granule_ids=list(self._handlers.keys()),
                     )
                 )
+                # Cancel any handler whose lease the orchestrator no longer
+                # credits to us — batch cancel, granule cancel, sweeper reclaim
+                # all surface here. CancelledError propagates through _handle's
+                # finally block (cleanup runs) and is naturally not caught by
+                # `except Exception`, so no spurious failure report fires.
+                for gid in resp.revoked_granule_ids:
+                    t = self._handlers.get(gid)
+                    if t is not None and not t.done():
+                        log.info("[%s] cancelling handler — orchestrator revoked lease", gid)
+                        t.cancel()
                 desired = resp.desired_capacity
                 new_eff = min(self.s.capacity, max(0, desired)) if desired is not None else self.s.capacity
                 if new_eff != self._effective_capacity:
@@ -224,9 +236,13 @@ class Worker:
                 continue
 
             for item in resp.items:
+                gid = item.granule_id
                 t = asyncio.create_task(self._handle(item))
-                self._handlers.add(t)
-                t.add_done_callback(self._handlers.discard)
+                self._handlers[gid] = t
+                # Pop from the keyed map when done; .pop with a default keeps
+                # this safe even if the key was already removed (e.g. by a
+                # concurrent revoke handler).
+                t.add_done_callback(lambda _t, _g=gid: self._handlers.pop(_g, None))
 
     async def _handle(self, item: LeaseItem) -> None:
         gid = item.granule_id

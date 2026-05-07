@@ -229,3 +229,78 @@ async def test_report_state_success_returns_silently():
     w = _stub_worker(agent)
     await w._report_state("g1", GranuleState.DOWNLOADING)
     assert agent.calls == [("g1", GranuleState.DOWNLOADING)]
+
+
+# ─── Bidirectional sync: heartbeat returns revoked granule IDs ────────────
+
+
+async def test_heartbeat_returns_revoked_for_unleased_active_granule(client):
+    """Worker reports an active granule that the DB no longer credits to it
+    (e.g. after cancel_batch cleared leased_by) → orchestrator returns it in
+    revoked_granule_ids so the worker can cancel the asyncio task."""
+    await _seed_worker_with_leased_granules("w1")
+    # Simulate the worker still claiming an extra granule ID that is now
+    # cancelled (BLACKLISTED, leased_by=null).
+    async with orch_db._session_maker() as s:
+        s.add(
+            Granule(
+                granule_id="g-cancelled",
+                batch_id="b",
+                state=GranuleState.BLACKLISTED.value,
+                inputs_json="[]",
+                leased_by=None,
+                lease_expires_at=None,
+            )
+        )
+        await s.commit()
+
+    payload = _heartbeat_payload("w1")
+    payload["active_granule_ids"] = ["g0", "g1", "g-cancelled", "g-doesnt-exist"]
+    r = client.post("/api/workers/heartbeat", json=payload)
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    revoked = set(body["revoked_granule_ids"])
+    # g0/g1 are still legitimately leased to w1 → not revoked.
+    assert "g0" not in revoked
+    assert "g1" not in revoked
+    # Cancelled and unknown IDs both end up revoked (worker should drop them).
+    assert "g-cancelled" in revoked
+    assert "g-doesnt-exist" in revoked
+
+
+async def test_heartbeat_returns_revoked_for_other_workers_lease(client):
+    """If worker w1 still thinks it owns a granule that's now leased by w2
+    (manual reassignment / sweeper handed off), w1 must drop it."""
+    await _seed_worker_with_leased_granules("w1")
+    async with orch_db._session_maker() as s:
+        s.add(Worker(worker_id="w2", version="t", capacity=4))
+        s.add(
+            Granule(
+                granule_id="g-w2",
+                batch_id="b",
+                state=GranuleState.DOWNLOADING.value,
+                inputs_json="[]",
+                leased_by="w2",
+                lease_expires_at=utcnow() + timedelta(minutes=30),
+            )
+        )
+        await s.commit()
+
+    payload = _heartbeat_payload("w1")
+    payload["active_granule_ids"] = ["g0", "g-w2"]
+    r = client.post("/api/workers/heartbeat", json=payload)
+    body = r.json()
+
+    assert "g0" not in body["revoked_granule_ids"]
+    assert "g-w2" in body["revoked_granule_ids"]
+
+
+async def test_heartbeat_empty_active_returns_no_revokes(client):
+    """Quiet worker (no in-flight tasks) shouldn't get any spurious revoke
+    list — empty input ⇒ empty output."""
+    await _seed_worker_with_leased_granules("w1")
+    payload = _heartbeat_payload("w1")
+    payload["active_granule_ids"] = []
+    body = client.post("/api/workers/heartbeat", json=payload).json()
+    assert body["revoked_granule_ids"] == []

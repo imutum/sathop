@@ -89,6 +89,11 @@ class WorkerHeartbeatResponse(BaseModel):
     # 默认值（SATHOP_PIPELINE_PRESSURE_MULT，默认 3）。orchestrator 通过 UI
     # 下发，worker 取 min(env, desired) 兜底。
     desired_pipeline_mult: int | None = None
+    # Granules the worker reported as active that the orchestrator no longer
+    # considers leased to it (batch/granule cancelled, lease swept, manual
+    # reassignment). Worker cancels the matching asyncio.Task to free up the
+    # CPU/bandwidth those granules are wasting on now-ghost work.
+    revoked_granule_ids: list[str] = Field(default_factory=list)
 
 
 class WorkerHeartbeat(BaseModel):
@@ -117,6 +122,11 @@ class WorkerHeartbeat(BaseModel):
     # disk-watermark backpressure). Surfaces to operators so an "online but
     # idle" worker doesn't look like the orchestrator is starving it.
     paused: bool = False
+    # Granule IDs the worker currently has an active asyncio handler task for.
+    # Orchestrator diff-checks against DB (state in LEASED_STATES, leased_by =
+    # this worker) and returns any stragglers as `revoked_granule_ids` so the
+    # worker can cancel ghost work after a batch/granule cancel.
+    active_granule_ids: list[str] = Field(default_factory=list)
 
 
 class ReceiverRegister(BaseModel):

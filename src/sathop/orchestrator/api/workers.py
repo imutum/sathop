@@ -192,11 +192,34 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         .where(Granule.state.in_(LEASED_STATES))
         .values(lease_expires_at=now + LEASE_DURATION)
     )
+
+    # Diff worker's active set vs. DB: anything the worker is still running
+    # but the DB no longer credits to this worker (cancel_batch / cancel_granule
+    # cleared leased_by, or a state change took it out of LEASED_STATES) is
+    # ghost work — return it so the worker can cancel the asyncio task.
+    revoked: list[str] = []
+    if req.active_granule_ids:
+        still_owned = (
+            (
+                await s.execute(
+                    select(Granule.granule_id)
+                    .where(Granule.granule_id.in_(req.active_granule_ids))
+                    .where(Granule.leased_by == req.worker_id)
+                    .where(Granule.state.in_(LEASED_STATES))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        owned_set = set(still_owned)
+        revoked = [gid for gid in req.active_granule_ids if gid not in owned_set]
+
     await s.commit()
     publish({"scope": "workers"})
     return WorkerHeartbeatResponse(
         desired_capacity=w.desired_capacity,
         desired_pipeline_mult=w.desired_pipeline_mult,
+        revoked_granule_ids=revoked,
     )
 
 

@@ -55,11 +55,19 @@ class Settings:
 
 def load() -> Settings:
     orchestrator_url, token = resolve_orch()
+    cpus = os.cpu_count() or 1
+    mult_default = max(1, int(os.getenv("SATHOP_PIPELINE_PRESSURE_MULT", "3")))
+    # Default capacity matches worker's internal pipeline ceiling
+    # (process_concurrency × pipeline_pressure_mult). The old fixed 20 made
+    # 8-vCPU workers request 20 leases at once, but the process semaphore
+    # then only ran 8 in parallel — the surplus 12 sat queued, and on a
+    # batch cancel the operator had to wait for ghost work on all 20 to
+    # clear. Aligning capacity with ceiling keeps the queue tight.
     return Settings(
         worker_id=os.environ["SATHOP_WORKER_ID"],
         orchestrator_url=orchestrator_url,
         token=token,
-        capacity=int(os.getenv("SATHOP_CAPACITY", "20")),
+        capacity=max(1, int(os.getenv("SATHOP_CAPACITY", str(cpus * mult_default)))),
         public_url=os.environ["SATHOP_PUBLIC_URL"].rstrip("/"),
         work_root=Path(os.getenv("SATHOP_WORK_ROOT", "./data/work")),
         bundle_cache=Path(os.getenv("SATHOP_BUNDLE_CACHE", "./data/bundles")),
