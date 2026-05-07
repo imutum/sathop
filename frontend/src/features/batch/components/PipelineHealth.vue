@@ -5,7 +5,7 @@ import { stateLabel } from "@/i18n";
 
 // Pipeline health visualization: a single horizontal stacked bar showing
 // where each granule currently sits in the pipeline, plus a 4-cell summary
-// strip (已清理 / 处理中 / 待处理 / 异常). Stage tints are constrained —
+// strip (待分配 / 进行中 / 已完成 / 异常). Stage tints are constrained —
 // neutral for waiting, sky for in-flight, success for done, danger for
 // errored — so the eye can read distribution at a glance.
 const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
@@ -28,17 +28,31 @@ const STAGE: Record<GranuleState, { bar: string; chip: string; dot: string }> = 
   blacklisted: { bar: "bg-danger/70",           chip: "text-danger",           dot: "bg-danger" },
 };
 
-const TERMINAL: GranuleState[] = ["acked", "deleted"];
-const PENDING: GranuleState[] = ["pending", "queued"];
+// 4 大命运分桶 — 跟 i18n 10 阶段命名对齐：
+//   待分配  = pending                          (orchestrator 还没派)
+//   进行中  = queued..downloaded..uploaded..acked  (worker 链 + 分发 + 清理)
+//   已完成  = deleted                          (终态)
+//   异常    = failed + blacklisted             (待重试 + 已拉黑)
+const PENDING: GranuleState[] = ["pending"];
+const DONE: GranuleState[] = ["deleted"];
 const FAILED: GranuleState[] = ["failed", "blacklisted"];
+const IN_PROGRESS: GranuleState[] = [
+  "queued",
+  "downloading",
+  "downloaded",
+  "processing",
+  "processed",
+  "uploaded",
+  "acked",
+];
 
 const total = computed(() =>
   STATE_ORDER.reduce((s, k) => s + (props.counts[k] ?? 0), 0),
 );
-const cleared = computed(() => TERMINAL.reduce((s, k) => s + (props.counts[k] ?? 0), 0));
 const pending = computed(() => PENDING.reduce((s, k) => s + (props.counts[k] ?? 0), 0));
+const inFlight = computed(() => IN_PROGRESS.reduce((s, k) => s + (props.counts[k] ?? 0), 0));
+const done = computed(() => DONE.reduce((s, k) => s + (props.counts[k] ?? 0), 0));
 const failed = computed(() => FAILED.reduce((s, k) => s + (props.counts[k] ?? 0), 0));
-const inFlight = computed(() => total.value - cleared.value - pending.value - failed.value);
 
 const segments = computed(() =>
   STATE_ORDER.filter((s) => (props.counts[s] ?? 0) > 0).map((s) => ({
@@ -55,10 +69,10 @@ function pct(n: number): string {
 }
 
 const chips = computed(() => [
-  { key: "cleared",  label: "已清理", value: cleared.value,  tone: "text-success",          dot: "bg-success",          tip: "管线终态：已 ack 或已清理的数据粒数量" },
-  { key: "inflight", label: "处理中", value: inFlight.value, tone: "text-sky-600",          dot: "bg-sky-500",          tip: "正在下载 / 处理 / 上传中的数据粒" },
-  { key: "pending",  label: "待处理", value: pending.value,  tone: "text-amber-600",        dot: "bg-amber-500",        tip: "尚未被 worker 领取的数据粒" },
-  { key: "failed",   label: "异常",   value: failed.value,   tone: "text-danger",           dot: "bg-danger",           tip: "失败 + 已拉黑（达到重试上限）的数据粒" },
+  { key: "pending",  label: "待分配", value: pending.value,  tone: "text-muted-foreground", dot: "bg-muted-foreground", tip: "orchestrator 还没派给任何 worker 的数据粒" },
+  { key: "inflight", label: "进行中", value: inFlight.value, tone: "text-sky-600",          dot: "bg-sky-500",          tip: "已 lease ~ 待清理之间所有处理中状态的合计" },
+  { key: "done",     label: "已完成", value: done.value,     tone: "text-success",          dot: "bg-success",          tip: "终态：worker 上的产物已删除（全链路完成）" },
+  { key: "failed",   label: "异常",   value: failed.value,   tone: "text-danger",           dot: "bg-danger",           tip: "待重试 + 已拉黑（达到重试上限）的数据粒" },
 ]);
 </script>
 

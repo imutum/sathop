@@ -18,17 +18,22 @@ export function useNow() {
   return now;
 }
 
+// 10 阶段 + 已拉黑（重试上限）。命名跟 worker 视角一致：
+//   待分配 (orchestrator 还没派出去)
+//   待下载 → 下载中 → 待处理 → 处理中 → 待上传  (worker 持有)
+//   待分发 → 待清理 → 已完成  (产物离开 worker，receiver 链路)
+//   待重试 / 已拉黑  (失败分支)
 export const GRANULE_STATE_ZH: Record<GranuleState, string> = {
-  pending: "待处理",
-  queued: "排队中",
+  pending: "待分配",
+  queued: "待下载",
   downloading: "下载中",
-  downloaded: "下载完成",
+  downloaded: "待处理",
   processing: "处理中",
-  processed: "处理完成",
-  uploaded: "已上传",
-  acked: "已确认",
-  deleted: "已清理",
-  failed: "失败",
+  processed: "待上传",
+  uploaded: "待分发",
+  acked: "待清理",
+  deleted: "已完成",
+  failed: "待重试",
   blacklisted: "已拉黑",
 };
 

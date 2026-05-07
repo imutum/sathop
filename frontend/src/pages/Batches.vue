@@ -168,7 +168,7 @@ function bundleLink(ref: string): { name: string; version: string } | null {
 async function confirmCancel(b: BatchSummary) {
   const ok = await requestConfirm({
     title: `取消批次 "${b.name}"？`,
-    description: `将取消尚未完成的 ${inFlightTotal(b)} 条数据粒。\n\n已上传/已确认的不会被取消。`,
+    description: `将取消尚未完成的 ${inFlightTotal(b)} 条数据粒。\n\n待分发/待清理 状态的不会被取消（已经离开 worker）。`,
     confirmText: "取消批次",
     tone: "danger",
   });

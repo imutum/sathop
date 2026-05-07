@@ -89,8 +89,8 @@ describe("i18n/fmtProgressStep", () => {
 
 describe("i18n/stateLabel + levelLabel", () => {
   it("translates known states + falls back to the raw value for unknown", () => {
-    expect(stateLabel("pending")).toBe("待处理");
-    expect(stateLabel("failed")).toBe("失败");
+    expect(stateLabel("pending")).toBe("待分配");
+    expect(stateLabel("failed")).toBe("待重试");
     // @ts-expect-error — exercising the fallback path
     expect(stateLabel("unknown")).toBe("unknown");
   });

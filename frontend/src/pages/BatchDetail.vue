@@ -20,17 +20,23 @@ import BatchGranuleTable from "@/features/batch/components/BatchGranuleTable.vue
 import BatchTimingCard from "@/features/batch/components/BatchTimingCard.vue";
 import { Icon } from "@/components/Icon";
 
+// Filter chips 直接派生自 i18n.GRANULE_STATE_ZH，避免命名漂移。下载完/处理完/上传完
+// 这 3 个中间状态 (downloaded/processed/uploaded) 在 UI 上对操作意义不大（很短暂），
+// 故只保留 worker 视角下"驻留时间长 + 用户关心的" 8 个。
+const FILTER_STATES: GranuleState[] = [
+  "pending",
+  "queued",
+  "downloading",
+  "processing",
+  "uploaded",
+  "acked",
+  "deleted",
+  "failed",
+  "blacklisted",
+];
 const STATE_FILTERS: { value: GranuleState | "all"; label: string }[] = [
   { value: "all", label: "全部" },
-  { value: "pending", label: "待处理" },
-  { value: "queued", label: "排队中" },
-  { value: "downloading", label: "下载中" },
-  { value: "processing", label: "处理中" },
-  { value: "uploaded", label: "已上传" },
-  { value: "acked", label: "已确认" },
-  { value: "deleted", label: "已清理" },
-  { value: "failed", label: "失败" },
-  { value: "blacklisted", label: "已拉黑" },
+  ...FILTER_STATES.map((s) => ({ value: s, label: stateLabel(s) })),
 ];
 
 const CANCELLABLE = new Set<GranuleState>(IN_FLIGHT_STATES);
@@ -234,7 +240,7 @@ async function confirmCancelAll() {
   if (!b.value) return;
   const ok = await requestConfirm({
     title: `取消批次 "${b.value.name}"？`,
-    description: `将取消尚未完成的 ${inflightCount.value} 条数据粒。\n\n已上传/已确认的不会被取消。`,
+    description: `将取消尚未完成的 ${inflightCount.value} 条数据粒。\n\n待分发/待清理 状态的不会被取消（已经离开 worker）。`,
     confirmText: "取消批次",
     tone: "danger",
   });

@@ -47,9 +47,11 @@ const stuckTotal = computed(() =>
   Object.values(stuck.value).reduce((a, b) => a + (b ?? 0), 0),
 );
 const failed = computed(() => (counts.value.failed ?? 0) + (counts.value.blacklisted ?? 0));
+// 进行中 = STATE_ORDER 减去终态 deleted 和 待分配 pending（pending 在 PipelineHealth
+// chip 单独显示，避免顶部 stat 被四个卡片占满）。
 const inflightTotal = computed(() =>
   STATE_ORDER.reduce(
-    (s, k) => (k === "deleted" ? s : s + (counts.value[k] ?? 0)),
+    (s, k) => (k === "deleted" || k === "pending" ? s : s + (counts.value[k] ?? 0)),
     0,
   ),
 );
@@ -122,10 +124,10 @@ function fmtHours(h: number): string {
          number means* — operators new to SatHop shouldn't have to dig. -->
     <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
       <Stat
-        label="处理中"
+        label="进行中"
         :value="inflightTotal.toLocaleString()"
-        hint="尚未达到终态的数据粒"
-        tooltip="所有非终态数据粒的总和。终态 = 已清理 / 已 ack。"
+        hint="lease ~ 待清理之间的活粒"
+        tooltip="待下载 / 下载中 / 待处理 / 处理中 / 待上传 / 待分发 / 待清理 七个阶段合计。不含 待分配 与 已完成。"
         to="/batches"
       >
         <template #icon><Icon name="pulse" :size="18" /></template>
@@ -134,18 +136,18 @@ function fmtHours(h: number): string {
         label="已完成"
         :value="done.toLocaleString()"
         tone="good"
-        hint="累计已清理"
-        tooltip="管线终态计数 — 数据粒被 receiver 拉走 + worker 上的产物已删除。"
+        hint="终态计数"
+        tooltip="管线终态：receiver 已确认 + worker 上的产物已被 janitor 清掉，数据粒生命周期结束。"
         to="/batches"
       >
         <template #icon><Icon name="check" :size="18" /></template>
       </Stat>
       <Stat
-        label="失败"
+        label="异常"
         :value="failed.toLocaleString()"
         :tone="failed > 0 ? 'bad' : 'default'"
         :hint="failed > 0 ? '点击查看错误事件' : '本周期无异常'"
-        tooltip="失败 + 已拉黑数据粒之和。已拉黑表示达到自动重试上限。"
+        tooltip="待重试 + 已拉黑数据粒之和。已拉黑表示达到自动重试上限，需手动重置。"
         :to="failed > 0 ? '/events?level=error' : '/batches'"
       >
         <template #icon><Icon name="alert" :size="18" /></template>
