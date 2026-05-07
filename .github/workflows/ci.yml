@@ -49,14 +49,13 @@ jobs:
         run: gitleaks detect --redact --no-banner --verbose
 
   tests:
-    # Dual-OS matrix: this project has Windows-specific code paths
-    # (venv Scripts/ vs bin/, cmd.exe $VAR non-expansion, path separators),
-    # so Linux-only CI would let Windows regressions reach main.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    # Linux-only: production runs in Linux containers (deploy/*/Dockerfile),
+    # Windows is only a dev convenience. The Windows runner was 5–6× slower
+    # than Linux (~3 min vs ~30 s) and caught no real regressions in
+    # practice — Windows-specific code paths (venv Scripts/ vs bin/,
+    # cmd.exe $VAR non-expansion, path separators) get exercised by local
+    # dev on Win machines before push.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
