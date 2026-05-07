@@ -154,14 +154,34 @@ export type WorkerConfig = {
   downloadConcurrency: number;
 };
 
+// Parse "ip" or "ip:port" or "[::1]:port" into the URL's host portion (the
+// part after the scheme, before the first /). IPv6 literals must already be
+// bracket-wrapped — same expectation as `URL`.
+function parseHostPort(raw: string): { host: string; port: number | null } {
+  const cleaned = raw.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (!cleaned) return { host: "", port: null };
+  try {
+    // `URL` rejects bare host:port without a scheme; prepending one is the
+    // canonical workaround and lets us reuse the spec-correct parser for
+    // IPv6 brackets, IDN hostnames, etc.
+    const u = new URL(`https://${cleaned}`);
+    return { host: u.host.replace(/:\d+$/, "").replace(/^\[|\]$/g, ""), port: u.port ? Number(u.port) : null };
+  } catch {
+    return { host: cleaned, port: null };
+  }
+}
+
 export function workerPublicUrl(cfg: WorkerConfig): string {
   if (cfg.exposeMode === "caddy") {
     const d = cfg.domain.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
     return d ? `https://${d}` : "https://<your-domain>";
   }
   if (cfg.exposeMode === "selfsigned") {
-    const ip = cfg.ipAddress.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
-    return ip ? `https://${ip}` : "https://<worker-ip>";
+    const { host, port } = parseHostPort(cfg.ipAddress);
+    if (!host) return "https://<worker-ip>";
+    // 443 is implicit in https://; emit explicitly only for non-default
+    // ports so the URL stays clean when operators stick with the default.
+    return port && port !== 443 ? `https://${host}:${port}` : `https://${host}`;
   }
   const hp = cfg.hostPort.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
   return hp ? `http://${hp}` : `http://<host>:${cfg.storagePort}`;
@@ -181,11 +201,14 @@ function workerEnv(cfg: WorkerConfig, sathopUrl: string): Array<[string, string]
   return out;
 }
 
-// Host-side port the worker listens on. selfsigned mode flips to 443 so
-// SATHOP_PUBLIC_URL=https://<ip> works without :port in the URL; other modes
-// keep the conventional 9000.
+// Host-side port to publish in the docker -p mapping. selfsigned mode reads
+// it from the IP field (operator may write `192.168.1.50:8443` to use a
+// non-443 port); falls back to 443 when only an IP is given. Other modes
+// keep the conventional storagePort (container-internal, 9000 by default).
 function hostPortFor(cfg: WorkerConfig): number {
-  return cfg.exposeMode === "selfsigned" ? 443 : cfg.storagePort;
+  if (cfg.exposeMode !== "selfsigned") return cfg.storagePort;
+  const { port } = parseHostPort(cfg.ipAddress);
+  return port ?? 443;
 }
 
 export function workerDockerRun(cfg: WorkerConfig): string {

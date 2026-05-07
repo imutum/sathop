@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { createBatchHeaderSchema } from "@/features/batch/schemas";
 
 const VALID = {
-  batchId: "mod09a1-2024001",
   name: "MOD09A1 2024 第 1 天",
   bundleSel: "mod09a1@1.0.0",
   targetReceiver: "",
@@ -24,7 +23,6 @@ describe("features/batch/createBatchHeaderSchema", () => {
   });
 
   it.each([
-    ["batchId", "请填批次 ID"],
     ["name", "请填展示名称"],
     ["bundleSel", "请选择任务包"],
   ])("rejects empty %s with the user-facing prompt", (field, msg) => {

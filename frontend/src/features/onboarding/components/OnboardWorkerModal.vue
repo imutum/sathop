@@ -169,15 +169,16 @@ async function copySnippet() {
       </div>
 
       <div v-if="exposeMode === 'selfsigned'" class="mt-3">
-        <Label for="ow-ip">Worker 主机 IP</Label>
+        <Label for="ow-ip">Worker 主机 IP[:端口]</Label>
         <Input
           id="ow-ip"
           v-model="ipAddress"
-          placeholder="192.168.1.50"
+          placeholder="192.168.1.50  或  192.168.1.50:8443"
           class="font-mono text-xs"
         />
         <p class="mt-1 text-2xs text-muted-foreground">
-          Worker 启动时自动生成 IP SAN 自签证书，直接监听 :443，无需 Caddy/域名。Public URL =
+          Worker 自动生成 IP SAN 自签证书，无需 Caddy/域名。省略端口 ⇒ 默认 443；填
+          <code class="font-mono">:8443</code> 等可走高位端口（自签证书与端口无关，仅绑 IP）。Public URL =
           <code class="font-mono">{{ computedPublicUrl }}</code>
         </p>
       </div>
