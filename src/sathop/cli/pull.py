@@ -40,6 +40,11 @@ def _parse(argv: list[str] | None = None) -> Settings:
     )
     p.add_argument("--poll", type=int, default=10, help="poll/heartbeat interval seconds (default: 10)")
     p.add_argument("--concurrent", type=int, default=4, help="concurrent pulls (default: 4)")
+    p.add_argument(
+        "--insecure-tls",
+        action="store_true",
+        help="skip TLS cert verification (for workers behind self-signed IP certs)",
+    )
     args = p.parse_args(argv)
 
     try:
@@ -55,6 +60,7 @@ def _parse(argv: list[str] | None = None) -> Settings:
         poll_interval=args.poll,
         concurrent_pulls=args.concurrent,
         platform=cast(Literal["linux", "windows"], "windows" if sys.platform == "win32" else "linux"),
+        tls_verify=not args.insecure_tls,
     )
 
 

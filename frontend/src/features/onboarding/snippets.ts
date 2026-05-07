@@ -54,6 +54,7 @@ export type ReceiverConfig = {
   platform: Platform;
   concurrent: number;
   poll: number;
+  tlsVerify: boolean;
 };
 
 function receiverEnv(cfg: ReceiverConfig, sathopUrl: string): Array<[string, string]> {
@@ -63,6 +64,7 @@ function receiverEnv(cfg: ReceiverConfig, sathopUrl: string): Array<[string, str
   ];
   if (cfg.concurrent !== 4) out.push(["SATHOP_CONCURRENT_PULLS", String(cfg.concurrent)]);
   if (cfg.poll !== 10) out.push(["SATHOP_POLL_INTERVAL", String(cfg.poll)]);
+  if (!cfg.tlsVerify) out.push(["SATHOP_TLS_VERIFY", "false"]);
   return out;
 }
 
@@ -108,6 +110,7 @@ export function receiverUvx(cfg: ReceiverConfig): string {
   ];
   if (cfg.concurrent !== 4) lines.push(`--concurrent ${cfg.concurrent}`);
   if (cfg.poll !== 10) lines.push(`--poll ${cfg.poll}`);
+  if (!cfg.tlsVerify) lines.push("--insecure-tls");
   return joinDockerArgs(lines, cfg.platform);
 }
 
@@ -124,7 +127,7 @@ export function receiverOpsHint(): string {
 
 // ─── Worker ────────────────────────────────────────────────────────────
 
-export type ExposeMode = "caddy" | "direct";
+export type ExposeMode = "caddy" | "selfsigned" | "direct";
 
 export type WorkerConfig = {
   workerId: string;
@@ -132,6 +135,7 @@ export type WorkerConfig = {
   orchUrl: string;
   exposeMode: ExposeMode;
   domain: string; // for caddy mode
+  ipAddress: string; // for selfsigned mode
   hostPort: string; // "ip:port" for direct mode
   storagePort: number;
   dataDir: string;
@@ -145,6 +149,10 @@ export function workerPublicUrl(cfg: WorkerConfig): string {
   if (cfg.exposeMode === "caddy") {
     const d = cfg.domain.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
     return d ? `https://${d}` : "https://<your-domain>";
+  }
+  if (cfg.exposeMode === "selfsigned") {
+    const ip = cfg.ipAddress.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    return ip ? `https://${ip}` : "https://<worker-ip>";
   }
   const hp = cfg.hostPort.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
   return hp ? `http://${hp}` : `http://<host>:${cfg.storagePort}`;
@@ -178,25 +186,61 @@ export function workerDockerRun(cfg: WorkerConfig): string {
   ];
   const worker = "# --- Worker ---\n" + joinDockerArgs(workerLines, cfg.platform);
 
-  if (cfg.exposeMode !== "caddy") return worker;
+  if (cfg.exposeMode === "direct") return worker;
 
-  const domain = cfg.domain.trim() || "your-domain.example.com";
+  if (cfg.exposeMode === "caddy") {
+    const domain = cfg.domain.trim() || "your-domain.example.com";
+    const caddyLines: string[] = [
+      "docker run -d",
+      "--name sathop-caddy",
+      "--restart unless-stopped",
+      "--add-host=host.docker.internal:host-gateway",
+      "-p 80:80 -p 443:443",
+      "-v caddy_data:/data",
+      "-v caddy_config:/config",
+      CADDY_IMAGE,
+      "caddy reverse-proxy",
+      `--from ${domain}`,
+      `--to host.docker.internal:${cfg.storagePort}`,
+    ];
+    const caddy =
+      "# --- Caddy 反向代理 (HTTPS 自动签发 + 续签) ---\n" + joinDockerArgs(caddyLines, cfg.platform);
+    return `${worker}\n\n${caddy}`;
+  }
+
+  // selfsigned: Caddy CLI does not support `tls internal`; need a Caddyfile.
+  const ip = cfg.ipAddress.trim() || "192.168.1.50";
+  const caddyfileBody = `{
+    auto_https disable_redirects
+}
+
+https://${ip} {
+    tls internal
+    reverse_proxy host.docker.internal:${cfg.storagePort}
+}`;
+  const heredoc =
+    cfg.platform === "linux"
+      ? `cat > Caddyfile <<'EOF'\n${caddyfileBody}\nEOF`
+      : `@'\n${caddyfileBody}\n'@ | Set-Content -Encoding utf8 Caddyfile`;
+  const caddyVolume =
+    cfg.platform === "linux"
+      ? `-v "$(pwd)/Caddyfile:/etc/caddy/Caddyfile:ro"`
+      : `-v "\${PWD}/Caddyfile:/etc/caddy/Caddyfile:ro"`;
   const caddyLines: string[] = [
     "docker run -d",
     "--name sathop-caddy",
     "--restart unless-stopped",
     "--add-host=host.docker.internal:host-gateway",
-    "-p 80:80 -p 443:443",
+    "-p 443:443",
+    caddyVolume,
     "-v caddy_data:/data",
     "-v caddy_config:/config",
     CADDY_IMAGE,
-    "caddy reverse-proxy",
-    `--from ${domain}`,
-    `--to host.docker.internal:${cfg.storagePort}`,
   ];
-  const caddy = "# --- Caddy 反向代理 (HTTPS 自动续签) ---\n" + joinDockerArgs(caddyLines, cfg.platform);
-
-  return `${worker}\n\n${caddy}`;
+  const caddyfileSection = "# --- Caddyfile (写入当前目录) ---\n" + heredoc;
+  const caddyContainer =
+    "# --- Caddy 反向代理 (HTTPS 自签 IP 证书) ---\n" + joinDockerArgs(caddyLines, cfg.platform);
+  return `${worker}\n\n${caddyfileSection}\n\n${caddyContainer}`;
 }
 
 export function workerDockerCompose(cfg: WorkerConfig): string {
@@ -232,6 +276,40 @@ ${cfg.exposeMode === "direct" ? portLine : ""}    volumes:
       - caddy_config:/config
     depends_on:
       - worker
+
+volumes:
+  caddy_data:
+  caddy_config:
+`;
+  } else if (cfg.exposeMode === "selfsigned") {
+    const ip = cfg.ipAddress.trim() || "192.168.1.50";
+    body += `
+  caddy:
+    image: ${CADDY_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - worker
+
+# 内联 Caddyfile 需要 docker compose v2.23+；旧版改为 bind-mount 同目录 ./Caddyfile
+configs:
+  caddyfile:
+    content: |
+      {
+          auto_https disable_redirects
+      }
+
+      https://${ip} {
+          tls internal
+          reverse_proxy worker:${cfg.storagePort}
+      }
 
 volumes:
   caddy_data:

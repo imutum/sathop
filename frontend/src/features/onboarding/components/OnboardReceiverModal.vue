@@ -27,6 +27,7 @@ const outputDir = ref("./downloads");
 const platform = ref<Platform>(navigator.userAgent.includes("Windows") ? "windows" : "linux");
 const concurrent = ref(4);
 const poll = ref(10);
+const trustSelfSigned = ref(false);
 const showToken = ref(false);
 
 type TabKey = "docker-run" | "compose" | "uvx";
@@ -45,6 +46,7 @@ const cfg = computed(() => ({
   platform: platform.value,
   concurrent: concurrent.value,
   poll: poll.value,
+  tlsVerify: !trustSelfSigned.value,
 }));
 
 const snippet = computed(() => {
@@ -151,6 +153,22 @@ async function copySnippet() {
           <code class="font-mono">`</code>) 与 <code class="font-mono">--user $(id -u):$(id -g)</code> 的添加
         </p>
       </div>
+    </div>
+
+    <div class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+      <label class="flex cursor-pointer items-start gap-2.5">
+        <input
+          type="checkbox"
+          v-model="trustSelfSigned"
+          class="mt-0.5 h-4 w-4 cursor-pointer rounded border-border accent-primary"
+        />
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-medium">信任 Worker 自签证书</div>
+          <div class="mt-0.5 text-2xs text-muted-foreground">
+            如果 Worker 用「自签 IP + HTTPS」方式部署，必须勾选此项才能拉取产物（跳过 TLS 证书验证；身份仍由 Token 守护）
+          </div>
+        </div>
+      </label>
     </div>
 
     <details class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">

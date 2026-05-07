@@ -24,8 +24,9 @@ const toast = useToast();
 const workerId = ref(`worker-${Math.random().toString(36).slice(2, 8)}`);
 const token = ref(localStorage.getItem("sathop.token") ?? "");
 const orchUrl = ref(window.location.origin);
-const exposeMode = ref<ExposeMode>("caddy");
+const exposeMode = ref<ExposeMode>("selfsigned");
 const domain = ref("");
+const ipAddress = ref("");
 const hostPort = ref("");
 const storagePort = ref(9000);
 const dataDir = ref("./data");
@@ -56,6 +57,7 @@ const cfg = computed(() => ({
   orchUrl: orchUrl.value.trim().replace(/\/api\/?$/, ""),
   exposeMode: exposeMode.value,
   domain: domain.value.trim(),
+  ipAddress: ipAddress.value.trim(),
   hostPort: hostPort.value.trim(),
   storagePort: storagePort.value,
   dataDir: dataDir.value.trim() || "./data",
@@ -80,6 +82,7 @@ const snippet = computed(() => {
 const valid = computed(() => {
   if (!cfg.value.workerId || !cfg.value.token || !cfg.value.orchUrl) return false;
   if (cfg.value.exposeMode === "caddy") return cfg.value.domain.length > 0;
+  if (cfg.value.exposeMode === "selfsigned") return cfg.value.ipAddress.length > 0;
   return cfg.value.hostPort.length > 0;
 });
 
@@ -138,26 +141,47 @@ async function copySnippet() {
 
     <div class="mt-3">
       <Label>暴露方式</Label>
-      <div class="mt-1 inline-flex w-full rounded-md border border-border bg-muted/40 p-0.5 md:w-auto">
+      <div class="mt-1 grid grid-cols-1 gap-1 rounded-md border border-border bg-muted/40 p-0.5 md:grid-cols-3">
         <button
           type="button"
-          class="flex-1 rounded px-3 py-1 text-xs font-medium transition md:flex-initial"
+          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          :class="exposeMode === 'selfsigned' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+          @click="exposeMode = 'selfsigned'"
+        >
+          自签 IP + HTTPS（内网，推荐）
+        </button>
+        <button
+          type="button"
+          class="rounded px-3 py-1.5 text-xs font-medium transition"
           :class="exposeMode === 'caddy' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="exposeMode = 'caddy'"
         >
-          Caddy 反向代理 + HTTPS（推荐）
+          Caddy + HTTPS（公网域名）
         </button>
         <button
           type="button"
-          class="flex-1 rounded px-3 py-1 text-xs font-medium transition md:flex-initial"
+          class="rounded px-3 py-1.5 text-xs font-medium transition"
           :class="exposeMode === 'direct' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="exposeMode = 'direct'"
         >
-          直接 HTTP（仅局域网）
+          直接 HTTP（不加密）
         </button>
       </div>
 
-      <div v-if="exposeMode === 'caddy'" class="mt-3">
+      <div v-if="exposeMode === 'selfsigned'" class="mt-3">
+        <Label for="ow-ip">Worker 主机 IP</Label>
+        <Input
+          id="ow-ip"
+          v-model="ipAddress"
+          placeholder="192.168.1.50"
+          class="font-mono text-xs"
+        />
+        <p class="mt-1 text-2xs text-muted-foreground">
+          Caddy 用 <code class="font-mono">tls internal</code> 自动签发 IP 证书，无需买/配域名。Public URL =
+          <code class="font-mono">{{ computedPublicUrl }}</code>
+        </p>
+      </div>
+      <div v-else-if="exposeMode === 'caddy'" class="mt-3">
         <Label for="ow-domain">域名</Label>
         <Input
           id="ow-domain"
@@ -179,7 +203,7 @@ async function copySnippet() {
           class="font-mono text-xs"
         />
         <p class="mt-1 text-2xs text-muted-foreground">
-          Receiver 会从这个地址 pull 产物。Public URL =
+          Receiver 直接 HTTP 拉取，不加密。Public URL =
           <code class="font-mono">{{ computedPublicUrl }}</code>
         </p>
       </div>
@@ -240,15 +264,26 @@ async function copySnippet() {
     <Alert v-if="!valid" variant="destructive" class="mt-4">
       <AlertDescription>
         Worker ID / Token / Orchestrator URL /
-        {{ exposeMode === "caddy" ? "域名" : "主机:端口" }}
+        {{ exposeMode === "caddy" ? "域名" : exposeMode === "selfsigned" ? "Worker 主机 IP" : "主机:端口" }}
         都不能为空
       </AlertDescription>
     </Alert>
 
-    <div v-if="exposeMode === 'caddy'" class="mt-4">
+    <div v-if="exposeMode === 'selfsigned'" class="mt-4">
       <Alert>
         <AlertDescription class="space-y-1 text-2xs">
-          <div class="text-xs font-medium text-foreground">Caddy HTTPS 模式前置条件：</div>
+          <div class="text-xs font-medium text-foreground">自签 IP HTTPS 模式注意事项：</div>
+          <div>1. 接收端必须勾选「信任 Worker 自签证书」（即设 <code class="font-mono">SATHOP_TLS_VERIFY=false</code>），否则握手会失败</div>
+          <div>2. 加密由 TLS 提供，Worker 身份由 Token 验证 — 内网部署足够安全</div>
+          <div>3. 证书在 Caddy 容器中自动签发与续签，路径 <code class="font-mono">caddy_data:/data/caddy/pki/</code></div>
+        </AlertDescription>
+      </Alert>
+    </div>
+
+    <div v-else-if="exposeMode === 'caddy'" class="mt-4">
+      <Alert>
+        <AlertDescription class="space-y-1 text-2xs">
+          <div class="text-xs font-medium text-foreground">Caddy + 域名 HTTPS 模式前置条件：</div>
           <div>1. 域名 <code class="font-mono">{{ cfg.domain || "<域名>" }}</code> 的 DNS A 记录已指向目标机器公网 IP</div>
           <div>2. 目标机器 80 / 443 端口对外开放（用于 ACME 证书签发与 HTTPS 接入）</div>
           <div>3. 第一次启动 Caddy 后约 30 秒自动签发 Let's Encrypt 证书</div>

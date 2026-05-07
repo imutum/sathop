@@ -92,6 +92,15 @@ class Settings:
     poll_interval: int
     concurrent_pulls: int
     platform: Literal["linux", "windows"]
+    # False ⇒ skip TLS cert verification when pulling from worker presigned URLs.
+    # Use when worker is fronted by a self-signed IP cert (Caddy `tls internal`).
+    # Worker identity is still authenticated via the bearer token; this flag only
+    # disables transport-layer cert validation, not auth.
+    tls_verify: bool = True
+
+
+def _parse_bool(s: str, default: bool) -> bool:
+    return s.strip().lower() not in ("0", "false", "no", "off") if s else default
 
 
 def load() -> Settings:
@@ -104,16 +113,19 @@ def load() -> Settings:
         poll_interval=int(os.getenv("SATHOP_POLL_INTERVAL", "10")),
         concurrent_pulls=int(os.getenv("SATHOP_CONCURRENT_PULLS", "4")),
         platform=cast(Literal["linux", "windows"], "windows" if sys.platform == "win32" else "linux"),
+        tls_verify=_parse_bool(os.getenv("SATHOP_TLS_VERIFY", ""), True),
     )
 
 
-async def _pull_http(url: str, dest: Path) -> tuple[str, int]:
+async def _pull_http(url: str, dest: Path, *, verify: bool = True) -> tuple[str, int]:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     h = hashlib.sha256()
     size = 0
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=600.0), follow_redirects=True) as c:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, read=600.0), follow_redirects=True, verify=verify
+        ) as c:
             async with c.stream("GET", url) as r:
                 r.raise_for_status()
                 with tmp.open("wb") as f:
@@ -196,7 +208,9 @@ class Receiver:
             try:
                 dest = self.s.storage_dir / item.object_key
                 try:
-                    sha, size = await _pull_http(item.presigned_url, dest)
+                    sha, size = await _pull_http(
+                        item.presigned_url, dest, verify=self.s.tls_verify
+                    )
                     ok = sha == item.sha256 and size == item.size
                     if ok:
                         pulled_bytes = size
