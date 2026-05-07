@@ -55,12 +55,10 @@ export type WorkerInfo = {
   cpu_percent: number;
   mem_percent: number;
   monthly_egress_gb: number;
-  queue_queued: number;
+  queue_pending_download: number;
   queue_downloading: number;
+  queue_pending_processing: number;
   queue_processing: number;
-  // Subset of queue_processing that's blocked on the process semaphore (CPU
-  // bottleneck). Optional — older orchestrators don't ship it.
-  queue_processing_waiting?: number;
   queue_uploading: number;
   enabled: boolean;
   paused: boolean;

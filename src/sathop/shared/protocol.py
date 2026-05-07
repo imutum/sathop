@@ -96,12 +96,18 @@ class WorkerHeartbeat(BaseModel):
     monthly_egress_gb: float = 0.0
     # Granules leased + handler running but blocked on the download semaphore
     # (i.e. state=queued in the orchestrator's view).
-    queue_queued: int = 0
+    # 5 个 worker-side 阶段 — UI 平铺显示，分别对应：
+    #   待下载: lease 后等 download_sem
+    #   下载中: 在拉源数据
+    #   待处理: 下完了等 process_sem（CPU 槽位）
+    #   处理中: run_bundle 在跑
+    #   上传中: 产物上传本机存储
+    # 全局/批次阶段（待分配/待分发/待清理/已完成/待重试）由 DB GranuleState
+    # 直接 query，不在 heartbeat 里冗余。
+    queue_pending_download: int = 0
     queue_downloading: int = 0
-    # queue_processing = pipeline 总数 (running + waiting). 兼容老消费者。
+    queue_pending_processing: int = 0
     queue_processing: int = 0
-    # 仅等 process semaphore 的部分; 老 worker 默认 0 ⇒ "全部都在跑"。
-    queue_processing_waiting: int = 0
     queue_uploading: int = 0
     # True while the worker is gating off new leases for any reason (currently
     # disk-watermark backpressure). Surfaces to operators so an "online but
