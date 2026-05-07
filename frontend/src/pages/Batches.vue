@@ -180,12 +180,14 @@ async function confirmDelete(b: BatchSummary) {
   const ok = await requestConfirm({
     title: `永久删除批次 "${b.name}"？`,
     description:
-      `将删除 ${t} 条数据粒，并清除该批次的全部 orchestrator 记录\n` +
-      `（数据粒、产物、进度、阶段计时、事件）。此操作不可恢复。`,
+      t === 0
+        ? "将清除该批次的全部 orchestrator 记录。此操作不可恢复。"
+        : `将删除 ${t} 条数据粒，并清除该批次的全部 orchestrator 记录\n` +
+          `（数据粒、产物、进度、阶段计时、事件）。此操作不可恢复。`,
     confirmText: "永久删除",
     tone: "danger",
-    requireText: b.name,
-    inputLabel: `请输入批次名称 "${b.name}" 确认`,
+    // 空批（无任何数据粒）跳过名称二次输入 —— 没东西可以丢失。
+    ...(t > 0 ? { requireText: b.name, inputLabel: `请输入批次名称 "${b.name}" 确认` } : {}),
   });
   if (ok) remove.mutate({ id: b.batch_id, force: false });
 }
