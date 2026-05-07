@@ -23,6 +23,7 @@ class Settings:
     lease_poll_interval: int
     download_concurrency: int
     process_concurrency: int
+    pipeline_pressure_mult: int
 
     # Production-mode toggles. Empty = MVP fallback (httpx / local FS static server).
     aria2_rpc: str
@@ -72,6 +73,9 @@ def load() -> Settings:
         # process 是 CPU 密集型 — 默认 = vCPU 数。让多个粒并行 process 只会
         # 线性拉长每个粒的耗时（实测 6 并发下单粒 6 min，限到 vCPU 后 ~1 min）。
         process_concurrency=max(1, int(os.getenv("SATHOP_PROCESS_CONCURRENCY", str(os.cpu_count() or 1)))),
+        # in-flight 上限相对 process_concurrency 的倍数。orchestrator 可通过
+        # PUT /workers/{id}/pipeline-mult 下发覆盖（worker 取 min(env, desired)）。
+        pipeline_pressure_mult=max(1, int(os.getenv("SATHOP_PIPELINE_PRESSURE_MULT", "3"))),
         aria2_rpc=os.getenv("SATHOP_ARIA2_RPC", ""),
         aria2_secret=os.getenv("SATHOP_ARIA2_SECRET", ""),
         minio_access_key=os.getenv("SATHOP_MINIO_ACCESS_KEY", ""),

@@ -142,6 +142,11 @@ const nodeApi = {
       `/api/workers/${encodeURIComponent(workerId)}/capacity`,
       { desired_capacity: desiredCapacity },
     ),
+  setWorkerPipelineMult: (workerId: string, desiredMult: number | null) =>
+    putJson<{ ok: boolean; desired_pipeline_mult: number | null }>(
+      `/api/workers/${encodeURIComponent(workerId)}/pipeline-mult`,
+      { desired_pipeline_mult: desiredMult },
+    ),
   setWorkerEnabled: (workerId: string, enabled: boolean) =>
     putJson<{ ok: boolean; enabled: boolean }>(
       `/api/workers/${encodeURIComponent(workerId)}/enabled`,

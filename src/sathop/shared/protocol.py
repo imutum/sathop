@@ -85,6 +85,10 @@ class WorkerHeartbeatResponse(BaseModel):
     ok: bool = True
     # None ⇒ no override; worker clamps env capacity by this if set.
     desired_capacity: int | None = None
+    # in-flight 上限相对 process_concurrency 的倍数。None ⇒ worker 用 env
+    # 默认值（SATHOP_PIPELINE_PRESSURE_MULT，默认 3）。orchestrator 通过 UI
+    # 下发，worker 取 min(env, desired) 兜底。
+    desired_pipeline_mult: int | None = None
 
 
 class WorkerHeartbeat(BaseModel):

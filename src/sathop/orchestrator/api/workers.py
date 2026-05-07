@@ -179,7 +179,10 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     w.paused = req.paused
     await s.commit()
     publish({"scope": "workers"})
-    return WorkerHeartbeatResponse(desired_capacity=w.desired_capacity)
+    return WorkerHeartbeatResponse(
+        desired_capacity=w.desired_capacity,
+        desired_pipeline_mult=w.desired_pipeline_mult,
+    )
 
 
 @router.post("/lease", response_model=LeaseResponse)
@@ -393,6 +396,27 @@ async def set_capacity(
     await s.commit()
     publish({"scope": "workers"})
     return {"ok": True, "desired_capacity": desired_capacity}
+
+
+@router.put("/{worker_id}/pipeline-mult")
+async def set_pipeline_mult(
+    worker_id: str,
+    desired_pipeline_mult: int | None = Body(default=None, embed=True),
+    s: AsyncSession = Depends(session),
+) -> dict:
+    """In-flight 反压倍数 override（in-flight ≤ N × process_concurrency）。
+    None 清空，回落到 worker env 默认。Positive int 同样通过 heartbeat reply
+    下发；worker 在下次心跳收到后立即生效，无需重启。"""
+    if desired_pipeline_mult is not None and desired_pipeline_mult < 1:
+        raise HTTPException(422, "desired_pipeline_mult must be a positive int or null")
+    w = await s.get(Worker, worker_id)
+    if w is None:
+        raise HTTPException(404, "worker not found")
+    w.desired_pipeline_mult = desired_pipeline_mult
+    await log(s, worker_id, f"pipeline_mult override → {desired_pipeline_mult}")
+    await s.commit()
+    publish({"scope": "workers"})
+    return {"ok": True, "desired_pipeline_mult": desired_pipeline_mult}
 
 
 @router.put("/{worker_id}/enabled")

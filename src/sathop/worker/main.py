@@ -76,6 +76,9 @@ class Worker:
         self._handlers: set[asyncio.Task[None]] = set()
         # Updated from heartbeat replies; orchestrator may clamp below s.capacity.
         self._effective_capacity = s.capacity
+        # Same pattern for the in-flight pressure multiplier — orchestrator
+        # can dial it down via PUT /workers/{id}/pipeline-mult.
+        self._effective_pipeline_mult = s.pipeline_pressure_mult
         self.progress = ProgressServer(self.client, port=s.progress_port)
         for p in (s.work_root, s.bundle_cache, s.venv_cache, s.shared_cache, s.storage_root):
             p.mkdir(parents=True, exist_ok=True)
@@ -162,17 +165,36 @@ class Worker:
                         desired,
                     )
                     self._effective_capacity = new_eff
+                desired_mult = resp.desired_pipeline_mult
+                new_mult = (
+                    min(self.s.pipeline_pressure_mult, max(1, desired_mult))
+                    if desired_mult is not None
+                    else self.s.pipeline_pressure_mult
+                )
+                if new_mult != self._effective_pipeline_mult:
+                    log.info(
+                        "effective pipeline_mult %d → %d (env=%d, override=%s)",
+                        self._effective_pipeline_mult,
+                        new_mult,
+                        self.s.pipeline_pressure_mult,
+                        desired_mult,
+                    )
+                    self._effective_pipeline_mult = new_mult
             except Exception as e:
                 log.warning("heartbeat failed: %s", e)
             await asyncio.sleep(self.s.heartbeat_interval)
 
     async def _pipeline_loop(self) -> None:
         while True:
-            # In-flight 上限 = min(用户配置 capacity, 3 × CPU)。3 × CPU 是
-            # "够吃但不撑死"的经验值：1 倍在跑、1 倍 download buffer、1 倍
-            # process 待跑队列。撑到上限就停 lease，让 orchestrator 把粒子
-            # 派给别的 worker（热扩容时尤其重要）；sem 流出后再拉。
-            ceiling = min(self._effective_capacity, self.s.process_concurrency * 3)
+            # In-flight 上限 = min(capacity, mult × CPU)。
+            # mult 默认 3 ("够吃但不撑死"经验值：1 倍在跑、1 倍 download buffer、
+            # 1 倍 process 待跑队列)，可由 SATHOP_PIPELINE_PRESSURE_MULT 改 env，
+            # 或 orchestrator 通过 PUT /workers/{id}/pipeline-mult 远程下发。
+            # 撑到上限就停 lease，让 orchestrator 把粒子派给别的 worker
+            # （热扩容时尤其重要）；sem 流出后再拉。
+            ceiling = min(
+                self._effective_capacity, self.s.process_concurrency * self._effective_pipeline_mult
+            )
             free = ceiling - sum(self.stage.values())
             if free <= 0 or self._pause_lease:
                 await asyncio.sleep(self.s.lease_poll_interval)

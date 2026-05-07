@@ -63,6 +63,7 @@ export type WorkerInfo = {
   enabled: boolean;
   paused: boolean;
   desired_capacity: number | null;
+  desired_pipeline_mult: number | null;
 };
 
 export type ReceiverInfo = {
