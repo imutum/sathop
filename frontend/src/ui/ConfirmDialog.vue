@@ -2,7 +2,6 @@
 import { computed, nextTick, ref, watch } from "vue";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -43,11 +42,14 @@ watch(confirmRequest, (request) => {
   }
 });
 
-function onActionClick(e: Event) {
-  if (!canConfirm.value) {
-    e.preventDefault();
-    return;
-  }
+// reka-ui 的 AlertDialogAction 点击时会先把 dialog 关掉再触发 @click，
+// 而 v-model:open 的 setter 在关闭分支里调用 resolveConfirm(false)，
+// 把 promise 抢先 resolve 为 false ⇒ 后续 resolveConfirm(true) 变 no-op。
+// 改用普通 button 让我们自己掌控 resolve 顺序：先 resolveConfirm(true)
+// 清空 confirmRequest → open=false → setter 再次 resolveConfirm(false)
+// 时 current 已 null ⇒ 安全 no-op。
+function onActionClick() {
+  if (!canConfirm.value) return;
   resolveConfirm(true);
 }
 </script>
@@ -82,13 +84,14 @@ function onActionClick(e: Event) {
         <AlertDialogCancel @click="resolveConfirm(false)">
           {{ confirmRequest.cancelText }}
         </AlertDialogCancel>
-        <AlertDialogAction
+        <button
+          type="button"
           :class="actionClass"
           :disabled="!canConfirm"
           @click="onActionClick"
         >
           {{ confirmRequest.confirmText }}
-        </AlertDialogAction>
+        </button>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
