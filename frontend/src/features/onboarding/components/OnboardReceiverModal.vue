@@ -9,10 +9,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import Modal from "@/ui/Modal.vue";
 import {
   type Platform,
-  dockerCompose,
-  dockerRun,
   linuxPrestep,
-  uvxCommand,
+  receiverDockerCompose,
+  receiverDockerRun,
+  receiverOpsHint,
+  receiverUvx,
 } from "@/features/onboarding/snippets";
 
 defineEmits<{ close: [] }>();
@@ -49,11 +50,11 @@ const cfg = computed(() => ({
 const snippet = computed(() => {
   switch (activeTab.value) {
     case "docker-run":
-      return dockerRun(cfg.value);
+      return `${receiverDockerRun(cfg.value)}\n\n${receiverOpsHint()}`;
     case "compose":
-      return dockerCompose(cfg.value);
+      return receiverDockerCompose(cfg.value);
     case "uvx":
-      return uvxCommand(cfg.value);
+      return receiverUvx(cfg.value);
   }
   return "";
 });

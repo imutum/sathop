@@ -59,12 +59,16 @@ async function forget() {
       {{ pending ? "…" : enabled ? "禁用" : "启用" }}
     </button>
     <button
-      v-if="!enabled"
       type="button"
-      :disabled="pending"
+      :disabled="pending || enabled"
       @click="forget"
-      :title="forgetTitle ?? '永久从注册表中删除'"
-      class="rounded-md border border-danger/30 bg-danger/10 px-2 py-0.5 text-mini font-medium text-danger transition hover:bg-danger/15 disabled:opacity-50"
+      :title="enabled ? '请先禁用此节点，再点击此按钮永久移除' : (forgetTitle ?? '永久从注册表中删除')"
+      :class="[
+        'rounded-md border px-2 py-0.5 text-mini font-medium transition disabled:cursor-not-allowed',
+        enabled
+          ? 'border-border bg-muted/40 text-muted-foreground/60 disabled:opacity-60'
+          : 'border-danger/30 bg-danger/10 text-danger hover:bg-danger/15 disabled:opacity-50',
+      ]"
     >
       {{ pending ? "…" : "移除" }}
     </button>

@@ -11,9 +11,12 @@ import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
 import WorkerCard from "@/features/nodes/components/WorkerCard.vue";
+import OnboardWorkerModal from "@/features/onboarding/components/OnboardWorkerModal.vue";
+import { Icon } from "@/components/Icon";
 
 const workers = useQuery({ queryKey: ["workers"], queryFn: API.workers });
 const list = computed(() => workers.data.value ?? []);
+const showOnboard = ref(false);
 
 // Deep-link: /workers?id=<worker_id> scrolls + ring-highlights one card. Used
 // by leased_by cells in BatchDetail / Dashboard.
@@ -40,7 +43,14 @@ function setRef(id: string, el: Element | null) {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列" />
+    <PageHeader title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列">
+      <template #actions>
+        <Button variant="default" class="gap-1.5" @click="showOnboard = true">
+          <Icon name="plus" :size="13" />
+          接入工作节点
+        </Button>
+      </template>
+    </PageHeader>
 
     <QueryState :query="workers">
       <template #loading>
@@ -61,9 +71,16 @@ function setRef(id: string, el: Element | null) {
           <CardContent class="pt-6">
             <EmptyState
               title="暂无已注册的工作节点"
-              description="启动 worker 容器后会自动出现在此。"
+              description="点下方按钮生成接入命令，复制到目标机器执行即可。"
               illustration="inbox"
-            />
+            >
+              <template #action>
+                <Button variant="default" class="gap-1.5" @click="showOnboard = true">
+                  <Icon name="plus" :size="13" />
+                  接入工作节点
+                </Button>
+              </template>
+            </EmptyState>
           </CardContent>
         </Card>
       </template>
@@ -75,5 +92,7 @@ function setRef(id: string, el: Element | null) {
         </div>
       </template>
     </QueryState>
+
+    <OnboardWorkerModal v-if="showOnboard" @close="showOnboard = false" />
   </div>
 </template>

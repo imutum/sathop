@@ -1,19 +1,14 @@
-// Code-snippet generators for the receiver onboarding wizard. Pure functions:
-// take form config, produce a copy-pasteable command string. No DOM, no I/O.
+// Code-snippet generators for the onboarding wizards (receiver + worker).
+// Pure functions: take form config, produce a copy-pasteable command string.
+// No DOM, no I/O — testable in isolation.
 
 export type Platform = "linux" | "windows";
 
-export type OnboardConfig = {
-  receiverId: string;
-  token: string;
-  orchUrl: string;
-  outputDir: string;
-  platform: Platform;
-  concurrent: number;
-  poll: number;
-};
+// ─── Common helpers ────────────────────────────────────────────────────
 
-export const DEFAULT_IMAGE = "ghcr.io/imutum/sathop/receiver:latest";
+export const RECEIVER_IMAGE = "ghcr.io/imutum/sathop/receiver:latest";
+export const WORKER_IMAGE = "ghcr.io/imutum/sathop/worker:latest";
+export const CADDY_IMAGE = "caddy:2-alpine";
 export const DEFAULT_GIT_REPO = "https://github.com/imutum/sathop.git";
 
 // http(s)://host:port  →  sathop(s)://TOKEN@host:port
@@ -31,7 +26,37 @@ export function buildSathopUrl(orchUrl: string, token: string): string {
   return `${scheme}://${encodeURIComponent(token)}@${host}${path}`;
 }
 
-function envFlags(cfg: OnboardConfig, sathopUrl: string): Array<[string, string]> {
+// Linux/macOS uses '\' for line continuation; PowerShell uses backtick '`'.
+function linecont(p: Platform): string {
+  return p === "linux" ? "\\" : "`";
+}
+
+function joinDockerArgs(lines: string[], p: Platform): string {
+  return lines.join(` ${linecont(p)}\n  `);
+}
+
+function userFlag(p: Platform): string[] {
+  return p === "linux" ? ["--user $(id -u):$(id -g)"] : [];
+}
+
+function mountSrc(p: Platform, hostDir: string): string {
+  const d = hostDir.replace(/^\.\//, "").replace(/^\.\\/, "");
+  return p === "linux" ? `"$(pwd)/${d}"` : `"\${PWD}/${d}"`;
+}
+
+// ─── Receiver ──────────────────────────────────────────────────────────
+
+export type ReceiverConfig = {
+  receiverId: string;
+  token: string;
+  orchUrl: string;
+  outputDir: string;
+  platform: Platform;
+  concurrent: number;
+  poll: number;
+};
+
+function receiverEnv(cfg: ReceiverConfig, sathopUrl: string): Array<[string, string]> {
   const out: Array<[string, string]> = [
     ["SATHOP_RECEIVER_ID", cfg.receiverId],
     ["SATHOP_URL", sathopUrl],
@@ -41,34 +66,29 @@ function envFlags(cfg: OnboardConfig, sathopUrl: string): Array<[string, string]
   return out;
 }
 
-// Linux/macOS uses '\' for line continuation; PowerShell uses backtick '`'.
-function linecont(p: Platform): string {
-  return p === "linux" ? "\\" : "`";
-}
-
-export function dockerRun(cfg: OnboardConfig): string {
+export function receiverDockerRun(cfg: ReceiverConfig): string {
   const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
-  const cont = linecont(cfg.platform);
-  const lines: string[] = ["docker run --rm -it"];
-  if (cfg.platform === "linux") lines.push("--user $(id -u):$(id -g)");
-  for (const [k, v] of envFlags(cfg, sathopUrl)) lines.push(`-e ${k}="${v}"`);
-  // Mount the host output dir to the image's fixed /data/archive (set by Dockerfile).
-  const hostDir = cfg.outputDir;
-  const mountSrc = cfg.platform === "linux" ? `"$(pwd)/${stripDot(hostDir)}"` : `"\${PWD}/${stripDot(hostDir)}"`;
-  lines.push(`-v ${mountSrc}:/data/archive`);
-  lines.push(DEFAULT_IMAGE);
-  return lines.join(` ${cont}\n  `);
+  const lines: string[] = [
+    "docker run -d",
+    "--name sathop-receiver",
+    "--restart unless-stopped",
+    ...userFlag(cfg.platform),
+    ...receiverEnv(cfg, sathopUrl).map(([k, v]) => `-e ${k}="${v}"`),
+    `-v ${mountSrc(cfg.platform, cfg.outputDir)}:/data/archive`,
+    RECEIVER_IMAGE,
+  ];
+  return joinDockerArgs(lines, cfg.platform);
 }
 
-export function dockerCompose(cfg: OnboardConfig): string {
+export function receiverDockerCompose(cfg: ReceiverConfig): string {
   const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
   const userLine = cfg.platform === "linux" ? '    user: "${UID:-1000}:${GID:-1000}"\n' : "";
-  const envLines = envFlags(cfg, sathopUrl)
+  const envLines = receiverEnv(cfg, sathopUrl)
     .map(([k, v]) => `      ${k}: "${v}"`)
     .join("\n");
   return `services:
   receiver:
-    image: ${DEFAULT_IMAGE}
+    image: ${RECEIVER_IMAGE}
     restart: unless-stopped
 ${userLine}    environment:
 ${envLines}
@@ -77,9 +97,8 @@ ${envLines}
 `;
 }
 
-export function uvxCommand(cfg: OnboardConfig): string {
+export function receiverUvx(cfg: ReceiverConfig): string {
   const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
-  const cont = linecont(cfg.platform);
   const lines: string[] = [
     `uvx --from 'sathop[receiver] @ git+${DEFAULT_GIT_REPO}'`,
     `sathop-pull`,
@@ -89,16 +108,141 @@ export function uvxCommand(cfg: OnboardConfig): string {
   ];
   if (cfg.concurrent !== 4) lines.push(`--concurrent ${cfg.concurrent}`);
   if (cfg.poll !== 10) lines.push(`--poll ${cfg.poll}`);
-  return lines.join(` ${cont}\n  `);
+  return joinDockerArgs(lines, cfg.platform);
 }
 
 // Linux preflight hint: ensure host dir exists and is owned by current user
 // before docker run mounts it (otherwise --user can't mkdir into root-owned mount).
 export function linuxPrestep(outputDir: string): string {
-  const d = outputDir;
-  return `mkdir -p ${d} && sudo chown -R "$(id -u):$(id -g)" ${d}`;
+  return `mkdir -p ${outputDir} && sudo chown -R "$(id -u):$(id -g)" ${outputDir}`;
 }
 
-function stripDot(p: string): string {
-  return p.replace(/^\.\//, "").replace(/^\.\\/, "");
+export function receiverOpsHint(): string {
+  return `# 查看日志：docker logs -f sathop-receiver
+# 停止：    docker stop sathop-receiver && docker rm sathop-receiver`;
+}
+
+// ─── Worker ────────────────────────────────────────────────────────────
+
+export type ExposeMode = "caddy" | "direct";
+
+export type WorkerConfig = {
+  workerId: string;
+  token: string;
+  orchUrl: string;
+  exposeMode: ExposeMode;
+  domain: string; // for caddy mode
+  hostPort: string; // "ip:port" for direct mode
+  storagePort: number;
+  dataDir: string;
+  platform: Platform;
+  capacity: number;
+  heartbeat: number;
+  downloadConcurrency: number;
+};
+
+export function workerPublicUrl(cfg: WorkerConfig): string {
+  if (cfg.exposeMode === "caddy") {
+    const d = cfg.domain.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+    return d ? `https://${d}` : "https://<your-domain>";
+  }
+  const hp = cfg.hostPort.trim().replace(/^https?:\/\//, "").replace(/\/$/, "");
+  return hp ? `http://${hp}` : `http://<host>:${cfg.storagePort}`;
+}
+
+function workerEnv(cfg: WorkerConfig, sathopUrl: string): Array<[string, string]> {
+  const out: Array<[string, string]> = [
+    ["SATHOP_WORKER_ID", cfg.workerId],
+    ["SATHOP_PUBLIC_URL", workerPublicUrl(cfg)],
+    ["SATHOP_URL", sathopUrl],
+  ];
+  if (cfg.capacity !== 20) out.push(["SATHOP_CAPACITY", String(cfg.capacity)]);
+  if (cfg.heartbeat !== 15) out.push(["SATHOP_HEARTBEAT", String(cfg.heartbeat)]);
+  if (cfg.downloadConcurrency !== 1)
+    out.push(["SATHOP_DOWNLOAD_CONCURRENCY", String(cfg.downloadConcurrency)]);
+  if (cfg.storagePort !== 9000) out.push(["SATHOP_STORAGE_PORT", String(cfg.storagePort)]);
+  return out;
+}
+
+export function workerDockerRun(cfg: WorkerConfig): string {
+  const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
+  const workerLines: string[] = [
+    "docker run -d",
+    "--name sathop-worker",
+    "--restart unless-stopped",
+    ...userFlag(cfg.platform),
+    ...workerEnv(cfg, sathopUrl).map(([k, v]) => `-e ${k}="${v}"`),
+    `-p ${cfg.storagePort}:${cfg.storagePort}`,
+    `-v ${mountSrc(cfg.platform, cfg.dataDir)}:/app/data`,
+    WORKER_IMAGE,
+  ];
+  const worker = "# --- Worker ---\n" + joinDockerArgs(workerLines, cfg.platform);
+
+  if (cfg.exposeMode !== "caddy") return worker;
+
+  const domain = cfg.domain.trim() || "your-domain.example.com";
+  const caddyLines: string[] = [
+    "docker run -d",
+    "--name sathop-caddy",
+    "--restart unless-stopped",
+    "--add-host=host.docker.internal:host-gateway",
+    "-p 80:80 -p 443:443",
+    "-v caddy_data:/data",
+    "-v caddy_config:/config",
+    CADDY_IMAGE,
+    "caddy reverse-proxy",
+    `--from ${domain}`,
+    `--to host.docker.internal:${cfg.storagePort}`,
+  ];
+  const caddy = "# --- Caddy 反向代理 (HTTPS 自动续签) ---\n" + joinDockerArgs(caddyLines, cfg.platform);
+
+  return `${worker}\n\n${caddy}`;
+}
+
+export function workerDockerCompose(cfg: WorkerConfig): string {
+  const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
+  const userLine = cfg.platform === "linux" ? '    user: "${UID:-1000}:${GID:-1000}"\n' : "";
+  const envLines = workerEnv(cfg, sathopUrl)
+    .map(([k, v]) => `      ${k}: "${v}"`)
+    .join("\n");
+  const portLine = `    ports:\n      - "${cfg.storagePort}:${cfg.storagePort}"\n`;
+
+  let body = `services:
+  worker:
+    image: ${WORKER_IMAGE}
+    restart: unless-stopped
+${userLine}    environment:
+${envLines}
+${cfg.exposeMode === "direct" ? portLine : ""}    volumes:
+      - ${cfg.dataDir}:/app/data
+`;
+
+  if (cfg.exposeMode === "caddy") {
+    const domain = cfg.domain.trim() || "your-domain.example.com";
+    body += `
+  caddy:
+    image: ${CADDY_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command: caddy reverse-proxy --from ${domain} --to worker:${cfg.storagePort}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - worker
+
+volumes:
+  caddy_data:
+  caddy_config:
+`;
+  }
+
+  return body;
+}
+
+export function workerOpsHint(): string {
+  return `# 查看日志：docker logs -f sathop-worker
+# 停止：    docker stop sathop-worker && docker rm sathop-worker`;
 }
