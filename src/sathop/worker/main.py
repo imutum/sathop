@@ -65,6 +65,11 @@ class Worker:
         self.stage: Counter[str] = Counter()
         self._pause_lease = False
         self._download_sem = asyncio.Semaphore(s.download_concurrency)
+        # CPU 是 process 阶段的硬瓶颈 — modis 重投影/解压都是计算密集型，让
+        # 多个粒同时跑只会线性拉长每个粒的耗时（实测 6 并发下单粒 6.2 min，
+        # 限并发到核数后单粒应回落到 ~1 min）。capacity 控制 in-flight 总数
+        # 仍然 > process 并发，所以下载/上传可以与处理重叠。
+        self._process_sem = asyncio.Semaphore(s.process_concurrency)
         # Strong refs for handler tasks: asyncio.create_task() only weak-refs
         # tasks, so without this set Python's GC may collect a long-running
         # _handle() mid-flight and silently cancel it. See asyncio docs.
@@ -281,8 +286,8 @@ class Worker:
         exit_stage: _StageExit,
     ) -> tuple[bundle.BundleHandle, ProcessResult]:
         gid = item.granule_id
-        enter_stage("processing")
-        await self._report_state(gid, GranuleState.PROCESSING)
+        # bundle.ensure 不占 process slot — 它是 first-time fetch + venv build，
+        # 内部已有 per-ref lock，不会 CPU thrash。
         handle = await asyncio.to_thread(
             bundle.ensure,
             item.bundle_ref,
@@ -292,17 +297,20 @@ class Worker:
             self.s.orchestrator_url,
             self.s.token,
         )
-        result = await asyncio.to_thread(
-            run_bundle,
-            handle,
-            gid,
-            item.batch_id,
-            paths,
-            item.meta,
-            self.s.work_root,
-            item.execution_env,
-            progress_url,
-        )
+        enter_stage("processing")
+        await self._report_state(gid, GranuleState.PROCESSING)
+        async with self._process_sem:
+            result = await asyncio.to_thread(
+                run_bundle,
+                handle,
+                gid,
+                item.batch_id,
+                paths,
+                item.meta,
+                self.s.work_root,
+                item.execution_env,
+                progress_url,
+            )
         exit_stage()
         return handle, result
 

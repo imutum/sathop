@@ -22,6 +22,7 @@ class Settings:
     heartbeat_interval: int
     lease_poll_interval: int
     download_concurrency: int
+    process_concurrency: int
 
     # Production-mode toggles. Empty = MVP fallback (httpx / local FS static server).
     aria2_rpc: str
@@ -68,6 +69,9 @@ def load() -> Settings:
         heartbeat_interval=int(os.getenv("SATHOP_HEARTBEAT", "15")),
         lease_poll_interval=int(os.getenv("SATHOP_LEASE_POLL", "10")),
         download_concurrency=max(1, int(os.getenv("SATHOP_DOWNLOAD_CONCURRENCY", "2"))),
+        # process 是 CPU 密集型 — 默认 = vCPU 数。让多个粒并行 process 只会
+        # 线性拉长每个粒的耗时（实测 6 并发下单粒 6 min，限到 vCPU 后 ~1 min）。
+        process_concurrency=max(1, int(os.getenv("SATHOP_PROCESS_CONCURRENCY", str(os.cpu_count() or 1)))),
         aria2_rpc=os.getenv("SATHOP_ARIA2_RPC", ""),
         aria2_secret=os.getenv("SATHOP_ARIA2_SECRET", ""),
         minio_access_key=os.getenv("SATHOP_MINIO_ACCESS_KEY", ""),
