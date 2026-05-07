@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/vue-query";
 import { API, type WorkerInfo } from "@/api";
 import { fmtGB, nodeStatusBadge } from "@/lib/format";
 import { fmtAge } from "@/i18n";
+import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -48,8 +49,17 @@ const forget = useMutation({
 function onSetEnabled(next: boolean): void {
   enable.mutate(next);
 }
-function onForget(): void {
-  forget.mutate();
+async function onForget(): Promise<void> {
+  const ok = await requestConfirm({
+    title: `永久移除节点 ${props.worker.worker_id}？`,
+    description:
+      "将从注册表中删除这条节点记录。\n" +
+      "如果 worker 容器仍在运行，下次心跳会自动重新注册（misclick 重启容器即恢复）。\n" +
+      "想让它彻底不再回来：先停掉容器再点移除。",
+    confirmText: "永久移除",
+    tone: "danger",
+  });
+  if (ok) forget.mutate();
 }
 
 const lifecyclePending = computed(() => enable.isPending.value || forget.isPending.value);

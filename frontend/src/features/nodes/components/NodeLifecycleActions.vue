@@ -11,10 +11,10 @@ const emit = defineEmits<{
   forget: [];
 }>();
 
-// Both ops are soft-reversible — single-click semantics, no dialogs:
-//   · disable/enable: instantly flippable via the same button
-//   · forget: only deletes the DB row — a live receiver/worker re-registers
-//     on its next heartbeat. Misclick recovery = restart the container.
+// Both ops are soft-reversible — disable flips back via the same button;
+// forget only deletes the DB row, a live receiver/worker re-registers on
+// next heartbeat (misclick recovery = restart the container). Parent owns
+// the confirm flow on forget.
 function toggle(): void {
   emit("setEnabled", !props.enabled);
 }

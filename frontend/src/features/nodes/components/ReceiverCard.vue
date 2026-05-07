@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/vue-query";
 import { API, type ReceiverInfo } from "@/api";
 import { fmtGB, fmtRate, nodeStatusBadge } from "@/lib/format";
 import { PLATFORM_ZH, fmtAge } from "@/i18n";
+import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -44,14 +45,20 @@ const forget = useMutation({
   onError: (e: Error) => toast.error(`删除失败：${e.message}`),
 });
 
-// Explicit arrow wrappers around mutate — guarantees the function call site
-// keeps the right binding regardless of how the template event listener
-// dispatches it. Defensive against any future vue-query mutate-binding edge.
 function onSetEnabled(next: boolean): void {
   enable.mutate(next);
 }
-function onForget(): void {
-  forget.mutate();
+async function onForget(): Promise<void> {
+  const ok = await requestConfirm({
+    title: `永久移除接收端 ${props.receiver.receiver_id}？`,
+    description:
+      "将从注册表中删除这条接收端记录。\n" +
+      "如果接收端容器仍在运行，下次心跳会自动重新注册（misclick 重启容器即恢复）。\n" +
+      "想让它彻底不再回来：先停掉容器再点移除。",
+    confirmText: "永久移除",
+    tone: "danger",
+  });
+  if (ok) forget.mutate();
 }
 
 const status = computed(() => nodeStatusBadge(props.receiver.enabled, props.receiver.last_seen));
