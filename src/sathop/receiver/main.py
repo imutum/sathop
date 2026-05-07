@@ -7,6 +7,7 @@ import hashlib
 import logging
 import os
 import shutil
+import ssl
 import sys
 import time
 from collections import deque
@@ -93,19 +94,33 @@ class Settings:
     concurrent_pulls: int
     platform: Literal["linux", "windows"]
     # False ⇒ skip TLS cert verification entirely (insecure escape hatch).
-    # True (default) ⇒ verify; if `tls_trust_orch` is also True, fetch the
-    # orchestrator's aggregated worker-CA bundle at startup and verify against
-    # it (precise trust without skip_verify). If False — system CA bundle only,
+    # True (default) ⇒ verify; if `tls_trust_orch` is also True, the receiver
+    # fetches the orchestrator-aggregated worker CA bundle at startup and on
+    # SSL cert errors, and uses it as httpx verify=. False — system CAs only,
     # which fails for self-signed worker certs.
     tls_verify: bool = True
-    # When True (and tls_verify True), download the orchestrator-aggregated
-    # worker CA bundle at startup → use as httpx verify path. Fallback to system
-    # CAs if the orchestrator returns 204 (no workers have uploaded a CA).
-    tls_trust_orch: bool = False
+    # Default True: the orchestrator-managed bundle is the only sane trust
+    # source for self-signed worker certs (no domain → no Let's Encrypt path).
+    # If every worker is fronted by a publicly-trusted cert, the bundle endpoint
+    # returns 204 and the receiver transparently falls back to system CAs, so
+    # there's no downside to defaulting on. Set false to force system CAs only.
+    tls_trust_orch: bool = True
 
 
 def _parse_bool(s: str, default: bool) -> bool:
     return s.strip().lower() not in ("0", "false", "no", "off") if s else default
+
+
+def _is_cert_error(e: BaseException) -> bool:
+    """Detect 'system trust said no, refresh might fix it' down the cause chain.
+    httpx wraps the underlying ssl.SSLCertVerificationError in ConnectError, so
+    a plain isinstance on the top-level exception misses it."""
+    cur: BaseException | None = e
+    while cur is not None:
+        if isinstance(cur, ssl.SSLError):
+            return True
+        cur = cur.__cause__
+    return False
 
 
 def load() -> Settings:
@@ -119,7 +134,7 @@ def load() -> Settings:
         concurrent_pulls=int(os.getenv("SATHOP_CONCURRENT_PULLS", "4")),
         platform=cast(Literal["linux", "windows"], "windows" if sys.platform == "win32" else "linux"),
         tls_verify=_parse_bool(os.getenv("SATHOP_TLS_VERIFY", ""), True),
-        tls_trust_orch=_parse_bool(os.getenv("SATHOP_TLS_TRUST_ORCH", ""), False),
+        tls_trust_orch=_parse_bool(os.getenv("SATHOP_TLS_TRUST_ORCH", ""), True),
     )
 
 
@@ -160,26 +175,32 @@ class Receiver:
         self._verify: bool | str = s.tls_verify
 
     async def _resolve_trust(self) -> None:
-        """Wire up self._verify based on Settings. Called once at startup so the
-        download loop carries a stable value (no per-pull HTTPS to the
-        orchestrator)."""
+        """Initial trust setup at run() start. Operator opt-outs short-circuit
+        before any orch call so a misconfigured/empty bundle never blocks boot."""
         if not self.s.tls_verify:
             log.warning("TLS verification disabled (SATHOP_TLS_VERIFY=false)")
             return
         if not self.s.tls_trust_orch:
             return
+        await self._refresh_trust()
+
+    async def _refresh_trust(self) -> None:
+        """Refetch the orchestrator-aggregated worker-CA bundle and rewire
+        self._verify. Called at startup and lazily on per-pull SSL cert errors
+        (a worker that registered AFTER us isn't in the startup snapshot, so
+        first pull from it would fail; one refresh + retry covers that case)."""
         bundle_path = self.s.storage_dir / ".orch-ca-bundle.pem"
         url = f"{self.s.orchestrator_url}/api/receivers/ca-bundle"
         async with httpx.AsyncClient(timeout=15.0, headers={"Authorization": f"Bearer {self.s.token}"}) as c:
             r = await c.get(url)
         if r.status_code == 204:
-            log.warning("orchestrator has no worker CAs to trust — falling back to system CAs")
+            log.warning("orchestrator has no worker CAs — using system CAs")
             return
         r.raise_for_status()
         bundle_path.parent.mkdir(parents=True, exist_ok=True)
         bundle_path.write_text(r.text, encoding="utf-8")
         self._verify = str(bundle_path)
-        log.info("trusting orchestrator-managed CA bundle at %s", bundle_path)
+        log.info("trusting orchestrator-managed CA bundle at %s (%d bytes)", bundle_path, len(r.text))
 
     async def run(self) -> None:
         await self._resolve_trust()
@@ -233,6 +254,20 @@ class Receiver:
 
             await asyncio.gather(*(self._fetch_one(sem, it) for it in resp.items))
 
+    async def _pull_with_trust_retry(self, url: str, dest: Path) -> tuple[str, int]:
+        """Pull with one CA-bundle refresh on SSL cert error. Covers the case
+        where a worker registered after our startup snapshot — first pull fails,
+        refresh adds its CA, retry succeeds. No retry for non-cert errors (the
+        normal pull-failures counter still escalates those)."""
+        try:
+            return await _pull_http(url, dest, verify=self._verify)
+        except Exception as e:
+            if not (_is_cert_error(e) and self.s.tls_trust_orch and self.s.tls_verify):
+                raise
+            log.warning("pull SSL cert error (%s) — refreshing CA bundle and retrying once", e)
+            await self._refresh_trust()
+            return await _pull_http(url, dest, verify=self._verify)
+
     async def _fetch_one(self, sem: asyncio.Semaphore, item) -> None:
         async with sem:
             self.stats.begin()
@@ -240,7 +275,7 @@ class Receiver:
             try:
                 dest = self.s.storage_dir / item.object_key
                 try:
-                    sha, size = await _pull_http(item.presigned_url, dest, verify=self._verify)
+                    sha, size = await self._pull_with_trust_retry(item.presigned_url, dest)
                     ok = sha == item.sha256 and size == item.size
                     if ok:
                         pulled_bytes = size

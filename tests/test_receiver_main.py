@@ -5,14 +5,16 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ssl
 import sys
 import threading
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
 
-from sathop.receiver.main import Receiver, Settings, load
+from sathop.receiver.main import Receiver, Settings, _is_cert_error, load
 from sathop.shared.protocol import AckReport, PullItem
 
 
@@ -193,3 +195,130 @@ def test_config_load_sathop_url_takes_precedence(monkeypatch, tmp_path):
     s = load()
     assert s.orchestrator_url == "http://new:8000"
     assert s.token == "winner"
+
+
+# ─── TLS trust ────────────────────────────────────────────────────────────
+
+
+def test_config_load_defaults_tls_trust_orch_true(monkeypatch, tmp_path):
+    """Self-signed worker certs are the default deployment shape; receivers
+    must trust the orchestrator-managed CA bundle out of the box."""
+    monkeypatch.setenv("SATHOP_RECEIVER_ID", "r")
+    monkeypatch.setenv("SATHOP_ORCH_URL", "http://x")
+    monkeypatch.setenv("SATHOP_TOKEN", "t")
+    monkeypatch.setenv("SATHOP_STORAGE_DIR", str(tmp_path))
+    monkeypatch.delenv("SATHOP_TLS_TRUST_ORCH", raising=False)
+    s = load()
+    assert s.tls_verify is True
+    assert s.tls_trust_orch is True
+
+
+def test_config_load_tls_trust_orch_off_when_explicitly_false(monkeypatch, tmp_path):
+    monkeypatch.setenv("SATHOP_RECEIVER_ID", "r")
+    monkeypatch.setenv("SATHOP_ORCH_URL", "http://x")
+    monkeypatch.setenv("SATHOP_TOKEN", "t")
+    monkeypatch.setenv("SATHOP_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setenv("SATHOP_TLS_TRUST_ORCH", "false")
+    assert load().tls_trust_orch is False
+
+
+def test_is_cert_error_walks_cause_chain():
+    """httpx wraps ssl.SSLError in ConnectError — surface check must follow __cause__."""
+    inner = ssl.SSLError("certificate verify failed")
+    try:
+        try:
+            raise inner
+        except ssl.SSLError as e:
+            raise RuntimeError("connect failed") from e
+    except RuntimeError as e:
+        assert _is_cert_error(e) is True
+
+    assert _is_cert_error(RuntimeError("network down")) is False
+
+
+async def test_pull_retries_once_after_refreshing_trust_on_cert_error(tmp_path, monkeypatch):
+    """First pull attempt raises a cert error; receiver refreshes its trust
+    bundle and retries; second attempt succeeds. Covers the case where a worker
+    registered after our startup snapshot."""
+    payload = b"after-refresh"
+    srv, port = _serve(payload)
+    try:
+        r, acks = _make_receiver(tmp_path)
+        # Make sure the retry path can run.
+        r.s = replace(r.s, tls_trust_orch=True, tls_verify=True)
+
+        refreshes = 0
+
+        async def fake_refresh() -> None:
+            nonlocal refreshes
+            refreshes += 1
+
+        # Wrap _pull_http so the FIRST call simulates an SSL cert error and
+        # subsequent calls fall through to the real implementation.
+        from sathop.receiver import main as recv_mod
+
+        real_pull = recv_mod._pull_http
+        calls = 0
+
+        async def flaky_pull(url, dest, *, verify):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise ssl.SSLError("certificate verify failed: self-signed certificate")
+            return await real_pull(url, dest, verify=verify)
+
+        monkeypatch.setattr(recv_mod, "_pull_http", flaky_pull)
+        monkeypatch.setattr(r, "_refresh_trust", fake_refresh)
+
+        it = PullItem(
+            granule_id="g1",
+            batch_id="b1",
+            object_id=42,
+            object_key="b1/g1/out.bin",
+            presigned_url=f"http://127.0.0.1:{port}/",
+            sha256=hashlib.sha256(payload).hexdigest(),
+            size=len(payload),
+        )
+        await r._fetch_one(asyncio.Semaphore(1), it)
+
+        assert refreshes == 1, "trust must be refreshed before the retry"
+        assert calls == 2, "second pull should fire after the refresh"
+        assert len(acks) == 1
+        assert acks[0].success is True
+    finally:
+        srv.shutdown()
+
+
+async def test_pull_does_not_refresh_when_trust_orch_disabled(tmp_path, monkeypatch):
+    """Operator who set tls_trust_orch=false has their own trust setup; we
+    must not silently bypass it by refetching the orch bundle."""
+    r, acks = _make_receiver(tmp_path)
+    r.s = replace(r.s, tls_trust_orch=False, tls_verify=True)
+
+    refreshes = 0
+
+    async def fake_refresh() -> None:
+        nonlocal refreshes
+        refreshes += 1
+
+    from sathop.receiver import main as recv_mod
+
+    async def always_cert_error(url, dest, *, verify):
+        raise ssl.SSLError("certificate verify failed")
+
+    monkeypatch.setattr(recv_mod, "_pull_http", always_cert_error)
+    monkeypatch.setattr(r, "_refresh_trust", fake_refresh)
+
+    it = PullItem(
+        granule_id="g1",
+        batch_id="b1",
+        object_id=99,
+        object_key="b1/g1/x.bin",
+        presigned_url="http://127.0.0.1:1/",
+        sha256="0" * 64,
+        size=1,
+    )
+    await r._fetch_one(asyncio.Semaphore(1), it)
+    assert refreshes == 0
+    assert len(acks) == 1
+    assert acks[0].success is False
