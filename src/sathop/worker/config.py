@@ -67,7 +67,7 @@ def load() -> Settings:
         progress_port=int(os.getenv("SATHOP_PROGRESS_PORT", "9002")),
         heartbeat_interval=int(os.getenv("SATHOP_HEARTBEAT", "15")),
         lease_poll_interval=int(os.getenv("SATHOP_LEASE_POLL", "10")),
-        download_concurrency=max(1, int(os.getenv("SATHOP_DOWNLOAD_CONCURRENCY", "1"))),
+        download_concurrency=max(1, int(os.getenv("SATHOP_DOWNLOAD_CONCURRENCY", "4"))),
         aria2_rpc=os.getenv("SATHOP_ARIA2_RPC", ""),
         aria2_secret=os.getenv("SATHOP_ARIA2_SECRET", ""),
         minio_access_key=os.getenv("SATHOP_MINIO_ACCESS_KEY", ""),
