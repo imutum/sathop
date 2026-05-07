@@ -22,6 +22,11 @@ const toast = useToast();
 const enable = useMutation({
   mutationFn: (next: boolean) => API.setWorkerEnabled(props.worker.worker_id, next),
   onSuccess: (_r, next) => {
+    qc.setQueryData<WorkerInfo[]>(["workers"], (prev) =>
+      prev?.map((w) =>
+        w.worker_id === props.worker.worker_id ? { ...w, enabled: next } : w,
+      ) ?? prev,
+    );
     qc.invalidateQueries({ queryKey: ["workers"] });
     toast.success(next ? "已启用" : "已禁用，已在手任务排空后停止接新单");
   },
@@ -31,11 +36,21 @@ const enable = useMutation({
 const forget = useMutation({
   mutationFn: () => API.forgetWorker(props.worker.worker_id),
   onSuccess: () => {
+    qc.setQueryData<WorkerInfo[]>(["workers"], (prev) =>
+      prev?.filter((w) => w.worker_id !== props.worker.worker_id) ?? prev,
+    );
     qc.invalidateQueries({ queryKey: ["workers"] });
     toast.success(`已删除节点 ${props.worker.worker_id}`);
   },
   onError: (e: Error) => toast.error(`删除失败：${e.message}`),
 });
+
+function onSetEnabled(next: boolean): void {
+  enable.mutate(next);
+}
+function onForget(): void {
+  forget.mutate();
+}
 
 const lifecyclePending = computed(() => enable.isPending.value || forget.isPending.value);
 
@@ -263,8 +278,8 @@ function onKey(e: KeyboardEvent) {
             <NodeLifecycleActions
               :enabled="worker.enabled"
               :pending="lifecyclePending"
-              @set-enabled="enable.mutate"
-              @forget="forget.mutate"
+              @set-enabled="onSetEnabled"
+              @forget="onForget"
               :disable-confirm="`禁用 worker ${worker.worker_id}？\n\n已 lease 的任务继续完成；不会再领新任务。`"
               :forget-confirm="`从注册表中移除 ${worker.worker_id}？\n\n仅删除元数据；如果它仍持有任务会被服务端拒绝。`"
               disable-title="禁用此节点（在手任务继续）"

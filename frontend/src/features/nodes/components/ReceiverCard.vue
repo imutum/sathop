@@ -19,6 +19,13 @@ const toast = useToast();
 const enable = useMutation({
   mutationFn: (next: boolean) => API.setReceiverEnabled(props.receiver.receiver_id, next),
   onSuccess: (_r, next) => {
+    // Optimistic local cache update so the badge + button labels flip
+    // immediately, independent of SSE timing or refetch latency.
+    qc.setQueryData<ReceiverInfo[]>(["receivers"], (prev) =>
+      prev?.map((r) =>
+        r.receiver_id === props.receiver.receiver_id ? { ...r, enabled: next } : r,
+      ) ?? prev,
+    );
     qc.invalidateQueries({ queryKey: ["receivers"] });
     toast.success(next ? "已启用" : "已禁用，下次 pull 会被拒绝");
   },
@@ -28,11 +35,24 @@ const enable = useMutation({
 const forget = useMutation({
   mutationFn: () => API.forgetReceiver(props.receiver.receiver_id),
   onSuccess: () => {
+    qc.setQueryData<ReceiverInfo[]>(["receivers"], (prev) =>
+      prev?.filter((r) => r.receiver_id !== props.receiver.receiver_id) ?? prev,
+    );
     qc.invalidateQueries({ queryKey: ["receivers"] });
     toast.success(`已删除接收端 ${props.receiver.receiver_id}`);
   },
   onError: (e: Error) => toast.error(`删除失败：${e.message}`),
 });
+
+// Explicit arrow wrappers around mutate — guarantees the function call site
+// keeps the right binding regardless of how the template event listener
+// dispatches it. Defensive against any future vue-query mutate-binding edge.
+function onSetEnabled(next: boolean): void {
+  enable.mutate(next);
+}
+function onForget(): void {
+  forget.mutate();
+}
 
 const status = computed(() => nodeStatusBadge(props.receiver.enabled, props.receiver.last_seen));
 const pending = computed(() => enable.isPending.value || forget.isPending.value);
@@ -97,8 +117,8 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
       <NodeLifecycleActions
         :enabled="receiver.enabled"
         :pending="pending"
-        @set-enabled="enable.mutate"
-        @forget="forget.mutate"
+        @set-enabled="onSetEnabled"
+        @forget="onForget"
         :disable-confirm="`禁用 receiver ${receiver.receiver_id}？\n\n已下载的对象可继续 ack；不会再被分到新对象。`"
         :forget-confirm="`从注册表中移除 ${receiver.receiver_id}？\n\n仅删除元数据；目标已绑定此接收端的批次将无法 pull。`"
         disable-title="禁用此接收端"
