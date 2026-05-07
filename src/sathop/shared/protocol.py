@@ -98,7 +98,10 @@ class WorkerHeartbeat(BaseModel):
     # (i.e. state=queued in the orchestrator's view).
     queue_queued: int = 0
     queue_downloading: int = 0
+    # queue_processing = pipeline 总数 (running + waiting). 兼容老消费者。
     queue_processing: int = 0
+    # 仅等 process semaphore 的部分; 老 worker 默认 0 ⇒ "全部都在跑"。
+    queue_processing_waiting: int = 0
     queue_uploading: int = 0
     # True while the worker is gating off new leases for any reason (currently
     # disk-watermark backpressure). Surfaces to operators so an "online but

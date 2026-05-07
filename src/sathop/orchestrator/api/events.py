@@ -82,6 +82,7 @@ async def list_workers(s: AsyncSession = Depends(session)) -> list[dict]:
             "queue_queued": w.queue_queued or 0,
             "queue_downloading": w.queue_downloading,
             "queue_processing": w.queue_processing,
+            "queue_processing_waiting": w.queue_processing_waiting or 0,
             "queue_uploading": w.queue_uploading,
             "enabled": w.enabled,
             "paused": w.paused,

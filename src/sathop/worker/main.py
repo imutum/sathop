@@ -133,6 +133,9 @@ class Worker:
             try:
                 du = psutil.disk_usage(str(self.s.storage_root))
                 vm = psutil.virtual_memory()
+                # queue_processing 保持 pipeline 总数（waiting + running）的
+                # 老语义，不破坏外部 dashboard / Prometheus；UI 拆分由新字段
+                # queue_processing_waiting 提供。
                 resp = await self.client.heartbeat(
                     WorkerHeartbeat(
                         worker_id=self.s.worker_id,
@@ -142,7 +145,8 @@ class Worker:
                         mem_percent=vm.percent,
                         queue_queued=self.stage["queued"],
                         queue_downloading=self.stage["downloading"],
-                        queue_processing=self.stage["processing"],
+                        queue_processing=self.stage["processing_running"] + self.stage["processing_waiting"],
+                        queue_processing_waiting=self.stage["processing_waiting"],
                         queue_uploading=self.stage["uploading"],
                         paused=self._pause_lease,
                     )
@@ -164,7 +168,17 @@ class Worker:
 
     async def _pipeline_loop(self) -> None:
         while True:
-            free = self._effective_capacity - sum(self.stage.values())
+            # Two independent ceilings — lease the lesser of:
+            #   (a) capacity left for any stage  (download + process + upload)
+            #   (b) process pipeline depth left, capped at 2 × CPU
+            # (b) keeps a fast downloader from piling N granules onto a slow
+            #     CPU; once running+waiting hit 2× CPU we pause leasing until
+            #     run_bundle drains the sem. Sweeper reclaims our lease if we
+            #     stall too long, so other workers can pick up the slack.
+            capacity_free = self._effective_capacity - sum(self.stage.values())
+            process_in_pipe = self.stage["processing_running"] + self.stage["processing_waiting"]
+            process_free = self.s.process_concurrency * 2 - process_in_pipe
+            free = min(capacity_free, process_free)
             if free <= 0 or self._pause_lease:
                 await asyncio.sleep(self.s.lease_poll_interval)
                 continue
@@ -297,9 +311,13 @@ class Worker:
             self.s.orchestrator_url,
             self.s.token,
         )
-        enter_stage("processing")
+        # Two-phase stage so heartbeat / UI can show "在跑 + 等候 CPU" 拆分。
+        # DB state 仍然 PROCESSING（orchestrator 视角不区分 waiting / running）。
+        enter_stage("processing_waiting")
         await self._report_state(gid, GranuleState.PROCESSING)
         async with self._process_sem:
+            exit_stage()
+            enter_stage("processing_running")
             result = await asyncio.to_thread(
                 run_bundle,
                 handle,

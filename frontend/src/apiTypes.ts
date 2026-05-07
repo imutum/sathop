@@ -58,6 +58,9 @@ export type WorkerInfo = {
   queue_queued: number;
   queue_downloading: number;
   queue_processing: number;
+  // Subset of queue_processing that's blocked on the process semaphore (CPU
+  // bottleneck). Optional — older orchestrators don't ship it.
+  queue_processing_waiting?: number;
   queue_uploading: number;
   enabled: boolean;
   paused: boolean;

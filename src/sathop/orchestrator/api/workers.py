@@ -174,6 +174,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     w.queue_queued = req.queue_queued
     w.queue_downloading = req.queue_downloading
     w.queue_processing = req.queue_processing
+    w.queue_processing_waiting = req.queue_processing_waiting
     w.queue_uploading = req.queue_uploading
     w.paused = req.paused
     await s.commit()

@@ -210,11 +210,18 @@ function onKey(e: KeyboardEvent) {
               </div>
             </div>
           </HintTip>
-          <HintTip text="正在执行任务包脚本">
+          <HintTip
+            :text="(worker.queue_processing_waiting ?? 0) > 0
+              ? `${worker.queue_processing - (worker.queue_processing_waiting ?? 0)} 个在 CPU 上跑 + ${worker.queue_processing_waiting} 个等 CPU 槽位`
+              : '正在执行任务包脚本'"
+          >
             <div>
               <div class="stat-label">处理</div>
               <div class="mt-0.5 text-base font-semibold tabular-nums text-foreground">
-                {{ worker.queue_processing }}
+                {{ worker.queue_processing - (worker.queue_processing_waiting ?? 0) }}<span
+                  v-if="(worker.queue_processing_waiting ?? 0) > 0"
+                  class="ml-1 text-xs font-normal text-muted-foreground"
+                >+{{ worker.queue_processing_waiting }}</span>
               </div>
             </div>
           </HintTip>

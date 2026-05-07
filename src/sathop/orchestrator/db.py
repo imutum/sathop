@@ -55,7 +55,11 @@ class Worker(Base):
     # workers that don't send the field still register cleanly via _ensure_columns.
     queue_queued: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     queue_downloading: Mapped[int] = mapped_column(Integer, default=0)
+    # queue_processing 保持原意：pipeline 总数 (running + waiting)。下面新增的
+    # queue_processing_waiting 仅给 UI 拆分用，老 dashboard / Prometheus 看
+    # processing series 数字仍是熟悉的 in-pipeline 总数，不破坏。
     queue_processing: Mapped[int] = mapped_column(Integer, default=0)
+    queue_processing_waiting: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     queue_uploading: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Worker self-reports True while it's gating off leases (disk pressure today).
