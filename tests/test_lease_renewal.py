@@ -1,0 +1,231 @@
+"""Lease auto-renewal on heartbeat + worker-side LeaseRevoked handling.
+
+Heartbeat doubles as a keep-alive: every check-in pushes the
+`lease_expires_at` of every granule the worker holds forward by
+LEASE_DURATION. Without this, a slow processor (e.g. a granule that takes
+>30 min) sees its lease swept while still running, the row flips back to
+PENDING, and subsequent state reports 409 — the worker's in-memory pipeline
+turns into wasted ghost work.
+
+The worker side of the contract: when /api/workers/state returns 404/409,
+the worker raises LeaseRevoked so the granule handler aborts immediately
+instead of continuing to download/process bytes whose upload will be
+rejected anyway."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from sathop.orchestrator import db as orch_db
+from sathop.orchestrator.api.workers import LEASE_DURATION
+from sathop.orchestrator.config import settings
+from sathop.orchestrator.db import Batch, Granule, Worker, utcnow
+from sathop.orchestrator.main import app
+from sathop.shared.protocol import GranuleState
+
+
+@pytest.fixture
+async def client(tmp_path):
+    object.__setattr__(settings, "db_path", tmp_path / "test.db")
+    object.__setattr__(settings, "token", "")
+    await orch_db.init_db()
+    try:
+        yield TestClient(app)
+    finally:
+        await orch_db.shutdown_db()
+
+
+async def _seed_worker_with_leased_granules(
+    worker_id: str = "w1",
+    expires_at: datetime | None = None,
+    states: list[str] | None = None,
+) -> list[str]:
+    """Seed one batch + N granules each leased to `worker_id`. Returns granule
+    IDs in insertion order. Default expiry is "10 minutes ago" so we can
+    detect renewal pushing it well into the future."""
+    states = states or [GranuleState.DOWNLOADING.value, GranuleState.PROCESSING.value]
+    expires_at = expires_at or (utcnow() - timedelta(minutes=10))
+    gids = []
+    async with orch_db._session_maker() as s:
+        s.add(Worker(worker_id=worker_id, version="t", capacity=4))
+        s.add(Batch(batch_id="b", name="t", bundle_ref="local:x"))
+        for i, st in enumerate(states):
+            gid = f"g{i}"
+            s.add(
+                Granule(
+                    granule_id=gid,
+                    batch_id="b",
+                    state=st,
+                    inputs_json="[]",
+                    leased_by=worker_id,
+                    lease_expires_at=expires_at,
+                )
+            )
+            gids.append(gid)
+        await s.commit()
+    return gids
+
+
+async def _granule_lease_expiry(granule_id: str) -> datetime | None:
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, granule_id)
+        return g.lease_expires_at if g else None
+
+
+def _heartbeat_payload(worker_id: str = "w1") -> dict:
+    return {
+        "worker_id": worker_id,
+        "disk_used_gb": 1.0,
+        "disk_total_gb": 100.0,
+        "cpu_percent": 10.0,
+        "mem_percent": 20.0,
+        "monthly_egress_gb": 0.0,
+        "queue_pending_download": 0,
+        "queue_downloading": 1,
+        "queue_pending_processing": 0,
+        "queue_processing": 1,
+        "queue_uploading": 0,
+        "paused": False,
+    }
+
+
+async def test_heartbeat_pushes_lease_expiry_forward(client):
+    gids = await _seed_worker_with_leased_granules()
+    before = utcnow()
+
+    r = client.post("/api/workers/heartbeat", json=_heartbeat_payload())
+    assert r.status_code == 200, r.text
+
+    # Each granule's lease_expires_at must now be roughly now + LEASE_DURATION.
+    for gid in gids:
+        new_expiry = await _granule_lease_expiry(gid)
+        assert new_expiry is not None
+        delta = new_expiry - before
+        # Allow a few seconds slack for the request round-trip.
+        assert LEASE_DURATION - timedelta(seconds=5) <= delta <= LEASE_DURATION + timedelta(seconds=5)
+
+
+async def test_heartbeat_does_not_renew_other_workers_leases(client):
+    """Lease renewal must scope to the heartbeating worker — otherwise w1's
+    heartbeat would extend granules leased by w2."""
+    await _seed_worker_with_leased_granules("w1")
+    other_expiry = utcnow() - timedelta(minutes=5)
+    async with orch_db._session_maker() as s:
+        s.add(Worker(worker_id="w2", version="t", capacity=4))
+        s.add(
+            Granule(
+                granule_id="g-w2",
+                batch_id="b",
+                state=GranuleState.DOWNLOADING.value,
+                inputs_json="[]",
+                leased_by="w2",
+                lease_expires_at=other_expiry,
+            )
+        )
+        await s.commit()
+
+    client.post("/api/workers/heartbeat", json=_heartbeat_payload("w1"))
+
+    # w2's granule must still have its original (stale) expiry — the sweeper
+    # will reclaim it on its next pass.
+    g_w2_expiry = await _granule_lease_expiry("g-w2")
+    assert g_w2_expiry is not None
+    assert abs((g_w2_expiry - other_expiry).total_seconds()) < 1
+
+
+async def test_heartbeat_skips_pending_granules_for_renewal(client):
+    """Granules in PENDING (sweeper-reclaimed or never-leased) shouldn't get
+    a lease_expires_at — they'd suddenly look "leased" to the next /lease
+    call's predicate."""
+    await _seed_worker_with_leased_granules("w1")
+    async with orch_db._session_maker() as s:
+        s.add(
+            Granule(
+                granule_id="g-pending",
+                batch_id="b",
+                state=GranuleState.PENDING.value,
+                inputs_json="[]",
+                leased_by=None,
+                lease_expires_at=None,
+            )
+        )
+        await s.commit()
+
+    client.post("/api/workers/heartbeat", json=_heartbeat_payload("w1"))
+
+    g_pending_expiry = await _granule_lease_expiry("g-pending")
+    assert g_pending_expiry is None
+
+
+# ─── Worker-side: LeaseRevoked translation of 404/409 ─────────────────────
+
+
+def _http_error(status: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "http://orch/api/workers/state")
+    response = httpx.Response(status, request=request)
+    return httpx.HTTPStatusError(f"HTTP {status}", request=request, response=response)
+
+
+class _StubAgent:
+    """Minimal stand-in for OrchestratorClient — only `report_state` matters
+    for the LeaseRevoked path. Each call dequeues from `responses`: a status
+    code int ⇒ raise that 4xx/5xx, None ⇒ succeed silently."""
+
+    def __init__(self, responses: list[int | None]) -> None:
+        self.responses = list(responses)
+        self.calls: list[tuple[str, GranuleState]] = []
+
+    async def report_state(self, gid: str, worker_id: str, state: GranuleState) -> None:
+        self.calls.append((gid, state))
+        next_status = self.responses.pop(0) if self.responses else None
+        if next_status is not None:
+            raise _http_error(next_status)
+
+
+def _stub_worker(agent: _StubAgent):
+    """Build just enough of `Worker` to call `_report_state` — bypasses the
+    real __init__ which requires Settings, storage, semaphores, etc."""
+    from types import SimpleNamespace
+
+    from sathop.worker.main import Worker
+
+    w = Worker.__new__(Worker)
+    w.client = agent  # type: ignore[assignment]
+    w.s = SimpleNamespace(worker_id="w1")
+    return w
+
+
+async def test_report_state_409_raises_lease_revoked():
+    from sathop.worker.main import LeaseRevoked
+
+    w = _stub_worker(_StubAgent([409]))
+    with pytest.raises(LeaseRevoked):
+        await w._report_state("g1", GranuleState.DOWNLOADING)
+
+
+async def test_report_state_404_raises_lease_revoked():
+    from sathop.worker.main import LeaseRevoked
+
+    w = _stub_worker(_StubAgent([404]))
+    with pytest.raises(LeaseRevoked):
+        await w._report_state("g1", GranuleState.PROCESSING)
+
+
+async def test_report_state_500_swallowed_as_best_effort():
+    """5xx and network errors stay best-effort — the next phase boundary
+    will retry the report. Raising would abort the whole granule on a
+    transient orchestrator hiccup."""
+    w = _stub_worker(_StubAgent([500]))
+    # No exception — _report_state logs and returns.
+    await w._report_state("g1", GranuleState.DOWNLOADING)
+
+
+async def test_report_state_success_returns_silently():
+    agent = _StubAgent([None])
+    w = _stub_worker(agent)
+    await w._report_state("g1", GranuleState.DOWNLOADING)
+    assert agent.calls == [("g1", GranuleState.DOWNLOADING)]

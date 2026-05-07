@@ -165,7 +165,8 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     w = await s.get(Worker, req.worker_id)
     if w is None:
         raise HTTPException(404, "worker not registered")
-    w.last_seen = utcnow()
+    now = utcnow()
+    w.last_seen = now
     w.disk_used_gb = req.disk_used_gb
     w.disk_total_gb = req.disk_total_gb
     w.cpu_percent = req.cpu_percent
@@ -177,6 +178,20 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     w.queue_processing = req.queue_processing
     w.queue_uploading = req.queue_uploading
     w.paused = req.paused
+    # Heartbeat doubles as lease renewal: as long as the worker keeps checking
+    # in, every granule it currently holds gets `lease_expires_at` pushed forward.
+    # 30 min is enough headroom for a single granule cycle but not for a whole
+    # batch; without renewal a slow processor (large MOD021KM + reprojection)
+    # has its lease swept while still working — DB flips the row back to PENDING,
+    # subsequent state reports 409, and the worker's in-memory pipeline turns
+    # into wasted "ghost work". Sweeper still reclaims if the worker actually
+    # goes silent (no heartbeat ⇒ no renewal ⇒ lease expires within 30 min).
+    await s.execute(
+        update(Granule)
+        .where(Granule.leased_by == req.worker_id)
+        .where(Granule.state.in_(LEASED_STATES))
+        .values(lease_expires_at=now + LEASE_DURATION)
+    )
     await s.commit()
     publish({"scope": "workers"})
     return WorkerHeartbeatResponse(

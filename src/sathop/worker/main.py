@@ -19,6 +19,7 @@ from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
+import httpx
 import psutil
 
 from sathop.shared.protocol import (
@@ -43,6 +44,15 @@ log = logging.getLogger("sathop.worker")
 
 _PROCESSING_FAILURE_TAIL_CHARS = 2000
 _WORKER_TRACEBACK_TAIL_CHARS = 1500
+
+
+class LeaseRevoked(Exception):
+    """Orchestrator says we no longer own this granule (lease swept while we
+    were working, or we restarted and forgot the prior lease). Abort the
+    handler immediately — any further upload/state report would 409 too, and
+    keeping the work going wastes the download/CPU."""
+
+
 _DOWNLOAD_PROGRESS_MIN_INTERVAL_SECONDS = 2.0
 _DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT = 5.0
 _StageTransition = Callable[[str], None]
@@ -260,6 +270,11 @@ class Worker:
 
             await self._upload_outputs(item, handle, result.outputs, _enter, _exit)
 
+        except LeaseRevoked:
+            # Lease already gone from the DB row — failure report would 409
+            # too, and the orchestrator's lease sweeper / reclaim path has
+            # already moved the row back to PENDING for another worker.
+            log.info("[%s] handler aborted (lease revoked)", gid)
         except Exception as e:
             log.exception("[%s] unhandled error", gid)
             try:
@@ -374,11 +389,22 @@ class Worker:
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
 
     async def _report_state(self, gid: str, state: GranuleState) -> None:
-        """Best-effort phase report. A failure here only delays UI state until
-        the next successful report (or upload), so we log and continue rather
-        than aborting the granule."""
+        """Phase report. 404/409 ⇒ orchestrator no longer recognises our
+        lease, so we raise LeaseRevoked to abort the handler. Other errors
+        (5xx, network blips) stay best-effort — the next phase boundary
+        will retry the report."""
         try:
             await self.client.report_state(gid, self.s.worker_id, state)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (404, 409):
+                log.warning(
+                    "[%s] lease revoked while reporting %s (HTTP %d) — aborting handler",
+                    gid,
+                    state.value,
+                    e.response.status_code,
+                )
+                raise LeaseRevoked from e
+            log.warning("[%s] state report %s failed: %s", gid, state.value, e)
         except Exception as e:
             log.warning("[%s] state report %s failed: %s", gid, state.value, e)
 
