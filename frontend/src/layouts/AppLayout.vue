@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Icon, type IconName } from "@/components/Icon";
 import HintTip from "@/components/HintTip.vue";
+import VersionStatus from "@/components/VersionStatus.vue";
 import { useTheme } from "@/composables/useTheme";
 import { useLiveStream } from "@/composables/useLiveStream";
 import { logout } from "@/composables/useAuthGate";
@@ -106,7 +107,8 @@ const isDark = computed(() => effective.value === "dark");
         </ul>
       </nav>
 
-      <div class="border-t border-border p-3">
+      <div class="space-y-1 border-t border-border p-3">
+        <VersionStatus :collapsed="collapsed" />
         <button
           type="button"
           @click="logout"
@@ -173,7 +175,8 @@ const isDark = computed(() => effective.value === "dark");
             </li>
           </ul>
         </nav>
-        <div class="border-t border-border p-3">
+        <div class="space-y-1 border-t border-border p-3">
+          <VersionStatus />
           <button
             type="button"
             @click="logout"
