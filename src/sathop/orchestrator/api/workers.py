@@ -335,6 +335,12 @@ async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
         raise HTTPException(404, "granule not found")
     if g.leased_by != req.worker_id:
         raise HTTPException(409, "granule not leased by this worker")
+    # Worker must have already reported PROCESSED before uploading. A worker
+    # that skipped PROCESSED would muddle the upload-stage timing (it would
+    # absorb the entire process phase) and is a sign the worker code is out
+    # of sync with the protocol. 409 surfaces the contract clearly.
+    if g.state != GranuleState.PROCESSED.value:
+        raise HTTPException(409, f"upload requires state=processed; granule is in state {g.state!r}")
 
     for o in req.objects:
         s.add(
@@ -368,6 +374,11 @@ async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> di
         raise HTTPException(404, "granule not found")
     if g.leased_by != req.worker_id:
         raise HTTPException(409, "granule not leased by this worker")
+    # The failure path can only fire while the worker still genuinely owns
+    # the granule. Anything outside the leased states means cancel/sweeper
+    # got there first; the worker should swallow the 409 and stop reporting.
+    if g.state not in LEASED_STATES:
+        raise HTTPException(409, f"failure not accepted in state {g.state!r} (lease was revoked)")
 
     g.retry_count += 1
     g.error = req.error[:2000]

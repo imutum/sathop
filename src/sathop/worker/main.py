@@ -370,8 +370,10 @@ class Worker:
             exit_stage()
             enter_stage("processing")
             await self._report_state(gid, GranuleState.PROCESSING)
-            result = await asyncio.to_thread(
-                run_bundle,
+            # run_bundle is now async + uses asyncio.create_subprocess_shell;
+            # CancelledError propagates straight in and `_kill_and_wait` tears
+            # the child down before the exception bubbles up to _handle.
+            result = await run_bundle(
                 handle,
                 gid,
                 item.batch_id,

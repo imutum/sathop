@@ -49,7 +49,7 @@ def work_root(tmp_path):
     return d
 
 
-def test_happy_path_copies_input_runs_and_collects(tmp_path, work_root):
+async def test_happy_path_copies_input_runs_and_collects(tmp_path, work_root):
     inp = tmp_path / "in.txt"
     inp.write_text("hello", encoding="utf-8")
 
@@ -61,7 +61,7 @@ def test_happy_path_copies_input_runs_and_collects(tmp_path, work_root):
     )
     h = _make_bundle(tmp_path, "python run.py", script)
 
-    r = run_bundle(h, "g1", "b1", [inp], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [inp], {}, work_root)
 
     assert r.ok
     assert r.exit_code == 0
@@ -71,24 +71,24 @@ def test_happy_path_copies_input_runs_and_collects(tmp_path, work_root):
     assert "_staged" in str(r.outputs[0])
 
 
-def test_nonzero_exit_reports_failure(tmp_path, work_root):
+async def test_nonzero_exit_reports_failure(tmp_path, work_root):
     h = _make_bundle(tmp_path, "python run.py", "import sys; sys.exit(7)")
-    r = run_bundle(h, "g1", "b1", [], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [], {}, work_root)
     assert not r.ok
     assert r.exit_code == 7
     assert r.outputs == []
 
 
-def test_empty_output_dir_flagged_as_failure(tmp_path, work_root):
+async def test_empty_output_dir_flagged_as_failure(tmp_path, work_root):
     """Bundle ran to success but produced nothing — worker needs this caught."""
     h = _make_bundle(tmp_path, "python run.py", "print('idle'); pass")
-    r = run_bundle(h, "g1", "b1", [], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [], {}, work_root)
     assert not r.ok
     assert r.exit_code == 0
     assert "no outputs" in r.stderr
 
 
-def test_extension_filter_drops_non_matching(tmp_path, work_root):
+async def test_extension_filter_drops_non_matching(tmp_path, work_root):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
@@ -96,13 +96,13 @@ def test_extension_filter_drops_non_matching(tmp_path, work_root):
         "(o / 'skip.log').write_text('no')\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script, extensions=[".txt"])
-    r = run_bundle(h, "g1", "b1", [], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [], {}, work_root)
     assert r.ok
     names = {p.name for p in r.outputs}
     assert names == {"keep.txt"}
 
 
-def test_multiple_inputs_all_staged(tmp_path, work_root):
+async def test_multiple_inputs_all_staged(tmp_path, work_root):
     a = tmp_path / "a.txt"
     a.write_text("A", encoding="utf-8")
     b = tmp_path / "b.txt"
@@ -115,12 +115,12 @@ def test_multiple_inputs_all_staged(tmp_path, work_root):
         "(o / 'list.txt').write_text(','.join(names))\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = run_bundle(h, "g1", "b1", [a, b], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [a, b], {}, work_root)
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "a.txt,b.txt"
 
 
-def test_env_vars_reach_entrypoint(tmp_path, work_root):
+async def test_env_vars_reach_entrypoint(tmp_path, work_root):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
@@ -129,12 +129,12 @@ def test_env_vars_reach_entrypoint(tmp_path, work_root):
         ")\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = run_bundle(h, "my-granule", "my-batch", [], {}, work_root)
+    r = await run_bundle(h, "my-granule", "my-batch", [], {}, work_root)
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "my-granule|my-batch"
 
 
-def test_custom_env_in_manifest_merged(tmp_path, work_root):
+async def test_custom_env_in_manifest_merged(tmp_path, work_root):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
@@ -164,12 +164,12 @@ def test_custom_env_in_manifest_merged(tmp_path, work_root):
         venv_python=Path(sys.executable),
         shared_dir=tmp_path / "shared",
     )
-    r = run_bundle(h, "g", "b", [], {}, work_root)
+    r = await run_bundle(h, "g", "b", [], {}, work_root)
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "custom-val"
 
 
-def test_batch_env_overrides_bundle_env(tmp_path, work_root):
+async def test_batch_env_overrides_bundle_env(tmp_path, work_root):
     """Batch execution_env wins over bundle manifest env — the whole point of
     batch-level overrides (same bundle, different task knobs)."""
     script = (
@@ -202,12 +202,12 @@ def test_batch_env_overrides_bundle_env(tmp_path, work_root):
         shared_dir=tmp_path / "shared",
     )
     # Batch overrides the bundle default
-    r = run_bundle(h, "g", "b", [], {}, work_root, execution_env={"RESOLUTION": "1km"})
+    r = await run_bundle(h, "g", "b", [], {}, work_root, execution_env={"RESOLUTION": "1km"})
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "1km"
 
 
-def test_internal_sathop_vars_immune_to_override(tmp_path, work_root):
+async def test_internal_sathop_vars_immune_to_override(tmp_path, work_root):
     """Batch env must NOT be able to hijack SATHOP_OUTPUT_DIR or SATHOP_INPUT_DIR
     — those are worker-controlled invariants."""
     script = (
@@ -217,7 +217,7 @@ def test_internal_sathop_vars_immune_to_override(tmp_path, work_root):
     )
     h = _make_bundle(tmp_path, "python run.py", script)
     # Malicious batch env trying to redirect output
-    r = run_bundle(
+    r = await run_bundle(
         h,
         "g",
         "b",
@@ -230,14 +230,14 @@ def test_internal_sathop_vars_immune_to_override(tmp_path, work_root):
     assert len(r.outputs) == 1
 
 
-def test_progress_url_injected_when_provided(tmp_path, work_root):
+async def test_progress_url_injected_when_provided(tmp_path, work_root):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
         "(o / 'u.txt').write_text(os.environ.get('SATHOP_PROGRESS_URL', 'MISSING'))\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = run_bundle(
+    r = await run_bundle(
         h,
         "g",
         "b",
@@ -250,7 +250,7 @@ def test_progress_url_injected_when_provided(tmp_path, work_root):
     assert r.outputs[0].read_text(encoding="utf-8") == "http://127.0.0.1:9002/progress/abc123"
 
 
-def test_progress_url_absent_when_not_provided(tmp_path, work_root):
+async def test_progress_url_absent_when_not_provided(tmp_path, work_root):
     """No progress_url → SATHOP_PROGRESS_URL should not appear in env. Bundles
     check for its absence to stay backward compatible with older workers."""
     script = (
@@ -259,12 +259,12 @@ def test_progress_url_absent_when_not_provided(tmp_path, work_root):
         "(o / 'u.txt').write_text(os.environ.get('SATHOP_PROGRESS_URL', 'MISSING'))\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = run_bundle(h, "g", "b", [], {}, work_root)
+    r = await run_bundle(h, "g", "b", [], {}, work_root)
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "MISSING"
 
 
-def test_batch_env_cannot_hijack_progress_url(tmp_path, work_root):
+async def test_batch_env_cannot_hijack_progress_url(tmp_path, work_root):
     """Like SATHOP_OUTPUT_DIR, SATHOP_PROGRESS_URL is worker-controlled —
     a malicious batch env mustn't be able to redirect progress to an external host."""
     script = (
@@ -273,7 +273,7 @@ def test_batch_env_cannot_hijack_progress_url(tmp_path, work_root):
         "(o / 'u.txt').write_text(os.environ['SATHOP_PROGRESS_URL'])\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = run_bundle(
+    r = await run_bundle(
         h,
         "g",
         "b",
@@ -285,3 +285,32 @@ def test_batch_env_cannot_hijack_progress_url(tmp_path, work_root):
     )
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "http://127.0.0.1:9002/progress/real"
+
+
+async def test_cancel_kills_subprocess_promptly(tmp_path, work_root):
+    """The whole reason run_bundle is async: when the worker's handler task
+    is cancelled (operator hit "取消批次"), the child must die within a few
+    seconds rather than burning CPU until manifest.timeout_sec."""
+    import asyncio
+    import time
+
+    # 60s sleep gives us plenty of headroom — the test should finish in <2s.
+    script = "import time; time.sleep(60)\n"
+    h = _make_bundle(tmp_path, "python run.py", script, timeout_sec=120)
+
+    async def worker_task():
+        return await run_bundle(h, "g", "b", [], {}, work_root)
+
+    task = asyncio.create_task(worker_task())
+    # Let the subprocess actually start before we cancel — without this the
+    # cancel would race against asyncio.create_subprocess_shell setup.
+    await asyncio.sleep(0.5)
+    started = time.monotonic()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    elapsed = time.monotonic() - started
+    # _kill_and_wait gives a 5s SIGTERM grace period before SIGKILL; the whole
+    # tear-down should comfortably finish well under 10s. Anything close to
+    # the bundle's timeout_sec means we're not actually killing the child.
+    assert elapsed < 10, f"cancel took {elapsed:.1f}s — subprocess wasn't killed promptly"
