@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import Modal from "@/ui/Modal.vue";
 import {
   type Platform,
+  type TlsMode,
   linuxPrestep,
   receiverDockerCompose,
   receiverDockerRun,
@@ -27,7 +28,7 @@ const outputDir = ref("./downloads");
 const platform = ref<Platform>(navigator.userAgent.includes("Windows") ? "windows" : "linux");
 const concurrent = ref(4);
 const poll = ref(10);
-const trustSelfSigned = ref(false);
+const tlsMode = ref<TlsMode>("strict");
 const showToken = ref(false);
 
 type TabKey = "docker-run" | "compose" | "uvx";
@@ -46,7 +47,7 @@ const cfg = computed(() => ({
   platform: platform.value,
   concurrent: concurrent.value,
   poll: poll.value,
-  tlsVerify: !trustSelfSigned.value,
+  tlsMode: tlsMode.value,
 }));
 
 const snippet = computed(() => {
@@ -155,20 +156,45 @@ async function copySnippet() {
       </div>
     </div>
 
-    <div class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
-      <label class="flex cursor-pointer items-start gap-2.5">
-        <input
-          type="checkbox"
-          v-model="trustSelfSigned"
-          class="mt-0.5 h-4 w-4 cursor-pointer rounded border-border accent-primary"
-        />
-        <div class="min-w-0 flex-1">
-          <div class="text-xs font-medium">信任 Worker 自签证书</div>
-          <div class="mt-0.5 text-2xs text-muted-foreground">
-            如果 Worker 用「自签 IP + HTTPS」方式部署，必须勾选此项才能拉取产物（跳过 TLS 证书验证；身份仍由 Token 守护）
-          </div>
-        </div>
-      </label>
+    <div class="mt-3">
+      <Label>TLS 信任模式</Label>
+      <div class="mt-1 grid grid-cols-1 gap-1 rounded-md border border-border bg-muted/40 p-0.5 md:grid-cols-3">
+        <button
+          type="button"
+          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          :class="tlsMode === 'strict' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+          @click="tlsMode = 'strict'"
+        >
+          严格（公网证书）
+        </button>
+        <button
+          type="button"
+          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          :class="tlsMode === 'trust-orch' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+          @click="tlsMode = 'trust-orch'"
+        >
+          信任调度中心管理的 CA（推荐内网）
+        </button>
+        <button
+          type="button"
+          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          :class="tlsMode === 'insecure' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+          @click="tlsMode = 'insecure'"
+        >
+          跳过验证（不安全）
+        </button>
+      </div>
+      <p class="mt-1.5 text-2xs text-muted-foreground">
+        <span v-if="tlsMode === 'strict'">
+          只信任系统 CA（Let's Encrypt 等公开证书）。Worker 用「自签 IP + HTTPS」时会握手失败 — 改选另两项
+        </span>
+        <span v-else-if="tlsMode === 'trust-orch'">
+          启动时从调度中心拉取所有 worker 的 CA 形成可信清单。中间人没有 worker 私钥就过不了 TLS — 内网最佳搭配
+        </span>
+        <span v-else>
+          完全跳过证书验证，加密但不验身份。仅在严格管控的物理网络下使用
+        </span>
+      </p>
     </div>
 
     <details class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">

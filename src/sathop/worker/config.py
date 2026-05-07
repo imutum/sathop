@@ -35,6 +35,12 @@ class Settings:
     disk_resume_pct: float
     backpressure_interval: int
 
+    # Path inside the worker container where the Caddy self-signed root CA
+    # appears (Caddy writes it after first cert issuance). Worker reads this
+    # at register time and uploads to orchestrator so receivers can pin trust.
+    # Empty / nonexistent ⇒ skip CA upload (publicly-trusted or HTTP worker).
+    caddy_ca_path: Path
+
     @property
     def use_aria2(self) -> bool:
         return bool(self.aria2_rpc)
@@ -70,4 +76,7 @@ def load() -> Settings:
         disk_pause_pct=float(os.getenv("SATHOP_DISK_PAUSE_PCT", "0.85")),
         disk_resume_pct=float(os.getenv("SATHOP_DISK_RESUME_PCT", "0.70")),
         backpressure_interval=int(os.getenv("SATHOP_BACKPRESSURE_INTERVAL", "10")),
+        caddy_ca_path=Path(
+            os.getenv("SATHOP_CADDY_CA_PATH", "/caddy-data/caddy/pki/authorities/local/root.crt")
+        ),
     )

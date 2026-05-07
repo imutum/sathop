@@ -272,10 +272,16 @@ async function copySnippet() {
     <div v-if="exposeMode === 'selfsigned'" class="mt-4">
       <Alert>
         <AlertDescription class="space-y-1 text-2xs">
-          <div class="text-xs font-medium text-foreground">自签 IP HTTPS 模式注意事项：</div>
-          <div>1. 接收端必须勾选「信任 Worker 自签证书」（即设 <code class="font-mono">SATHOP_TLS_VERIFY=false</code>），否则握手会失败</div>
-          <div>2. 加密由 TLS 提供，Worker 身份由 Token 验证 — 内网部署足够安全</div>
-          <div>3. 证书在 Caddy 容器中自动签发与续签，路径 <code class="font-mono">caddy_data:/data/caddy/pki/</code></div>
+          <div class="text-xs font-medium text-foreground">自签 IP HTTPS 模式工作原理：</div>
+          <div>1. Caddy 自动签发 IP 证书（路径 <code class="font-mono">caddy_data:/data/caddy/pki/</code>），自动续签</div>
+          <div>2. Worker 共享挂载 <code class="font-mono">caddy_data:ro</code>，启动时读取根 CA 并上报到调度中心</div>
+          <div>3. 接收端启动时从调度中心拉取 CA 清单 → 精确验证 Worker 身份（中间人没有 worker 私钥就过不了 TLS）</div>
+          <div class="font-medium text-foreground">
+            ⚠️ 接收端 TLS 信任模式必须选「信任调度中心管理的 CA」，否则会握手失败
+          </div>
+          <div class="text-muted-foreground">
+            注：本模式下 worker 容器需以 root 运行（读 Caddy 700-mode pki 目录）；worker 数据是内部缓存，不影响接收端最终产物
+          </div>
         </AlertDescription>
       </Alert>
     </div>

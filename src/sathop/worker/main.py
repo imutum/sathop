@@ -75,13 +75,36 @@ class Worker:
         for p in (s.work_root, s.bundle_cache, s.venv_cache, s.shared_cache, s.storage_root):
             p.mkdir(parents=True, exist_ok=True)
 
+    async def _read_caddy_ca(self, *, retries: int = 10, interval_sec: float = 3.0) -> str | None:
+        """If a Caddy self-signed CA exists at s.caddy_ca_path, read & return its
+        PEM. Caddy writes this only after first cert issuance, so retry briefly
+        on first boot. Returns None when the path doesn't exist after all
+        retries (worker without a Caddy front, or non-selfsigned Caddy mode)."""
+        path = self.s.caddy_ca_path
+        for attempt in range(retries):
+            if path.is_file():
+                try:
+                    pem = path.read_text(encoding="utf-8").strip()
+                except OSError as e:
+                    log.warning("read caddy CA at %s failed: %s", path, e)
+                    return None
+                if pem:
+                    log.info("loaded self-signed CA from %s (%d bytes)", path, len(pem))
+                    return pem
+            if attempt < retries - 1:
+                await asyncio.sleep(interval_sec)
+        log.info("no caddy CA at %s — registering without ca_pem", path)
+        return None
+
     async def run(self) -> None:
+        ca_pem = await self._read_caddy_ca()
         await self.client.register(
             WorkerRegister(
                 worker_id=self.s.worker_id,
                 version="0.1.0",
                 capacity=self.s.capacity,
                 public_url=self.s.public_url,
+                ca_pem=ca_pem,
             )
         )
         log.info(

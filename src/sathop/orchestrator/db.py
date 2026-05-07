@@ -63,6 +63,10 @@ class Worker(Base):
     paused: Mapped[bool] = mapped_column(Boolean, default=False)
     # Runtime concurrency override; NULL ⇒ worker's env capacity. Rides heartbeat replies.
     desired_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Self-signed root CA (PEM) the worker uploaded at register time; aggregated
+    # into /api/receivers/ca-bundle so receivers can pin trust without skip_verify.
+    # NULL for workers without a self-signed front (publicly-trusted or HTTP).
+    ca_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Receiver(Base):

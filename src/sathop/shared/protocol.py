@@ -53,6 +53,10 @@ class WorkerRegister(BaseModel):
     version: str = ""
     capacity: int = 20
     public_url: str | None = None
+    # Self-signed root CA (PEM) the worker is fronted by — uploaded so the
+    # orchestrator can hand it to receivers via /api/receivers/ca-bundle. None
+    # for workers behind a publicly-trusted cert (Let's Encrypt) or plain HTTP.
+    ca_pem: str | None = None
 
 
 class Credential(BaseModel):

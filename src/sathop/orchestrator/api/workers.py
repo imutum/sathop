@@ -137,7 +137,11 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
     w = await s.get(Worker, req.worker_id)
     if w is None:
         w = Worker(
-            worker_id=req.worker_id, version=req.version, capacity=req.capacity, public_url=req.public_url
+            worker_id=req.worker_id,
+            version=req.version,
+            capacity=req.capacity,
+            public_url=req.public_url,
+            ca_pem=req.ca_pem,
         )
         s.add(w)
         await log(s, req.worker_id, f"worker registered (cap={req.capacity})")
@@ -145,6 +149,11 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
         w.version = req.version
         w.capacity = req.capacity
         w.public_url = req.public_url
+        # Update CA only when the worker provides one — preserves a previously
+        # registered CA across restarts without it (e.g. user temporarily ran
+        # the worker without the caddy_data mount).
+        if req.ca_pem is not None:
+            w.ca_pem = req.ca_pem
         w.last_seen = utcnow()
     await s.commit()
     publish({"scope": "workers"})

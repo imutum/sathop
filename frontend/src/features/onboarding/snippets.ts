@@ -46,6 +46,11 @@ function mountSrc(p: Platform, hostDir: string): string {
 
 // ─── Receiver ──────────────────────────────────────────────────────────
 
+// strict      = system CAs (publicly-trusted certs only)
+// trust-orch  = fetch orchestrator-aggregated worker CA bundle, verify against it
+// insecure    = skip TLS verification entirely (escape hatch)
+export type TlsMode = "strict" | "trust-orch" | "insecure";
+
 export type ReceiverConfig = {
   receiverId: string;
   token: string;
@@ -54,7 +59,7 @@ export type ReceiverConfig = {
   platform: Platform;
   concurrent: number;
   poll: number;
-  tlsVerify: boolean;
+  tlsMode: TlsMode;
 };
 
 function receiverEnv(cfg: ReceiverConfig, sathopUrl: string): Array<[string, string]> {
@@ -64,7 +69,8 @@ function receiverEnv(cfg: ReceiverConfig, sathopUrl: string): Array<[string, str
   ];
   if (cfg.concurrent !== 4) out.push(["SATHOP_CONCURRENT_PULLS", String(cfg.concurrent)]);
   if (cfg.poll !== 10) out.push(["SATHOP_POLL_INTERVAL", String(cfg.poll)]);
-  if (!cfg.tlsVerify) out.push(["SATHOP_TLS_VERIFY", "false"]);
+  if (cfg.tlsMode === "insecure") out.push(["SATHOP_TLS_VERIFY", "false"]);
+  if (cfg.tlsMode === "trust-orch") out.push(["SATHOP_TLS_TRUST_ORCH", "true"]);
   return out;
 }
 
@@ -110,7 +116,8 @@ export function receiverUvx(cfg: ReceiverConfig): string {
   ];
   if (cfg.concurrent !== 4) lines.push(`--concurrent ${cfg.concurrent}`);
   if (cfg.poll !== 10) lines.push(`--poll ${cfg.poll}`);
-  if (!cfg.tlsVerify) lines.push("--insecure-tls");
+  if (cfg.tlsMode === "trust-orch") lines.push("--trust-orch-ca");
+  if (cfg.tlsMode === "insecure") lines.push("--insecure-tls");
   return joinDockerArgs(lines, cfg.platform);
 }
 
@@ -174,14 +181,23 @@ function workerEnv(cfg: WorkerConfig, sathopUrl: string): Array<[string, string]
 
 export function workerDockerRun(cfg: WorkerConfig): string {
   const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
+  // selfsigned mode: worker reads Caddy's root CA from a shared volume and
+  // uploads at register time, so receivers can pin trust via /api/receivers/ca-bundle.
+  // Caddy's pki/ dir is 700 (protects CA private key) — worker must be root to
+  // descend into it. Other modes can stay as the host user since worker /app/data
+  // is internal cache, not user-facing output.
+  const caddyDataMount =
+    cfg.exposeMode === "selfsigned" ? ["-v caddy_data:/caddy-data:ro"] : [];
+  const userLines = cfg.exposeMode === "selfsigned" ? [] : userFlag(cfg.platform);
   const workerLines: string[] = [
     "docker run -d",
     "--name sathop-worker",
     "--restart unless-stopped",
-    ...userFlag(cfg.platform),
+    ...userLines,
     ...workerEnv(cfg, sathopUrl).map(([k, v]) => `-e ${k}="${v}"`),
     `-p ${cfg.storagePort}:${cfg.storagePort}`,
     `-v ${mountSrc(cfg.platform, cfg.dataDir)}:/app/data`,
+    ...caddyDataMount,
     WORKER_IMAGE,
   ];
   const worker = "# --- Worker ---\n" + joinDockerArgs(workerLines, cfg.platform);
@@ -245,12 +261,21 @@ https://${ip} {
 
 export function workerDockerCompose(cfg: WorkerConfig): string {
   const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
-  const userLine = cfg.platform === "linux" ? '    user: "${UID:-1000}:${GID:-1000}"\n' : "";
+  // selfsigned mode: worker stays root to read Caddy's 700-mode pki dir; other
+  // modes keep host UID for friendlier file ownership on bind-mounted ./data.
+  const userLine =
+    cfg.platform === "linux" && cfg.exposeMode !== "selfsigned"
+      ? '    user: "${UID:-1000}:${GID:-1000}"\n'
+      : "";
   const envLines = workerEnv(cfg, sathopUrl)
     .map(([k, v]) => `      ${k}: "${v}"`)
     .join("\n");
   const portLine = `    ports:\n      - "${cfg.storagePort}:${cfg.storagePort}"\n`;
 
+  // selfsigned mode: worker mounts caddy_data:ro to read Caddy's root CA and
+  // upload it on register, so receivers can pin trust via the orchestrator.
+  const caddyDataVol =
+    cfg.exposeMode === "selfsigned" ? "      - caddy_data:/caddy-data:ro\n" : "";
   let body = `services:
   worker:
     image: ${WORKER_IMAGE}
@@ -259,7 +284,7 @@ ${userLine}    environment:
 ${envLines}
 ${cfg.exposeMode === "direct" ? portLine : ""}    volumes:
       - ${cfg.dataDir}:/app/data
-`;
+${caddyDataVol}`;
 
   if (cfg.exposeMode === "caddy") {
     const domain = cfg.domain.trim() || "your-domain.example.com";

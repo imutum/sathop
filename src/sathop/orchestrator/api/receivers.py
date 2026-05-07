@@ -1,8 +1,9 @@
-"""Receiver-facing endpoints: register, heartbeat, pull, ack."""
+"""Receiver-facing endpoints: register, heartbeat, pull, ack, ca-bundle."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,7 @@ from sathop.shared.protocol import (
 )
 
 from ..config import require_token, settings
-from ..db import Batch, Granule, GranuleObject, Receiver, session, utcnow
+from ..db import Batch, Granule, GranuleObject, Receiver, Worker, session, utcnow
 from ..pubsub import log_event as log
 from ..pubsub import publish
 
@@ -155,6 +156,21 @@ async def set_enabled(
     await s.commit()
     publish({"scope": "receivers"})
     return {"ok": True, "enabled": enabled}
+
+
+@router.get("/ca-bundle")
+async def ca_bundle(s: AsyncSession = Depends(session)) -> Response:
+    """Concatenate every registered worker's self-signed root CA into a single
+    PEM bundle. Receiver writes this to a local file at startup and points
+    httpx at it (verify=path), giving precise trust without skip_verify.
+
+    Empty bundle (no workers uploaded a CA) returns 204 — receiver should treat
+    that as "no orchestrator-managed trust available, fall back to system CAs"."""
+    rows = (await s.execute(select(Worker.ca_pem).where(Worker.ca_pem.is_not(None)))).scalars().all()
+    pems = [p.strip() for p in rows if p and p.strip()]
+    if not pems:
+        return Response(status_code=204)
+    return PlainTextResponse("\n".join(pems) + "\n")
 
 
 @router.delete("/{receiver_id}")

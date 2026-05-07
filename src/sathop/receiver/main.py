@@ -92,11 +92,16 @@ class Settings:
     poll_interval: int
     concurrent_pulls: int
     platform: Literal["linux", "windows"]
-    # False ⇒ skip TLS cert verification when pulling from worker presigned URLs.
-    # Use when worker is fronted by a self-signed IP cert (Caddy `tls internal`).
-    # Worker identity is still authenticated via the bearer token; this flag only
-    # disables transport-layer cert validation, not auth.
+    # False ⇒ skip TLS cert verification entirely (insecure escape hatch).
+    # True (default) ⇒ verify; if `tls_trust_orch` is also True, fetch the
+    # orchestrator's aggregated worker-CA bundle at startup and verify against
+    # it (precise trust without skip_verify). If False — system CA bundle only,
+    # which fails for self-signed worker certs.
     tls_verify: bool = True
+    # When True (and tls_verify True), download the orchestrator-aggregated
+    # worker CA bundle at startup → use as httpx verify path. Fallback to system
+    # CAs if the orchestrator returns 204 (no workers have uploaded a CA).
+    tls_trust_orch: bool = False
 
 
 def _parse_bool(s: str, default: bool) -> bool:
@@ -114,10 +119,11 @@ def load() -> Settings:
         concurrent_pulls=int(os.getenv("SATHOP_CONCURRENT_PULLS", "4")),
         platform=cast(Literal["linux", "windows"], "windows" if sys.platform == "win32" else "linux"),
         tls_verify=_parse_bool(os.getenv("SATHOP_TLS_VERIFY", ""), True),
+        tls_trust_orch=_parse_bool(os.getenv("SATHOP_TLS_TRUST_ORCH", ""), False),
     )
 
 
-async def _pull_http(url: str, dest: Path, *, verify: bool = True) -> tuple[str, int]:
+async def _pull_http(url: str, dest: Path, *, verify: bool | str = True) -> tuple[str, int]:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     h = hashlib.sha256()
@@ -149,8 +155,38 @@ class Receiver:
         self.client = OrchestratorClient(s.orchestrator_url, s.token)
         self.stats = _PullStats()
         s.storage_dir.mkdir(parents=True, exist_ok=True)
+        # Resolved at run() start: bool (True/False) or path str pointing at an
+        # orchestrator-aggregated CA bundle. Passed verbatim to httpx verify=.
+        self._verify: bool | str = s.tls_verify
+
+    async def _resolve_trust(self) -> None:
+        """Wire up self._verify based on Settings. Called once at startup so the
+        download loop carries a stable value (no per-pull HTTPS to the
+        orchestrator)."""
+        if not self.s.tls_verify:
+            log.warning("TLS verification disabled (SATHOP_TLS_VERIFY=false)")
+            return
+        if not self.s.tls_trust_orch:
+            return
+        bundle_path = self.s.storage_dir / ".orch-ca-bundle.pem"
+        url = f"{self.s.orchestrator_url}/api/receivers/ca-bundle"
+        async with httpx.AsyncClient(
+            timeout=15.0, headers={"Authorization": f"Bearer {self.s.token}"}
+        ) as c:
+            r = await c.get(url)
+        if r.status_code == 204:
+            log.warning(
+                "orchestrator has no worker CAs to trust — falling back to system CAs"
+            )
+            return
+        r.raise_for_status()
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_text(r.text, encoding="utf-8")
+        self._verify = str(bundle_path)
+        log.info("trusting orchestrator-managed CA bundle at %s", bundle_path)
 
     async def run(self) -> None:
+        await self._resolve_trust()
         await self.client.register(
             ReceiverRegister(
                 receiver_id=self.s.receiver_id,
@@ -208,9 +244,7 @@ class Receiver:
             try:
                 dest = self.s.storage_dir / item.object_key
                 try:
-                    sha, size = await _pull_http(
-                        item.presigned_url, dest, verify=self.s.tls_verify
-                    )
+                    sha, size = await _pull_http(item.presigned_url, dest, verify=self._verify)
                     ok = sha == item.sha256 and size == item.size
                     if ok:
                         pulled_bytes = size
