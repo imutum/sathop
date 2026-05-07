@@ -362,14 +362,14 @@ class Worker:
             self.s.orchestrator_url,
             self.s.token,
         )
-        # Two-phase stage so heartbeat / UI can show "处理中 + 等 CPU 槽位"
-        # 拆分。DB state 仍然 PROCESSING — orchestrator 视角下 pending_processing
-        # 跟 processing 都是同一个 DB state，UI 上的细分纯靠 worker.stage。
+        # 等 CPU 槽位时 DB state 留在 DOWNLOADED（"待处理"）— 只有真正拿到
+        # process_sem、即将开跑时才报 PROCESSING（"处理中"）。这样耗时统计
+        # 里的 process 阶段反映实际处理时长，不把排队等待算进去。
         enter_stage("pending_processing")
-        await self._report_state(gid, GranuleState.PROCESSING)
         async with self._process_sem:
             exit_stage()
             enter_stage("processing")
+            await self._report_state(gid, GranuleState.PROCESSING)
             result = await asyncio.to_thread(
                 run_bundle,
                 handle,
