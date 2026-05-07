@@ -170,14 +170,10 @@ class Receiver:
             return
         bundle_path = self.s.storage_dir / ".orch-ca-bundle.pem"
         url = f"{self.s.orchestrator_url}/api/receivers/ca-bundle"
-        async with httpx.AsyncClient(
-            timeout=15.0, headers={"Authorization": f"Bearer {self.s.token}"}
-        ) as c:
+        async with httpx.AsyncClient(timeout=15.0, headers={"Authorization": f"Bearer {self.s.token}"}) as c:
             r = await c.get(url)
         if r.status_code == 204:
-            log.warning(
-                "orchestrator has no worker CAs to trust — falling back to system CAs"
-            )
+            log.warning("orchestrator has no worker CAs to trust — falling back to system CAs")
             return
         r.raise_for_status()
         bundle_path.parent.mkdir(parents=True, exist_ok=True)
