@@ -1,21 +1,32 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/Icon";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
 import ReceiverCard from "@/features/nodes/components/ReceiverCard.vue";
+import OnboardReceiverModal from "@/features/onboarding/components/OnboardReceiverModal.vue";
 
 const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
+const showOnboard = ref(false);
 </script>
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="接收端" description="拉取 Worker 已上传产物的下游消费者" />
+    <PageHeader title="接收端" description="拉取 Worker 已上传产物的下游消费者">
+      <template #actions>
+        <Button variant="default" class="gap-1.5" @click="showOnboard = true">
+          <Icon name="plus" :size="13" />
+          接入接收端
+        </Button>
+      </template>
+    </PageHeader>
 
     <QueryState :query="receivers">
       <template #loading>
@@ -36,9 +47,16 @@ const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
           <CardContent class="pt-6">
             <EmptyState
               title="暂无已注册的接收端"
-              description="启动 receiver 容器后会自动出现在此。"
+              description="点下方按钮生成接入命令，复制到目标机器执行即可。"
               illustration="inbox"
-            />
+            >
+              <template #action>
+                <Button variant="default" class="gap-1.5" @click="showOnboard = true">
+                  <Icon name="plus" :size="13" />
+                  接入接收端
+                </Button>
+              </template>
+            </EmptyState>
           </CardContent>
         </Card>
       </template>
@@ -48,5 +66,7 @@ const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
         </div>
       </template>
     </QueryState>
+
+    <OnboardReceiverModal v-if="showOnboard" @close="showOnboard = false" />
   </div>
 </template>

@@ -44,6 +44,7 @@ sathop-receiver        = "sathop.receiver.main:run"
 sathop-validate-bundle = "sathop.cli.validate_bundle:main"
 sathop-upload-bundle   = "sathop.cli.upload_bundle:main"
 sathop-reconcile       = "sathop.cli.reconcile:main"
+sathop-pull            = "sathop.cli.pull:main"
 
 [dependency-groups]
 dev = [
