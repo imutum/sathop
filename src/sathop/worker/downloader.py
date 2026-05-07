@@ -104,12 +104,12 @@ class HttpDownloader:
         if existing:
             headers["Range"] = f"bytes={existing}-"
 
-        # read=120s acts as an inter-byte stall watchdog: if the upstream stops
-        # delivering bytes for 2 min the chunk read raises ReadTimeout and the
-        # whole granule fails fast → orchestrator re-leases it instead of
-        # blocking the download semaphore for 10 minutes on a wedged peer.
+        # read=30s is per-chunk inter-byte timeout, not total download cap —
+        # as long as the server keeps delivering bytes the timer resets each
+        # chunk, so big files still finish. 30s without any byte ⇒ fail fast,
+        # orchestrator re-leases instead of holding the download semaphore.
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, read=120.0),
+            timeout=httpx.Timeout(30.0, read=30.0),
             follow_redirects=True,
             auth=x_auth,
         ) as c:
