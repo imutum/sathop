@@ -118,8 +118,18 @@ def load(
     return LocalStorage(root=storage_root, public_base_url=public_base_url)
 
 
-async def serve_static(root: Path, port: int) -> None:
-    """Serve `root` as read-only HTTP. Only used with LocalStorage."""
+async def serve_static(
+    root: Path,
+    port: int,
+    *,
+    tls_cert: Path | None = None,
+    tls_key: Path | None = None,
+) -> None:
+    """Serve `root` as read-only static files. Used with LocalStorage only.
+
+    When `tls_cert` and `tls_key` are both given, uvicorn serves HTTPS with
+    them; otherwise plain HTTP. The caller decides based on whether
+    SATHOP_PUBLIC_URL starts with `https://`."""
     import uvicorn
     from fastapi import FastAPI
     from fastapi.staticfiles import StaticFiles
@@ -128,5 +138,13 @@ async def serve_static(root: Path, port: int) -> None:
     root.mkdir(parents=True, exist_ok=True)
     app.mount("/", StaticFiles(directory=str(root)), name="storage")
 
-    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
+    kwargs: dict[str, object] = {
+        "host": "0.0.0.0",
+        "port": port,
+        "log_level": "warning",
+    }
+    if tls_cert and tls_key:
+        kwargs["ssl_certfile"] = str(tls_cert)
+        kwargs["ssl_keyfile"] = str(tls_key)
+    config = uvicorn.Config(app, **kwargs)
     await uvicorn.Server(config).serve()

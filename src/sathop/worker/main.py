@@ -33,7 +33,7 @@ from sathop.shared.protocol import (
     WorkerRegister,
 )
 
-from . import bundle, downloader, storage
+from . import bundle, downloader, storage, tls
 from .agent import OrchestratorClient
 from .config import Settings, load
 from .processor import ProcessResult, run_bundle
@@ -83,29 +83,24 @@ class Worker:
         for p in (s.work_root, s.bundle_cache, s.venv_cache, s.shared_cache, s.storage_root):
             p.mkdir(parents=True, exist_ok=True)
 
-    async def _read_caddy_ca(self, *, retries: int = 10, interval_sec: float = 3.0) -> str | None:
-        """If a Caddy self-signed CA exists at s.caddy_ca_path, read & return its
-        PEM. Caddy writes this only after first cert issuance, so retry briefly
-        on first boot. Returns None when the path doesn't exist after all
-        retries (worker without a Caddy front, or non-selfsigned Caddy mode)."""
-        path = self.s.caddy_ca_path
-        for attempt in range(retries):
-            if path.is_file():
-                try:
-                    pem = path.read_text(encoding="utf-8").strip()
-                except OSError as e:
-                    log.warning("read caddy CA at %s failed: %s", path, e)
-                    return None
-                if pem:
-                    log.info("loaded self-signed CA from %s (%d bytes)", path, len(pem))
-                    return pem
-            if attempt < retries - 1:
-                await asyncio.sleep(interval_sec)
-        log.info("no caddy CA at %s — registering without ca_pem", path)
-        return None
+    def _ensure_tls(self) -> str | None:
+        """SATHOP_PUBLIC_URL https? ⇒ generate (or reuse) a self-signed cert
+        covering its host and return the PEM for upload as ca_pem. Plain http
+        ⇒ skip TLS entirely. Operator can pre-place a publicly-trusted cert
+        at the same paths to bypass self-signing."""
+        if not self.s.public_url.lower().startswith("https://"):
+            return None
+        pem = tls.ensure_self_signed(self.s.public_url, self.s.tls_cert_path, self.s.tls_key_path)
+        log.info(
+            "TLS cert ready at %s (host=%s, %d bytes PEM)",
+            self.s.tls_cert_path,
+            self.s.public_url,
+            len(pem),
+        )
+        return pem
 
     async def run(self) -> None:
-        ca_pem = await self._read_caddy_ca()
+        ca_pem = self._ensure_tls()
         await self.client.register(
             WorkerRegister(
                 worker_id=self.s.worker_id,
@@ -116,10 +111,11 @@ class Worker:
             )
         )
         log.info(
-            "registered as %s (downloader=%s, storage=%s)",
+            "registered as %s (downloader=%s, storage=%s, tls=%s)",
             self.s.worker_id,
             type(self.downloader).__name__,
             type(self.storage).__name__,
+            "on" if ca_pem else "off",
         )
 
         async with asyncio.TaskGroup() as tg:
@@ -129,7 +125,14 @@ class Worker:
             tg.create_task(self._backpressure_loop())
             tg.create_task(self.progress.serve())
             if getattr(self.storage, "needs_static_server", False):
-                tg.create_task(storage.serve_static(self.s.storage_root, self.s.storage_port))
+                tg.create_task(
+                    storage.serve_static(
+                        self.s.storage_root,
+                        self.s.storage_port,
+                        tls_cert=self.s.tls_cert_path if ca_pem else None,
+                        tls_key=self.s.tls_key_path if ca_pem else None,
+                    )
+                )
 
     async def _heartbeat_loop(self) -> None:
         while True:

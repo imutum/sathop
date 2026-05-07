@@ -8,6 +8,8 @@ export type Platform = "linux" | "windows";
 
 export const RECEIVER_IMAGE = "ghcr.io/imutum/sathop/receiver:latest";
 export const WORKER_IMAGE = "ghcr.io/imutum/sathop/worker:latest";
+// Caddy is still used for caddy mode (public domain + ACME). selfsigned mode
+// no longer needs caddy — worker handles internal TLS itself via cryptography.
 export const CADDY_IMAGE = "caddy:2-alpine";
 export const DEFAULT_GIT_REPO = "https://github.com/imutum/sathop.git";
 
@@ -179,112 +181,69 @@ function workerEnv(cfg: WorkerConfig, sathopUrl: string): Array<[string, string]
   return out;
 }
 
+// Host-side port the worker listens on. selfsigned mode flips to 443 so
+// SATHOP_PUBLIC_URL=https://<ip> works without :port in the URL; other modes
+// keep the conventional 9000.
+function hostPortFor(cfg: WorkerConfig): number {
+  return cfg.exposeMode === "selfsigned" ? 443 : cfg.storagePort;
+}
+
 export function workerDockerRun(cfg: WorkerConfig): string {
   const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
-  // selfsigned mode: worker reads Caddy's root CA from a shared volume and
-  // uploads at register time, so receivers can pin trust via /api/receivers/ca-bundle.
-  // Caddy's pki/ dir is 700 (protects CA private key) — worker must be root to
-  // descend into it. Other modes can stay as the host user since worker /app/data
-  // is internal cache, not user-facing output.
-  const caddyDataMount =
-    cfg.exposeMode === "selfsigned" ? ["-v caddy_data:/caddy-data:ro"] : [];
-  const userLines = cfg.exposeMode === "selfsigned" ? [] : userFlag(cfg.platform);
   const workerLines: string[] = [
     "docker run -d",
     "--name sathop-worker",
     "--restart unless-stopped",
-    ...userLines,
+    ...userFlag(cfg.platform),
     ...workerEnv(cfg, sathopUrl).map(([k, v]) => `-e ${k}="${v}"`),
-    `-p ${cfg.storagePort}:${cfg.storagePort}`,
+    `-p ${hostPortFor(cfg)}:${cfg.storagePort}`,
     `-v ${mountSrc(cfg.platform, cfg.dataDir)}:/app/data`,
-    ...caddyDataMount,
     WORKER_IMAGE,
   ];
   const worker = "# --- Worker ---\n" + joinDockerArgs(workerLines, cfg.platform);
 
-  if (cfg.exposeMode === "direct") return worker;
+  if (cfg.exposeMode !== "caddy") return worker;
 
-  if (cfg.exposeMode === "caddy") {
-    const domain = cfg.domain.trim() || "your-domain.example.com";
-    const caddyLines: string[] = [
-      "docker run -d",
-      "--name sathop-caddy",
-      "--restart unless-stopped",
-      "--add-host=host.docker.internal:host-gateway",
-      "-p 80:80 -p 443:443",
-      "-v caddy_data:/data",
-      "-v caddy_config:/config",
-      CADDY_IMAGE,
-      "caddy reverse-proxy",
-      `--from ${domain}`,
-      `--to host.docker.internal:${cfg.storagePort}`,
-    ];
-    const caddy =
-      "# --- Caddy 反向代理 (HTTPS 自动签发 + 续签) ---\n" + joinDockerArgs(caddyLines, cfg.platform);
-    return `${worker}\n\n${caddy}`;
-  }
-
-  // selfsigned: Caddy CLI does not support `tls internal`; need a Caddyfile.
-  const ip = cfg.ipAddress.trim() || "192.168.1.50";
-  const caddyfileBody = `{
-    auto_https disable_redirects
-}
-
-https://${ip} {
-    tls internal
-    reverse_proxy host.docker.internal:${cfg.storagePort}
-}`;
-  const heredoc =
-    cfg.platform === "linux"
-      ? `cat > Caddyfile <<'EOF'\n${caddyfileBody}\nEOF`
-      : `@'\n${caddyfileBody}\n'@ | Set-Content -Encoding utf8 Caddyfile`;
-  const caddyVolume =
-    cfg.platform === "linux"
-      ? `-v "$(pwd)/Caddyfile:/etc/caddy/Caddyfile:ro"`
-      : `-v "\${PWD}/Caddyfile:/etc/caddy/Caddyfile:ro"`;
+  // caddy mode: public domain + ACME. selfsigned and direct modes don't
+  // need an extra container — selfsigned is handled by worker's built-in
+  // Python self-signed cert; direct is plain HTTP.
+  const domain = cfg.domain.trim() || "your-domain.example.com";
   const caddyLines: string[] = [
     "docker run -d",
     "--name sathop-caddy",
     "--restart unless-stopped",
     "--add-host=host.docker.internal:host-gateway",
-    "-p 443:443",
-    caddyVolume,
+    "-p 80:80 -p 443:443",
     "-v caddy_data:/data",
     "-v caddy_config:/config",
     CADDY_IMAGE,
+    "caddy reverse-proxy",
+    `--from ${domain}`,
+    `--to host.docker.internal:${cfg.storagePort}`,
   ];
-  const caddyfileSection = "# --- Caddyfile (写入当前目录) ---\n" + heredoc;
-  const caddyContainer =
-    "# --- Caddy 反向代理 (HTTPS 自签 IP 证书) ---\n" + joinDockerArgs(caddyLines, cfg.platform);
-  return `${worker}\n\n${caddyfileSection}\n\n${caddyContainer}`;
+  const caddy =
+    "# --- Caddy 反向代理 (HTTPS 自动签发 + 续签) ---\n" + joinDockerArgs(caddyLines, cfg.platform);
+  return `${worker}\n\n${caddy}`;
 }
 
 export function workerDockerCompose(cfg: WorkerConfig): string {
   const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
-  // selfsigned mode: worker stays root to read Caddy's 700-mode pki dir; other
-  // modes keep host UID for friendlier file ownership on bind-mounted ./data.
   const userLine =
-    cfg.platform === "linux" && cfg.exposeMode !== "selfsigned"
-      ? '    user: "${UID:-1000}:${GID:-1000}"\n'
-      : "";
+    cfg.platform === "linux" ? '    user: "${UID:-1000}:${GID:-1000}"\n' : "";
   const envLines = workerEnv(cfg, sathopUrl)
     .map(([k, v]) => `      ${k}: "${v}"`)
     .join("\n");
-  const portLine = `    ports:\n      - "${cfg.storagePort}:${cfg.storagePort}"\n`;
+  const portLine = `    ports:\n      - "${hostPortFor(cfg)}:${cfg.storagePort}"\n`;
 
-  // selfsigned mode: worker mounts caddy_data:ro to read Caddy's root CA and
-  // upload it on register, so receivers can pin trust via the orchestrator.
-  const caddyDataVol =
-    cfg.exposeMode === "selfsigned" ? "      - caddy_data:/caddy-data:ro\n" : "";
   let body = `services:
   worker:
     image: ${WORKER_IMAGE}
     restart: unless-stopped
 ${userLine}    environment:
 ${envLines}
-${cfg.exposeMode === "direct" ? portLine : ""}    volumes:
+${cfg.exposeMode !== "caddy" ? portLine : ""}    volumes:
       - ${cfg.dataDir}:/app/data
-${caddyDataVol}`;
+`;
 
   if (cfg.exposeMode === "caddy") {
     const domain = cfg.domain.trim() || "your-domain.example.com";
@@ -301,40 +260,6 @@ ${caddyDataVol}`;
       - caddy_config:/config
     depends_on:
       - worker
-
-volumes:
-  caddy_data:
-  caddy_config:
-`;
-  } else if (cfg.exposeMode === "selfsigned") {
-    const ip = cfg.ipAddress.trim() || "192.168.1.50";
-    body += `
-  caddy:
-    image: ${CADDY_IMAGE}
-    restart: unless-stopped
-    ports:
-      - "443:443"
-    configs:
-      - source: caddyfile
-        target: /etc/caddy/Caddyfile
-    volumes:
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - worker
-
-# 内联 Caddyfile 需要 docker compose v2.23+；旧版改为 bind-mount 同目录 ./Caddyfile
-configs:
-  caddyfile:
-    content: |
-      {
-          auto_https disable_redirects
-      }
-
-      https://${ip} {
-          tls internal
-          reverse_proxy worker:${cfg.storagePort}
-      }
 
 volumes:
   caddy_data:

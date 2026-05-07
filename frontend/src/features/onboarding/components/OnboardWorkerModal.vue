@@ -177,7 +177,7 @@ async function copySnippet() {
           class="font-mono text-xs"
         />
         <p class="mt-1 text-2xs text-muted-foreground">
-          Caddy 用 <code class="font-mono">tls internal</code> 自动签发 IP 证书，无需买/配域名。Public URL =
+          Worker 启动时自动生成 IP SAN 自签证书，直接监听 :443，无需 Caddy/域名。Public URL =
           <code class="font-mono">{{ computedPublicUrl }}</code>
         </p>
       </div>
@@ -273,14 +273,14 @@ async function copySnippet() {
       <Alert>
         <AlertDescription class="space-y-1 text-2xs">
           <div class="text-xs font-medium text-foreground">自签 IP HTTPS 模式工作原理：</div>
-          <div>1. Caddy 自动签发 IP 证书（路径 <code class="font-mono">caddy_data:/data/caddy/pki/</code>），自动续签</div>
-          <div>2. Worker 共享挂载 <code class="font-mono">caddy_data:ro</code>，启动时读取根 CA 并上报到调度中心</div>
+          <div>1. Worker 启动时用 Python <code class="font-mono">cryptography</code> 生成 IP SAN 自签证书（10 年有效期，持久化在 <code class="font-mono">data/tls/</code>）</div>
+          <div>2. uvicorn 直接以该证书监听 :443，注册时把证书 PEM 当 ca_pem 上报到调度中心</div>
           <div>3. 接收端启动时从调度中心拉取 CA 清单 → 精确验证 Worker 身份（中间人没有 worker 私钥就过不了 TLS）</div>
           <div class="font-medium text-foreground">
             ⚠️ 接收端 TLS 信任模式必须选「信任调度中心管理的 CA」，否则会握手失败
           </div>
           <div class="text-muted-foreground">
-            注：本模式下 worker 容器需以 root 运行（读 Caddy 700-mode pki 目录）；worker 数据是内部缓存，不影响接收端最终产物
+            零额外依赖：无需 Caddy、无需 Caddyfile、无需域名。换 Worker IP 时删掉 <code class="font-mono">data/tls/</code> 触发重新签发即可
           </div>
         </AlertDescription>
       </Alert>
