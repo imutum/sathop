@@ -23,7 +23,6 @@ class Settings:
     lease_poll_interval: int
     download_concurrency: int
     process_concurrency: int
-    pipeline_pressure_mult: int
 
     # Production-mode toggles. Empty = MVP fallback (httpx / local FS static server).
     aria2_rpc: str
@@ -55,19 +54,19 @@ class Settings:
 
 def load() -> Settings:
     orchestrator_url, token = resolve_orch()
-    cpus = os.cpu_count() or 1
-    mult_default = max(1, int(os.getenv("SATHOP_PIPELINE_PRESSURE_MULT", "3")))
-    # Default capacity matches worker's internal pipeline ceiling
-    # (process_concurrency × pipeline_pressure_mult). The old fixed 20 made
-    # 8-vCPU workers request 20 leases at once, but the process semaphore
-    # then only ran 8 in parallel — the surplus 12 sat queued, and on a
-    # batch cancel the operator had to wait for ghost work on all 20 to
-    # clear. Aligning capacity with ceiling keeps the queue tight.
+    download_conc = max(1, int(os.getenv("SATHOP_DOWNLOAD_CONCURRENCY", "2")))
+    process_conc = max(1, int(os.getenv("SATHOP_PROCESS_CONCURRENCY", str(os.cpu_count() or 1))))
+    # In-flight ceiling = download_sem + process_sem (the two physical bottlenecks
+    # in the pipeline). Lease capacity defaults to the same number — pulling more
+    # would just queue work behind the semaphores, fragmenting visibility ("待下载
+    # 10 / 下载中 2" pattern) and starving other workers in a multi-node setup.
+    # Operator widens download_concurrency or process_concurrency to scale; no
+    # separate "pipeline depth multiplier" knob to misconfigure.
     return Settings(
         worker_id=os.environ["SATHOP_WORKER_ID"],
         orchestrator_url=orchestrator_url,
         token=token,
-        capacity=max(1, int(os.getenv("SATHOP_CAPACITY", str(cpus * mult_default)))),
+        capacity=max(1, int(os.getenv("SATHOP_CAPACITY", str(download_conc + process_conc)))),
         public_url=os.environ["SATHOP_PUBLIC_URL"].rstrip("/"),
         work_root=Path(os.getenv("SATHOP_WORK_ROOT", "./data/work")),
         bundle_cache=Path(os.getenv("SATHOP_BUNDLE_CACHE", "./data/bundles")),
@@ -78,13 +77,8 @@ def load() -> Settings:
         progress_port=int(os.getenv("SATHOP_PROGRESS_PORT", "9002")),
         heartbeat_interval=int(os.getenv("SATHOP_HEARTBEAT", "15")),
         lease_poll_interval=int(os.getenv("SATHOP_LEASE_POLL", "10")),
-        download_concurrency=max(1, int(os.getenv("SATHOP_DOWNLOAD_CONCURRENCY", "2"))),
-        # process 是 CPU 密集型 — 默认 = vCPU 数。让多个粒并行 process 只会
-        # 线性拉长每个粒的耗时（实测 6 并发下单粒 6 min，限到 vCPU 后 ~1 min）。
-        process_concurrency=max(1, int(os.getenv("SATHOP_PROCESS_CONCURRENCY", str(os.cpu_count() or 1)))),
-        # in-flight 上限相对 process_concurrency 的倍数。orchestrator 可通过
-        # PUT /workers/{id}/pipeline-mult 下发覆盖（worker 取 min(env, desired)）。
-        pipeline_pressure_mult=max(1, int(os.getenv("SATHOP_PIPELINE_PRESSURE_MULT", "3"))),
+        download_concurrency=download_conc,
+        process_concurrency=process_conc,
         aria2_rpc=os.getenv("SATHOP_ARIA2_RPC", ""),
         aria2_secret=os.getenv("SATHOP_ARIA2_SECRET", ""),
         minio_access_key=os.getenv("SATHOP_MINIO_ACCESS_KEY", ""),

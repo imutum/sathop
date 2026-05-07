@@ -123,48 +123,6 @@ function onKey(e: KeyboardEvent) {
   if (e.key === "Enter") submitDraft();
   if (e.key === "Escape") draft.value = null;
 }
-
-// Pipeline-mult editor: 同款 inline 编辑 (draft=null 显示, string 编辑)。
-const multDraft = ref<string | null>(null);
-const multDraftInput = ref<InstanceType<typeof TextInput> | null>(null);
-watch(multDraft, (v) => {
-  if (v !== null) void nextTick(() => multDraftInput.value?.focus());
-});
-const setMult = useMutation({
-  mutationFn: (n: number | null) => API.setWorkerPipelineMult(props.worker.worker_id, n),
-  onSuccess: (_r, n) => {
-    qc.invalidateQueries({ queryKey: ["workers"] });
-    toast.success(n == null ? "已清除反压倍数" : `已设反压倍数 ${n}× CPU`);
-    multDraft.value = null;
-  },
-  onError: (e: Error) => toast.error(`设置失败：${e.message}`),
-});
-
-const effectiveMult = computed(() => props.worker.desired_pipeline_mult ?? null);
-
-function startEditMult() {
-  multDraft.value =
-    props.worker.desired_pipeline_mult != null ? String(props.worker.desired_pipeline_mult) : "";
-}
-
-function submitMultDraft() {
-  const t = (multDraft.value ?? "").trim();
-  if (t === "") {
-    setMult.mutate(null);
-    return;
-  }
-  const n = Number(t);
-  if (!Number.isInteger(n) || n < 1 || n > 16) {
-    toast.error("反压倍数必须是 1–16 的整数");
-    return;
-  }
-  setMult.mutate(n);
-}
-
-function onMultKey(e: KeyboardEvent) {
-  if (e.key === "Enter") submitMultDraft();
-  if (e.key === "Escape") multDraft.value = null;
-}
 </script>
 
 <template>
@@ -322,53 +280,6 @@ function onMultKey(e: KeyboardEvent) {
                 class="rounded-md border border-border bg-background px-1.5 py-0.5 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
               >
                 {{ worker.desired_capacity != null ? "改" : "限流" }}
-              </button>
-            </HintTip>
-
-            <HintTip text="动态反压上限 = N × CPU 核数 — 智能限流的倍数">
-              <span class="ml-1 border-l border-border/60 pl-2">
-                反压 {{ effectiveMult ?? "默认" }}<span v-if="effectiveMult != null">×</span>
-              </span>
-            </HintTip>
-            <template v-if="multDraft !== null">
-              <TextInput
-                ref="multDraftInput"
-                type="number"
-                :min="1"
-                :max="16"
-                :model-value="multDraft"
-                @update:model-value="multDraft = $event"
-                @keydown="onMultKey"
-                :disabled="setMult.isPending.value"
-                placeholder="env"
-                class="w-12 text-2xs tabular-nums"
-              />
-              <button
-                @click="submitMultDraft"
-                :disabled="setMult.isPending.value"
-                class="rounded-md bg-primary/15 px-1.5 py-0.5 text-mini font-medium text-primary hover:bg-primary/25 disabled:opacity-50"
-              >
-                保存
-              </button>
-              <button
-                @click="multDraft = null"
-                :disabled="setMult.isPending.value"
-                class="text-mini text-muted-foreground hover:text-foreground"
-              >
-                取消
-              </button>
-            </template>
-            <HintTip
-              v-else
-              :text="effectiveMult != null
-                ? '修改 in-flight 反压倍数（撑到 N×CPU 即停 lease，让任务流向其它 worker）'
-                : '智能限流：按 CPU 核数动态收紧 in-flight 上限，热扩容时让新机器更快接到任务'"
-            >
-              <button
-                @click="startEditMult"
-                class="rounded-md border border-border bg-background px-1.5 py-0.5 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
-              >
-                {{ effectiveMult != null ? "改" : "调" }}
               </button>
             </HintTip>
           </span>

@@ -87,9 +87,6 @@ class Worker:
         self._handlers: dict[str, asyncio.Task[None]] = {}
         # Updated from heartbeat replies; orchestrator may clamp below s.capacity.
         self._effective_capacity = s.capacity
-        # Same pattern for the in-flight pressure multiplier — orchestrator
-        # can dial it down via PUT /workers/{id}/pipeline-mult.
-        self._effective_pipeline_mult = s.pipeline_pressure_mult
         self.progress = ProgressServer(self.client, port=s.progress_port)
         for p in (s.work_root, s.bundle_cache, s.venv_cache, s.shared_cache, s.storage_root):
             p.mkdir(parents=True, exist_ok=True)
@@ -190,35 +187,20 @@ class Worker:
                         desired,
                     )
                     self._effective_capacity = new_eff
-                desired_mult = resp.desired_pipeline_mult
-                new_mult = (
-                    min(self.s.pipeline_pressure_mult, max(1, desired_mult))
-                    if desired_mult is not None
-                    else self.s.pipeline_pressure_mult
-                )
-                if new_mult != self._effective_pipeline_mult:
-                    log.info(
-                        "effective pipeline_mult %d → %d (env=%d, override=%s)",
-                        self._effective_pipeline_mult,
-                        new_mult,
-                        self.s.pipeline_pressure_mult,
-                        desired_mult,
-                    )
-                    self._effective_pipeline_mult = new_mult
             except Exception as e:
                 log.warning("heartbeat failed: %s", e)
             await asyncio.sleep(self.s.heartbeat_interval)
 
     async def _pipeline_loop(self) -> None:
         while True:
-            # In-flight 上限 = min(capacity, mult × CPU)。
-            # mult 默认 3 ("够吃但不撑死"经验值：1 倍在跑、1 倍 download buffer、
-            # 1 倍 process 待跑队列)，可由 SATHOP_PIPELINE_PRESSURE_MULT 改 env，
-            # 或 orchestrator 通过 PUT /workers/{id}/pipeline-mult 远程下发。
-            # 撑到上限就停 lease，让 orchestrator 把粒子派给别的 worker
-            # （热扩容时尤其重要）；sem 流出后再拉。
+            # In-flight 上限 = process_sem + download_sem（流水线里两个真实的
+            # 物理瓶颈：CPU 槽位 + 并发下载槽位）。多拉的 lease 只会卡在 sem
+            # 后面排队，把"待下载/待处理"虚高，看不出谁真在干活，也让别的
+            # worker 抢不到。要扩容就调 SATHOP_DOWNLOAD_CONCURRENCY 或
+            # SATHOP_PROCESS_CONCURRENCY，没有第二个"管道深度"开关好误配。
             ceiling = min(
-                self._effective_capacity, self.s.process_concurrency * self._effective_pipeline_mult
+                self._effective_capacity,
+                self.s.process_concurrency + self.s.download_concurrency,
             )
             free = ceiling - sum(self.stage.values())
             if free <= 0 or self._pause_lease:
