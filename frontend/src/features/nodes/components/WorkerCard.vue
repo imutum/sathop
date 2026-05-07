@@ -280,9 +280,8 @@ function onKey(e: KeyboardEvent) {
               :pending="lifecyclePending"
               @set-enabled="onSetEnabled"
               @forget="onForget"
-              :disable-confirm="`禁用 worker ${worker.worker_id}？\n\n已 lease 的任务继续完成；不会再领新任务。`"
               :forget-confirm="`从注册表中移除 ${worker.worker_id}？\n\n仅删除元数据；如果它仍持有任务会被服务端拒绝。`"
-              disable-title="禁用此节点（在手任务继续）"
+              disable-title="禁用此节点（在手任务继续，可点启用恢复）"
               forget-title="永久从注册表中删除（仅在已禁用且无任务时允许）"
             />
             <span>心跳 {{ fmtAge(worker.last_seen) }}</span>

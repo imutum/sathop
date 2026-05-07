@@ -119,9 +119,8 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
         :pending="pending"
         @set-enabled="onSetEnabled"
         @forget="onForget"
-        :disable-confirm="`禁用 receiver ${receiver.receiver_id}？\n\n已下载的对象可继续 ack；不会再被分到新对象。`"
         :forget-confirm="`从注册表中移除 ${receiver.receiver_id}？\n\n仅删除元数据；目标已绑定此接收端的批次将无法 pull。`"
-        disable-title="禁用此接收端"
+        disable-title="禁用此接收端（不再分到新对象，可点启用恢复）"
         forget-title="永久从注册表中删除（仅在已禁用时允许）"
       />
     </div>

@@ -4,7 +4,6 @@ import { requestConfirm } from "@/composables/useConfirm";
 const props = defineProps<{
   enabled: boolean;
   pending: boolean;
-  disableConfirm: string;
   forgetConfirm: string;
   disableTitle?: string;
   forgetTitle?: string;
@@ -15,21 +14,16 @@ const emit = defineEmits<{
   forget: [];
 }>();
 
-async function toggle() {
-  if (
-    props.enabled &&
-    !(await requestConfirm({
-      title: "禁用节点？",
-      description: props.disableConfirm,
-      confirmText: "禁用",
-      tone: "danger",
-    }))
-  ) {
-    return;
-  }
+// Disable / enable is a soft, reversible op (won't drop data, can be flipped
+// back instantly) — emit synchronously, no confirm dialog. Earlier we routed
+// it through requestConfirm; some browser extensions corrupt portal-rendered
+// dialogs and swallowed the promise, leaving the button "dead". Direct emit
+// removes that failure mode and matches the toned-down nature of the action.
+function toggle(): void {
   emit("setEnabled", !props.enabled);
 }
 
+// Forget is destructive (permanent registry removal) — keep the confirm.
 async function forget() {
   const ok = await requestConfirm({
     title: "移除节点？",
