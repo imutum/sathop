@@ -8,7 +8,8 @@ defineProps<{ collapsed?: boolean }>();
 
 const GITHUB_REPO = "imutum/sathop";
 const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
-const LATEST_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+const TAGS_API = `https://api.github.com/repos/${GITHUB_REPO}/tags?per_page=1`;
 
 // `vX.Y.Z` ⇒ [X, Y, Z]; loose so a `0.2.5` (no v) or `v0.2.5-rc1` (with suffix)
 // both parse to a sortable tuple. Pre-release suffix is stripped (treated as
@@ -34,15 +35,33 @@ const info = useQuery({
   staleTime: 60 * 60 * 1000,
 });
 
-// Direct fetch (not through `api()`) — GitHub's public Releases API doesn't
+// Direct fetch (not through `api()`) — GitHub's public REST API doesn't
 // want our Bearer header, and sending one would also leak the token if
 // somehow the URL got rewritten. 30-min staleTime keeps us well under
 // the 60-req/hr unauthenticated rate limit even with multiple tabs open.
+//
+// Two-step lookup: published Releases first; if the repo has no Release
+// (`/releases/latest` returns 404 — the common case for projects that only
+// push git tags), fall back to the latest tag. Other 4xx/5xx are surfaced
+// as errors so genuine outages still show "无法访问".
+const GH_HEADERS = { Accept: "application/vnd.github+json" } as const;
+
 async function fetchLatestRelease(): Promise<{ tag: string; htmlUrl: string }> {
-  const r = await fetch(LATEST_API, { headers: { Accept: "application/vnd.github+json" } });
-  if (!r.ok) throw new Error(`GitHub ${r.status}`);
-  const j = (await r.json()) as { tag_name?: string; html_url?: string };
-  return { tag: j.tag_name ?? "", htmlUrl: j.html_url ?? RELEASES_URL };
+  const releaseR = await fetch(LATEST_RELEASE_API, { headers: GH_HEADERS });
+  if (releaseR.ok) {
+    const j = (await releaseR.json()) as { tag_name?: string; html_url?: string };
+    return { tag: j.tag_name ?? "", htmlUrl: j.html_url ?? RELEASES_URL };
+  }
+  if (releaseR.status !== 404) throw new Error(`GitHub ${releaseR.status}`);
+
+  const tagsR = await fetch(TAGS_API, { headers: GH_HEADERS });
+  if (!tagsR.ok) throw new Error(`GitHub ${tagsR.status}`);
+  const tags = (await tagsR.json()) as Array<{ name?: string }>;
+  const name = Array.isArray(tags) && tags.length > 0 ? tags[0].name ?? "" : "";
+  return {
+    tag: name,
+    htmlUrl: name ? `https://github.com/${GITHUB_REPO}/releases/tag/${name}` : RELEASES_URL,
+  };
 }
 
 const latest = useQuery({
@@ -71,7 +90,10 @@ const statusLabel = computed(() => {
     case "loading":
       return "正在检查更新…";
     case "unknown":
-      return latest.isError.value ? "无法访问 GitHub（网络或限流）" : "版本信息缺失";
+      if (latest.isError.value) return "无法访问 GitHub（网络或限流）";
+      // releases/latest 404 + tags 空：仓库还没打过任何版本标签
+      if (!latestTag.value) return "仓库暂未发布版本";
+      return "版本信息缺失";
   }
   return "";
 });
