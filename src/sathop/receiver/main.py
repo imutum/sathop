@@ -23,6 +23,7 @@ from sathop.shared.config import resolve_orch
 from sathop.shared.http import make_orch_client
 from sathop.shared.protocol import (
     AckReport,
+    PullItem,
     PullRequest,
     PullResponse,
     ReceiverHeartbeat,
@@ -119,8 +120,10 @@ class Settings:
     # bandwidth across N flows, which is what bumps throughput on big files.
     # Set pull_segments=1 to force single-stream. Files smaller than the
     # threshold skip range entirely — handshake+coordination overhead dominates.
+    # 4 MB threshold catches typical satellite-product chunks that benefit
+    # from parallelism without paying range overhead on tiny config blobs.
     pull_segments: int = 4
-    pull_segment_min_bytes: int = 8 * 1024 * 1024  # 8 MB
+    pull_segment_min_bytes: int = 4 * 1024 * 1024  # 4 MB
 
 
 def _parse_bool(s: str, default: bool) -> bool:
@@ -153,12 +156,16 @@ def load() -> Settings:
         token=token,
         storage_dir=Path(os.environ["SATHOP_STORAGE_DIR"]),
         poll_interval=int(os.getenv("SATHOP_POLL_INTERVAL", "10")),
-        concurrent_pulls=int(os.getenv("SATHOP_CONCURRENT_PULLS", "4")),
+        # 16 was chosen because pipeline (producer + N workers) makes high N
+        # cheap — workers only run when there's something to do, idle workers
+        # cost ~0. The previous 4 was a reasonable default for the old
+        # gather-batched loop where a slow file genuinely stalled siblings.
+        concurrent_pulls=int(os.getenv("SATHOP_CONCURRENT_PULLS", "16")),
         platform=cast(Literal["linux", "windows"], "windows" if sys.platform == "win32" else "linux"),
         tls_verify=_parse_bool(os.getenv("SATHOP_TLS_VERIFY", ""), True),
         tls_trust_orch=_parse_bool(os.getenv("SATHOP_TLS_TRUST_ORCH", ""), True),
         pull_segments=int(os.getenv("SATHOP_PULL_SEGMENTS", "4")),
-        pull_segment_min_bytes=int(os.getenv("SATHOP_PULL_SEGMENT_MIN_BYTES", str(8 * 1024 * 1024))),
+        pull_segment_min_bytes=int(os.getenv("SATHOP_PULL_SEGMENT_MIN_BYTES", str(4 * 1024 * 1024))),
     )
 
 
@@ -296,16 +303,26 @@ class Receiver:
         # TLS sessions warm and let the OS skip TCP slow-start on each new
         # range request, which is doubly important for segmented downloads.
         self._pull_client: httpx.AsyncClient = self._build_pull_client()
+        # In-flight object_ids — the orchestrator's /pull endpoint re-offers
+        # any not-yet-acked object on every call (it has no notion of "this
+        # receiver already started fetching this"), so without dedup the
+        # producer would queue the same id again and double-download. set
+        # mutations are sync-no-await so single-threaded asyncio makes this
+        # race-free without a lock.
+        self._inflight: set[int] = set()
 
     def _build_pull_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, read=600.0),
             follow_redirects=True,
             verify=self._verify,
-            # Plenty of headroom: 32 concurrent_pulls × 8 segments = 256
-            # potential simultaneous connections; 200/50 keeps the pool from
-            # serializing range requests through a single keep-alive socket.
-            limits=httpx.Limits(max_connections=200, max_keepalive_connections=50),
+            # 16 concurrent_pulls × 4 segments = 64 simultaneous connections
+            # at peak, all to a single worker host in the worst case.
+            # max_keepalive=100 ensures the pool never thrashes on TLS
+            # re-handshake when a connection is reaped. max_connections=300
+            # leaves headroom for operators who crank concurrent_pulls to
+            # 32+ on fat pipes.
+            limits=httpx.Limits(max_connections=300, max_keepalive_connections=100),
         )
 
     async def aclose(self) -> None:
@@ -386,13 +403,37 @@ class Receiver:
             await asyncio.sleep(self.s.poll_interval)
 
     async def _pull_loop(self) -> None:
-        sem = asyncio.Semaphore(self.s.concurrent_pulls)
+        """Continuous pipeline: 1 producer keeps a bounded queue topped up,
+        N permanent worker coroutines drain it. Replaces the old
+        `pull → gather(N) → loop` pattern where one slow object stalled
+        every sibling and the next pull RPC didn't fire until the whole
+        batch finished.
+
+        Steady state: workers pick the next item the instant their current
+        ack lands; producer's pull RPC overlaps the workers' fetches via
+        queue.put backpressure (full queue ⇒ producer waits, naturally
+        rate-matching to drain speed). No batch boundaries, no stragglers
+        starving the slot, no zero-throughput windows."""
+        # Queue size 2× workers: enough pre-fetch to hide one pull RPC's
+        # latency, small enough to keep us from hoarding offers another
+        # receiver could be doing.
+        queue: asyncio.Queue[PullItem] = asyncio.Queue(maxsize=self.s.concurrent_pulls * 2)
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(self._pull_producer(queue))
+            for _ in range(self.s.concurrent_pulls):
+                tg.create_task(self._pull_worker(queue))
+
+    async def _pull_producer(self, queue: asyncio.Queue[PullItem]) -> None:
+        """Single producer task: ask orch for `concurrent_pulls * 2` items,
+        push into queue. queue.put blocks when full so we don't accumulate
+        more offers than workers can drain. Dedups against in-flight ids
+        because /pull keeps re-offering not-yet-acked objects."""
         while True:
             try:
                 resp = await self.client.pull(
                     PullRequest(
                         receiver_id=self.s.receiver_id,
-                        limit=self.s.concurrent_pulls * 4,
+                        limit=self.s.concurrent_pulls * 2,
                     )
                 )
             except Exception as e:
@@ -404,7 +445,27 @@ class Receiver:
                 await asyncio.sleep(self.s.poll_interval)
                 continue
 
-            await asyncio.gather(*(self._fetch_one(sem, it) for it in resp.items))
+            # All-new-or-skip: a re-offered id we're already fetching gets
+            # dropped here so it doesn't queue twice. Adding to _inflight
+            # before put means even if put() blocks, dedup is in effect for
+            # the next iteration's pull RPC.
+            for item in resp.items:
+                if item.object_id in self._inflight:
+                    continue
+                self._inflight.add(item.object_id)
+                await queue.put(item)
+
+    async def _pull_worker(self, queue: asyncio.Queue[PullItem]) -> None:
+        """Permanent fetcher. Each worker is independent — a slow object
+        only blocks its own slot, never a sibling's. _fetch_one_inner
+        catches per-pull exceptions itself, so this loop runs forever."""
+        while True:
+            item = await queue.get()
+            try:
+                await self._fetch_one_inner(item)
+            finally:
+                self._inflight.discard(item.object_id)
+                queue.task_done()
 
     async def _pull_object(self, url: str, dest: Path, expected_size: int) -> tuple[str, int]:
         """Dispatch: segmented for big files where the server supports Range,
@@ -437,50 +498,58 @@ class Receiver:
             await self._refresh_trust()
             return await self._pull_object(url, dest, expected_size)
 
-    async def _fetch_one(self, sem: asyncio.Semaphore, item) -> None:
-        async with sem:
-            self.stats.begin()
-            pulled_bytes = 0
+    async def _fetch_one_inner(self, item) -> None:
+        """Fetch + verify + ack one object. Self-contained — any per-pull
+        exception is caught and reported as a failed ack, so the pipeline
+        worker calling us never dies on one bad object."""
+        self.stats.begin()
+        pulled_bytes = 0
+        try:
+            dest = self.s.storage_dir / item.object_key
             try:
-                dest = self.s.storage_dir / item.object_key
+                sha, size = await self._pull_with_trust_retry(item.presigned_url, dest, item.size)
+                ok = sha == item.sha256 and size == item.size
+                if ok:
+                    pulled_bytes = size
+                else:
+                    dest.unlink(missing_ok=True)
+                await self.client.ack(
+                    AckReport(
+                        receiver_id=self.s.receiver_id,
+                        object_id=item.object_id,
+                        sha256=sha,
+                        success=ok,
+                        error=None if ok else f"sha/size mismatch {sha}/{size} vs {item.sha256}/{item.size}",
+                    )
+                )
+                if ok:
+                    log.info("pulled %s (%d bytes)", item.object_key, size)
+                else:
+                    log.error("verify failed %s", item.object_key)
+            except Exception as e:
+                log.warning("pull %s failed: %s", item.object_key, e)
                 try:
-                    sha, size = await self._pull_with_trust_retry(item.presigned_url, dest, item.size)
-                    ok = sha == item.sha256 and size == item.size
-                    if ok:
-                        pulled_bytes = size
-                    else:
-                        dest.unlink(missing_ok=True)
                     await self.client.ack(
                         AckReport(
                             receiver_id=self.s.receiver_id,
                             object_id=item.object_id,
-                            sha256=sha,
-                            success=ok,
-                            error=None
-                            if ok
-                            else f"sha/size mismatch {sha}/{size} vs {item.sha256}/{item.size}",
+                            sha256="",
+                            success=False,
+                            error=str(e),
                         )
                     )
-                    if ok:
-                        log.info("pulled %s (%d bytes)", item.object_key, size)
-                    else:
-                        log.error("verify failed %s", item.object_key)
-                except Exception as e:
-                    log.warning("pull %s failed: %s", item.object_key, e)
-                    try:
-                        await self.client.ack(
-                            AckReport(
-                                receiver_id=self.s.receiver_id,
-                                object_id=item.object_id,
-                                sha256="",
-                                success=False,
-                                error=str(e),
-                            )
-                        )
-                    except Exception:
-                        pass
-            finally:
-                self.stats.end(pulled_bytes)
+                except Exception:
+                    pass
+        finally:
+            self.stats.end(pulled_bytes)
+
+    async def _fetch_one(self, sem: asyncio.Semaphore, item) -> None:
+        """Sem-gated wrapper kept for test compatibility — the gather-batched
+        loop's tests construct an explicit semaphore. The pipeline path
+        (`_pull_worker`) skips this and calls `_fetch_one_inner` directly;
+        N permanent workers ARE the concurrency limit there."""
+        async with sem:
+            await self._fetch_one_inner(item)
 
 
 async def main() -> None:

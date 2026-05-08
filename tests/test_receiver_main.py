@@ -189,7 +189,9 @@ def test_config_load_reads_required_env(monkeypatch, tmp_path):
     assert s.storage_dir == tmp_path / "arch"
     # defaults
     assert s.poll_interval == 10
-    assert s.concurrent_pulls == 4
+    # 16 since 0.3.11 — pipeline (producer + N workers) makes high N cheap
+    # so we ship a default that saturates a typical home/office link.
+    assert s.concurrent_pulls == 16
     assert s.platform == ("windows" if sys.platform == "win32" else "linux")
 
 
