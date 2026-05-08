@@ -7,9 +7,17 @@ import hashlib
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import httpx
 import pytest
 
-from sathop.receiver.main import _pull_http as pull
+from sathop.receiver.main import _pull_single
+
+
+async def _pull(url: str, dest):
+    """Tiny harness: open a fresh client, run a single-stream pull, close.
+    Mirrors the v0.3.10 shape where Receiver owns the long-lived client."""
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as c:
+        return await _pull_single(c, url, dest)
 
 
 def _serve_static(payload: bytes) -> tuple[HTTPServer, int]:
@@ -39,12 +47,12 @@ async def test_pull_writes_file_and_reports_sha_and_size(tmp_path):
     srv, port = _serve_static(payload)
     try:
         dest = tmp_path / "out" / "sub" / "granule.bin"
-        sha, size = await pull(f"http://127.0.0.1:{port}/f", dest)
+        sha, size = await _pull(f"http://127.0.0.1:{port}/f", dest)
         assert sha == hashlib.sha256(payload).hexdigest()
         assert size == len(payload)
         assert dest.read_bytes() == payload
-        # .part file should be gone after atomic replace
-        assert not dest.with_suffix(dest.suffix + ".part").exists()
+        # No .part-* leftover after atomic replace.
+        assert list(dest.parent.glob("*.part-*")) == []
     finally:
         srv.shutdown()
 
@@ -54,7 +62,7 @@ async def test_pull_creates_parent_dirs(tmp_path):
     try:
         dest = tmp_path / "deep" / "nested" / "path" / "f.bin"
         assert not dest.parent.exists()
-        sha, size = await pull(f"http://127.0.0.1:{port}/f", dest)
+        sha, size = await _pull(f"http://127.0.0.1:{port}/f", dest)
         assert dest.read_bytes() == b"hello"
         assert size == 5
         assert sha == hashlib.sha256(b"hello").hexdigest()
@@ -66,15 +74,15 @@ async def test_pull_404_raises(tmp_path):
     srv, port = _serve_static(b"only-served-at-/f")
     try:
         with pytest.raises(Exception):
-            await pull(f"http://127.0.0.1:{port}/nope", tmp_path / "x.bin")
+            await _pull(f"http://127.0.0.1:{port}/nope", tmp_path / "x.bin")
     finally:
         srv.shutdown()
 
 
 async def test_pull_cleans_up_part_on_mid_stream_failure(tmp_path):
-    """If the server hangs up mid-stream, the partial `.part` file must be
-    removed — otherwise it lingers on disk after permanent download failures
-    (e.g. orchestrator stops offering the object before retry overwrites it)."""
+    """If the server hangs up mid-stream, the partial `.part-<token>` file
+    must be removed — otherwise it lingers on disk after permanent download
+    failures (e.g. orchestrator stops offering the object before retry)."""
 
     class HangUp(BaseHTTPRequestHandler):
         def log_message(self, *a, **kw):
@@ -96,11 +104,10 @@ async def test_pull_cleans_up_part_on_mid_stream_failure(tmp_path):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     dest = tmp_path / "out.bin"
-    part = dest.with_suffix(dest.suffix + ".part")
     try:
         with pytest.raises(Exception):
-            await pull(f"http://127.0.0.1:{port}/f", dest)
+            await _pull(f"http://127.0.0.1:{port}/f", dest)
     finally:
         srv.shutdown()
     assert not dest.exists(), "dest should not exist on failure"
-    assert not part.exists(), ".part should be cleaned up on mid-stream failure"
+    assert list(dest.parent.glob("*.part-*")) == [], ".part-* should be cleaned up on failure"

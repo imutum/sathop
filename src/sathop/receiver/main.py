@@ -113,6 +113,14 @@ class Settings:
     # returns 204 and the receiver transparently falls back to system CAs, so
     # there's no downside to defaulting on. Set false to force system CAs only.
     tls_trust_orch: bool = True
+    # Parallel byte-range download knobs. A single TCP flow is bandwidth-capped
+    # by `window/RTT` (BDP); on a 50ms cross-region link that's tens of MB/s
+    # max. Splitting one object into N parallel range requests fans the
+    # bandwidth across N flows, which is what bumps throughput on big files.
+    # Set pull_segments=1 to force single-stream. Files smaller than the
+    # threshold skip range entirely — handshake+coordination overhead dominates.
+    pull_segments: int = 4
+    pull_segment_min_bytes: int = 8 * 1024 * 1024  # 8 MB
 
 
 def _parse_bool(s: str, default: bool) -> bool:
@@ -149,35 +157,125 @@ def load() -> Settings:
         platform=cast(Literal["linux", "windows"], "windows" if sys.platform == "win32" else "linux"),
         tls_verify=_parse_bool(os.getenv("SATHOP_TLS_VERIFY", ""), True),
         tls_trust_orch=_parse_bool(os.getenv("SATHOP_TLS_TRUST_ORCH", ""), True),
+        pull_segments=int(os.getenv("SATHOP_PULL_SEGMENTS", "4")),
+        pull_segment_min_bytes=int(os.getenv("SATHOP_PULL_SEGMENT_MIN_BYTES", str(8 * 1024 * 1024))),
     )
 
 
-async def _pull_http(url: str, dest: Path, *, verify: bool | str = True) -> tuple[str, int]:
+def _tmp_for(dest: Path) -> Path:
+    """Per-pull random tmp name: a fixed `<dest>.part` would race when two
+    tasks write the same path simultaneously (concurrent same-key offers,
+    multi-receiver shared volume, restart-overlap with orphan workers). The
+    first rename wins, the second would FileNotFoundError on src. Token +
+    atomic rename = idempotent, last-writer-wins on dest."""
+    return dest.with_suffix(dest.suffix + f".part-{secrets.token_hex(4)}")
+
+
+def _sha256_path(path: Path) -> str:
+    """Sequential-read SHA256. Used by the segmented path because segments
+    arrive at disjoint offsets and SHA256 is not homomorphic — you can't
+    combine partial digests, you have to feed the bytes in order."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(_CHUNK), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _byte_ranges(size: int, n: int) -> list[tuple[int, int]]:
+    """Even split of [0, size-1] into n inclusive byte ranges. Last range
+    absorbs the remainder so the union always covers the whole file. When
+    n > size we clamp to size (no zero-length ranges that would 416)."""
+    n = max(1, min(n, size))
+    seg = size // n
+    out: list[tuple[int, int]] = []
+    for i in range(n):
+        start = i * seg
+        end = (i + 1) * seg - 1 if i < n - 1 else size - 1
+        out.append((start, end))
+    return out
+
+
+class _SegmentNotSupportedError(RuntimeError):
+    """Server returned 200 instead of 206 — Range was ignored. Caller should
+    fall back to single-stream rather than retrying segmented (a server that
+    didn't honor Range once won't honor it next time)."""
+
+
+async def _fetch_segment(
+    client: httpx.AsyncClient,
+    url: str,
+    start: int,
+    end: int,
+    f,
+) -> None:
+    """Stream one byte range into `f` at the segment's offset. `f` is shared
+    by all segments — single-event-loop atomicity makes seek+write safe:
+    asyncio coroutines don't preempt mid-sync-call, so no other coroutine can
+    re-seek between our seek and write. Disjoint ranges = no byte collision."""
+    pos = start
+    async with client.stream("GET", url, headers={"Range": f"bytes={start}-{end}"}) as r:
+        if r.status_code == 200:
+            raise _SegmentNotSupportedError(f"server ignored Range {start}-{end}, returned 200")
+        r.raise_for_status()
+        async for chunk in r.aiter_bytes(_CHUNK):
+            f.seek(pos)
+            f.write(chunk)
+            pos += len(chunk)
+    if pos != end + 1:
+        raise RuntimeError(f"segment {start}-{end} short read: got {pos - start}/{end - start + 1}")
+
+
+async def _pull_segmented(
+    client: httpx.AsyncClient,
+    url: str,
+    dest: Path,
+    *,
+    expected_size: int,
+    segments: int,
+) -> tuple[str, int]:
+    """N-way parallel byte-range download. Pre-allocates tmp at full size,
+    fans out N coroutines each fetching its slice and writing at its offset.
+    SHA256 is computed by a final sequential read (segments can't compute
+    incrementally — they don't see bytes in order)."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # Per-pull random tmp name: a fixed `<dest>.part` would race when two
-    # tasks (concurrent same-key offers across pull batches, multi-receiver
-    # bind-mount sharing the volume, or restart-overlap with orphan workers)
-    # write the same path simultaneously. The first rename wins, the second
-    # would FileNotFoundError on src. Token + atomic rename = idempotent,
-    # last-writer-wins on dest, no contention.
-    tmp = dest.with_suffix(dest.suffix + f".part-{secrets.token_hex(4)}")
+    tmp = _tmp_for(dest)
+    # Pre-allocate so segment writers can seek into any offset without
+    # tripping over short-file-then-extend races.
+    with tmp.open("wb") as alloc:
+        alloc.truncate(expected_size)
+    ranges = _byte_ranges(expected_size, segments)
+    try:
+        # buffering=0 → raw FileIO. seek+write becomes a single OS-level pair
+        # with no Python-side buffer state mixing across coroutines.
+        with tmp.open("r+b", buffering=0) as f:
+            await asyncio.gather(*(_fetch_segment(client, url, s, e, f) for s, e in ranges))
+        sha = await asyncio.to_thread(_sha256_path, tmp)
+        size = tmp.stat().st_size
+        tmp.replace(dest)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    return sha, size
+
+
+async def _pull_single(client: httpx.AsyncClient, url: str, dest: Path) -> tuple[str, int]:
+    """Single-stream path — used for sub-threshold files and as the fallback
+    when a server doesn't honor Range. Hashes incrementally on the fly."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _tmp_for(dest)
     h = hashlib.sha256()
     size = 0
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, read=600.0), follow_redirects=True, verify=verify
-        ) as c:
-            async with c.stream("GET", url) as r:
-                r.raise_for_status()
-                with tmp.open("wb") as f:
-                    async for chunk in r.aiter_bytes(_CHUNK):
-                        f.write(chunk)
-                        h.update(chunk)
-                        size += len(chunk)
+        async with client.stream("GET", url) as r:
+            r.raise_for_status()
+            with tmp.open("wb") as f:
+                async for chunk in r.aiter_bytes(_CHUNK):
+                    f.write(chunk)
+                    h.update(chunk)
+                    size += len(chunk)
         tmp.replace(dest)
     except BaseException:
-        # Mid-stream failure (network, cancel, disk full): drop our own partial.
-        # Other tasks' `.part-<token>` are theirs to clean — we never touch them.
         tmp.unlink(missing_ok=True)
         raise
     return h.hexdigest(), size
@@ -192,6 +290,26 @@ class Receiver:
         # Resolved at run() start: bool (True/False) or path str pointing at an
         # orchestrator-aggregated CA bundle. Passed verbatim to httpx verify=.
         self._verify: bool | str = s.tls_verify
+        # Shared httpx client across all pulls — without this, every object
+        # paid one TCP+TLS handshake (the old per-pull `async with AsyncClient`
+        # killed the connection pool every time). Kept-alive connections keep
+        # TLS sessions warm and let the OS skip TCP slow-start on each new
+        # range request, which is doubly important for segmented downloads.
+        self._pull_client: httpx.AsyncClient = self._build_pull_client()
+
+    def _build_pull_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, read=600.0),
+            follow_redirects=True,
+            verify=self._verify,
+            # Plenty of headroom: 32 concurrent_pulls × 8 segments = 256
+            # potential simultaneous connections; 200/50 keeps the pool from
+            # serializing range requests through a single keep-alive socket.
+            limits=httpx.Limits(max_connections=200, max_keepalive_connections=50),
+        )
+
+    async def aclose(self) -> None:
+        await self._pull_client.aclose()
 
     async def _resolve_trust(self) -> None:
         """Initial trust setup at run() start. Operator opt-outs short-circuit
@@ -219,6 +337,13 @@ class Receiver:
         bundle_path.parent.mkdir(parents=True, exist_ok=True)
         bundle_path.write_text(r.text, encoding="utf-8")
         self._verify = str(bundle_path)
+        # SSL context is bound at AsyncClient construction — to pick up the
+        # newly-added CA we must rebuild the client. Existing kept-alive
+        # connections to already-trusted workers are dropped, but they reopen
+        # cheaply on the next pull.
+        old = self._pull_client
+        self._pull_client = self._build_pull_client()
+        await old.aclose()
         log.info("trusting orchestrator-managed CA bundle at %s (%d bytes)", bundle_path, len(r.text))
 
     async def run(self) -> None:
@@ -281,19 +406,36 @@ class Receiver:
 
             await asyncio.gather(*(self._fetch_one(sem, it) for it in resp.items))
 
-    async def _pull_with_trust_retry(self, url: str, dest: Path) -> tuple[str, int]:
+    async def _pull_object(self, url: str, dest: Path, expected_size: int) -> tuple[str, int]:
+        """Dispatch: segmented for big files where the server supports Range,
+        single-stream otherwise. The PullItem.size field already tells us the
+        expected size, so we don't pay a HEAD round-trip just to plan ranges."""
+        if self.s.pull_segments > 1 and expected_size >= self.s.pull_segment_min_bytes and expected_size > 0:
+            try:
+                return await _pull_segmented(
+                    self._pull_client,
+                    url,
+                    dest,
+                    expected_size=expected_size,
+                    segments=self.s.pull_segments,
+                )
+            except _SegmentNotSupportedError as e:
+                log.info("range not supported (%s) — falling back to single-stream", e)
+        return await _pull_single(self._pull_client, url, dest)
+
+    async def _pull_with_trust_retry(self, url: str, dest: Path, expected_size: int) -> tuple[str, int]:
         """Pull with one CA-bundle refresh on SSL cert error. Covers the case
         where a worker registered after our startup snapshot — first pull fails,
         refresh adds its CA, retry succeeds. No retry for non-cert errors (the
         normal pull-failures counter still escalates those)."""
         try:
-            return await _pull_http(url, dest, verify=self._verify)
+            return await self._pull_object(url, dest, expected_size)
         except Exception as e:
             if not (_is_cert_error(e) and self.s.tls_trust_orch and self.s.tls_verify):
                 raise
             log.warning("pull SSL cert error (%s) — refreshing CA bundle and retrying once", e)
             await self._refresh_trust()
-            return await _pull_http(url, dest, verify=self._verify)
+            return await self._pull_object(url, dest, expected_size)
 
     async def _fetch_one(self, sem: asyncio.Semaphore, item) -> None:
         async with sem:
@@ -302,7 +444,7 @@ class Receiver:
             try:
                 dest = self.s.storage_dir / item.object_key
                 try:
-                    sha, size = await self._pull_with_trust_retry(item.presigned_url, dest)
+                    sha, size = await self._pull_with_trust_retry(item.presigned_url, dest, item.size)
                     ok = sha == item.sha256 and size == item.size
                     if ok:
                         pulled_bytes = size
@@ -348,6 +490,7 @@ async def main() -> None:
         await r.run()
     finally:
         await r.client.aclose()
+        await r.aclose()
 
 
 def run() -> None:
