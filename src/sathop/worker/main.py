@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import time
 import traceback
@@ -170,6 +171,14 @@ class Worker:
                         active_granule_ids=list(self._handlers.keys()),
                     )
                 )
+                if resp.restart_requested:
+                    # Operator clicked "重启" — exit hard so docker
+                    # `restart: unless-stopped` brings us back fresh. Lease
+                    # sweeper reclaims in-flight granules; finally-block
+                    # cleanup is skipped on _exit, but tmp work_dirs are
+                    # purgeable and idempotent. Atexit handlers also skipped.
+                    log.warning("restart requested via orchestrator — exiting")
+                    os._exit(0)
                 # Cancel any handler whose lease the orchestrator no longer
                 # credits to us — batch cancel, granule cancel, sweeper reclaim
                 # all surface here. CancelledError propagates through _handle's

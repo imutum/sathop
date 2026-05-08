@@ -227,11 +227,21 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         owned_set = set(still_owned)
         revoked = [gid for gid in req.active_granule_ids if gid not in owned_set]
 
+    # One-shot restart signal: pop the flag (clear column) and forward it to
+    # the worker exactly once. Worker exits 0 on receipt; docker brings it
+    # back. If the worker is already gone or never reads this beat, the flag
+    # is still cleared — re-click in the UI re-arms it cleanly.
+    restart_requested = w.restart_requested_at is not None
+    if restart_requested:
+        w.restart_requested_at = None
+        await log(s, req.worker_id, "restart signal delivered to worker")
+
     await s.commit()
     publish({"scope": "workers"})
     return WorkerHeartbeatResponse(
         desired_capacity=w.desired_capacity,
         revoked_granule_ids=revoked,
+        restart_requested=restart_requested,
     )
 
 
@@ -457,6 +467,21 @@ async def set_capacity(
     await s.commit()
     publish({"scope": "workers"})
     return {"ok": True, "desired_capacity": desired_capacity}
+
+
+@router.post("/{worker_id}/restart")
+async def request_restart(worker_id: str, s: AsyncSession = Depends(session)) -> dict:
+    """Operator-triggered restart. Sets a one-shot flag the worker picks up on
+    its next heartbeat and exits 0 on. Idempotent — re-clicks while a previous
+    request hasn't been consumed just refresh the timestamp."""
+    w = await s.get(Worker, worker_id)
+    if w is None:
+        raise HTTPException(404, "worker not found")
+    w.restart_requested_at = utcnow()
+    await log(s, worker_id, "restart requested via UI")
+    await s.commit()
+    publish({"scope": "workers"})
+    return {"ok": True}
 
 
 @router.put("/{worker_id}/enabled")

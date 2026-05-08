@@ -68,6 +68,10 @@ class Worker(Base):
     # into /api/receivers/ca-bundle so receivers can pin trust without skip_verify.
     # NULL for workers without a self-signed front (publicly-trusted or HTTP).
     ca_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Operator-clicked "重启" timestamp; consumed (cleared) on the next heartbeat
+    # which then returns restart_requested=True to the worker. NULL ⇒ no pending
+    # restart. One-shot — a re-click after the heartbeat consumed it sets a new ts.
+    restart_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
 
 class Receiver(Base):
@@ -82,6 +86,8 @@ class Receiver(Base):
     # running an older protocol still register cleanly via _ensure_columns.
     queue_pulling: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     recent_pull_bps: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    # See Worker.restart_requested_at.
+    restart_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
 
 class Batch(Base):

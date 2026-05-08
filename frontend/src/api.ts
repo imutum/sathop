@@ -149,6 +149,8 @@ const nodeApi = {
     ),
   forgetWorker: (workerId: string) =>
     deleteJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}`),
+  restartWorker: (workerId: string) =>
+    postJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}/restart`),
   receivers: () => getJson<ReceiverInfo[]>("/api/receivers"),
   setReceiverEnabled: (receiverId: string, enabled: boolean) =>
     putJson<{ ok: boolean; enabled: boolean }>(
@@ -157,6 +159,8 @@ const nodeApi = {
     ),
   forgetReceiver: (receiverId: string) =>
     deleteJson<{ ok: boolean }>(`/api/receivers/${encodeURIComponent(receiverId)}`),
+  restartReceiver: (receiverId: string) =>
+    postJson<{ ok: boolean }>(`/api/receivers/${encodeURIComponent(receiverId)}/restart`),
 };
 
 const batchApi = {

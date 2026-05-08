@@ -45,6 +45,14 @@ const forget = useMutation({
   onError: (e: Error) => toast.error(`删除失败：${e.message}`),
 });
 
+const restart = useMutation({
+  mutationFn: () => API.restartReceiver(props.receiver.receiver_id),
+  onSuccess: () => {
+    toast.success("已发送重启信号，下次心跳生效");
+  },
+  onError: (e: Error) => toast.error(`重启失败：${e.message}`),
+});
+
 function onSetEnabled(next: boolean): void {
   enable.mutate(next);
 }
@@ -60,9 +68,21 @@ async function onForget(): Promise<void> {
   });
   if (ok) forget.mutate();
 }
+async function onRestart(): Promise<void> {
+  const ok = await requestConfirm({
+    title: `重启接收端 ${props.receiver.receiver_id}？`,
+    description:
+      "向该接收端发送重启信号 — 它会在下一次心跳收到后立即退出，由容器 restart 策略拉起。\n" +
+      "在手的拉取会被中断，未 ack 的对象会在重启后重新分发。",
+    confirmText: "重启",
+  });
+  if (ok) restart.mutate();
+}
 
 const status = computed(() => nodeStatusBadge(props.receiver.enabled, props.receiver.last_seen));
-const pending = computed(() => enable.isPending.value || forget.isPending.value);
+const pending = computed(
+  () => enable.isPending.value || forget.isPending.value || restart.isPending.value,
+);
 </script>
 
 <template>
@@ -132,8 +152,10 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
         :pending="pending"
         @set-enabled="onSetEnabled"
         @forget="onForget"
+        @restart="onRestart"
         disable-title="禁用此接收端（不再分到新对象，可点启用恢复）"
         forget-title="永久从注册表中删除（仅在已禁用时允许）"
+        restart-title="向该接收端发送重启信号（一次心跳内生效）"
       />
     </div>
   </Card>

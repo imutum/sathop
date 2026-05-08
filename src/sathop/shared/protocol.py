@@ -90,6 +90,11 @@ class WorkerHeartbeatResponse(BaseModel):
     # reassignment). Worker cancels the matching asyncio.Task to free up the
     # CPU/bandwidth those granules are wasting on now-ghost work.
     revoked_granule_ids: list[str] = Field(default_factory=list)
+    # One-shot signal: operator clicked "重启" in the UI. Worker exits 0 on
+    # receipt; docker `restart: unless-stopped` brings it back. Orchestrator
+    # clears the underlying flag the same heartbeat it returns True, so a
+    # later heartbeat (post-restart) sees False and the worker doesn't loop.
+    restart_requested: bool = False
 
 
 class WorkerHeartbeat(BaseModel):
@@ -149,6 +154,12 @@ class ReceiverHeartbeat(BaseModel):
     # — divide by the window for MB/s. Persisted as the latest sample, not a
     # counter; next heartbeat overwrites.
     recent_pull_bps: int = 0
+
+
+class ReceiverHeartbeatResponse(BaseModel):
+    ok: bool = True
+    # One-shot restart signal — see WorkerHeartbeatResponse.restart_requested.
+    restart_requested: bool = False
 
 
 class InputSpec(BaseModel):

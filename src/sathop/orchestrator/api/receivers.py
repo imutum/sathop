@@ -14,6 +14,7 @@ from sathop.shared.protocol import (
     PullRequest,
     PullResponse,
     ReceiverHeartbeat,
+    ReceiverHeartbeatResponse,
     ReceiverRegister,
 )
 
@@ -41,8 +42,8 @@ async def register(req: ReceiverRegister, s: AsyncSession = Depends(session)) ->
     return {"ok": True}
 
 
-@router.post("/heartbeat")
-async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) -> dict:
+@router.post("/heartbeat", response_model=ReceiverHeartbeatResponse)
+async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) -> ReceiverHeartbeatResponse:
     r = await s.get(Receiver, req.receiver_id)
     if r is None:
         raise HTTPException(404, "receiver not registered")
@@ -62,9 +63,14 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
     r.disk_free_gb = req.disk_free_gb
     r.queue_pulling = req.queue_pulling
     r.recent_pull_bps = req.recent_pull_bps
+    # See workers.heartbeat for the one-shot restart-flag pattern.
+    restart_requested = r.restart_requested_at is not None
+    if restart_requested:
+        r.restart_requested_at = None
+        await log(s, req.receiver_id, "restart signal delivered to receiver")
     await s.commit()
     publish({"scope": "receivers"})
-    return {"ok": True}
+    return ReceiverHeartbeatResponse(restart_requested=restart_requested)
 
 
 @router.post("/pull", response_model=PullResponse)
@@ -149,6 +155,19 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
     await log(s, req.receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id)
     await s.commit()
     publish({"scope": "batches"})
+    return {"ok": True}
+
+
+@router.post("/{receiver_id}/restart")
+async def request_restart(receiver_id: str, s: AsyncSession = Depends(session)) -> dict:
+    """Operator-triggered restart — see workers.request_restart."""
+    r = await s.get(Receiver, receiver_id)
+    if r is None:
+        raise HTTPException(404, "receiver not found")
+    r.restart_requested_at = utcnow()
+    await log(s, receiver_id, "restart requested via UI")
+    await s.commit()
+    publish({"scope": "receivers"})
     return {"ok": True}
 
 

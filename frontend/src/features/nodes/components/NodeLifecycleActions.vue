@@ -4,27 +4,42 @@ const props = defineProps<{
   pending: boolean;
   disableTitle?: string;
   forgetTitle?: string;
+  restartTitle?: string;
 }>();
 
 const emit = defineEmits<{
   setEnabled: [next: boolean];
   forget: [];
+  restart: [];
 }>();
 
-// Both ops are soft-reversible — disable flips back via the same button;
+// All three ops are soft-reversible — disable flips back via the same button;
 // forget only deletes the DB row, a live receiver/worker re-registers on
-// next heartbeat (misclick recovery = restart the container). Parent owns
-// the confirm flow on forget.
+// next heartbeat; restart goes through the heartbeat reply, container restart
+// policy brings the process back. Parent owns the confirm flow on forget +
+// restart.
 function toggle(): void {
   emit("setEnabled", !props.enabled);
 }
 function forget(): void {
   emit("forget");
 }
+function restart(): void {
+  emit("restart");
+}
 </script>
 
 <template>
   <span class="flex items-center gap-1.5">
+    <button
+      type="button"
+      :disabled="pending"
+      @click="restart"
+      :title="restartTitle ?? '触发该节点重启（一次心跳内生效，依赖容器 restart 策略恢复）'"
+      class="rounded-md border border-border bg-background px-2 py-0.5 text-mini font-medium text-muted-foreground transition hover:border-primary/40 hover:text-primary disabled:opacity-50"
+    >
+      {{ pending ? "…" : "重启" }}
+    </button>
     <button
       type="button"
       :disabled="pending"

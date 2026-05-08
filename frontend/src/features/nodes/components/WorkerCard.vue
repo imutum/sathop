@@ -46,6 +46,14 @@ const forget = useMutation({
   onError: (e: Error) => toast.error(`删除失败：${e.message}`),
 });
 
+const restart = useMutation({
+  mutationFn: () => API.restartWorker(props.worker.worker_id),
+  onSuccess: () => {
+    toast.success("已发送重启信号，下次心跳生效");
+  },
+  onError: (e: Error) => toast.error(`重启失败：${e.message}`),
+});
+
 function onSetEnabled(next: boolean): void {
   enable.mutate(next);
 }
@@ -61,8 +69,20 @@ async function onForget(): Promise<void> {
   });
   if (ok) forget.mutate();
 }
+async function onRestart(): Promise<void> {
+  const ok = await requestConfirm({
+    title: `重启节点 ${props.worker.worker_id}？`,
+    description:
+      "向该 worker 发送重启信号 — 它会在下一次心跳收到后立即退出，由容器 restart 策略拉起。\n" +
+      "在手任务的 lease 在 30 分钟后被回收并重新分配，重启过程中不接新单。",
+    confirmText: "重启",
+  });
+  if (ok) restart.mutate();
+}
 
-const lifecyclePending = computed(() => enable.isPending.value || forget.isPending.value);
+const lifecyclePending = computed(
+  () => enable.isPending.value || forget.isPending.value || restart.isPending.value,
+);
 
 const status = computed(() =>
   nodeStatusBadge(props.worker.enabled, props.worker.last_seen),
@@ -304,8 +324,10 @@ function onKey(e: KeyboardEvent) {
               :pending="lifecyclePending"
               @set-enabled="onSetEnabled"
               @forget="onForget"
+              @restart="onRestart"
               disable-title="禁用此节点（在手任务继续，可点启用恢复）"
               forget-title="永久从注册表中删除（仅在已禁用且无任务时允许）"
+              restart-title="向该 worker 发送重启信号（一次心跳内生效）"
             />
             <span>心跳 {{ fmtAge(worker.last_seen) }}</span>
           </div>

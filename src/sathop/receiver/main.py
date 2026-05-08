@@ -26,6 +26,7 @@ from sathop.shared.protocol import (
     PullRequest,
     PullResponse,
     ReceiverHeartbeat,
+    ReceiverHeartbeatResponse,
     ReceiverRegister,
 )
 
@@ -40,8 +41,13 @@ class OrchestratorClient:
     async def register(self, req: ReceiverRegister) -> None:
         (await self._client.post("/api/receivers/register", json=req.model_dump())).raise_for_status()
 
-    async def heartbeat(self, req: ReceiverHeartbeat) -> None:
-        (await self._client.post("/api/receivers/heartbeat", json=req.model_dump())).raise_for_status()
+    async def heartbeat(self, req: ReceiverHeartbeat) -> ReceiverHeartbeatResponse:
+        r = await self._client.post("/api/receivers/heartbeat", json=req.model_dump())
+        r.raise_for_status()
+        # Older orchestrators returned `{"ok": true}` only — Pydantic ignores
+        # unknown keys and uses defaults for missing ones, so this also handles
+        # the back-compat path (restart_requested defaults to False).
+        return ReceiverHeartbeatResponse.model_validate(r.json())
 
     async def pull(self, req: PullRequest) -> PullResponse:
         r = await self._client.post("/api/receivers/pull", json=req.model_dump())
@@ -234,7 +240,7 @@ class Receiver:
         while True:
             try:
                 free = shutil.disk_usage(str(self.s.storage_dir)).free / 1024**3
-                await self.client.heartbeat(
+                resp = await self.client.heartbeat(
                     ReceiverHeartbeat(
                         receiver_id=self.s.receiver_id,
                         version=__version__,
@@ -243,6 +249,13 @@ class Receiver:
                         recent_pull_bps=self.stats.recent_bps(),
                     )
                 )
+                if resp.restart_requested:
+                    # Operator clicked "重启" — exit hard so docker
+                    # `restart: unless-stopped` brings us back fresh. In-flight
+                    # pulls drop their `.part-<token>` tmp; re-offer happens
+                    # naturally when the orch hasn't seen an ack yet.
+                    log.warning("restart requested via orchestrator — exiting")
+                    os._exit(0)
             except Exception as e:
                 log.warning("heartbeat failed: %s", e)
             await asyncio.sleep(self.s.poll_interval)
