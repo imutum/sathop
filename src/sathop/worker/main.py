@@ -35,6 +35,7 @@ from sathop.shared.protocol import (
 )
 
 from . import bundle, downloader, storage, tls
+from ._paths import safe_segment
 from .agent import OrchestratorClient
 from .config import Settings, load
 from .processor import ProcessResult, run_bundle
@@ -228,7 +229,7 @@ class Worker:
 
     async def _handle(self, item: LeaseItem) -> None:
         gid = item.granule_id
-        work_dir = self.s.work_root / f"g-{gid}-{int(time.time())}"
+        work_dir = self.s.work_root / f"g-{safe_segment(gid)}-{int(time.time())}"
         work_dir.mkdir(parents=True, exist_ok=True)
         input_dir = work_dir / "input"
         input_dir.mkdir()

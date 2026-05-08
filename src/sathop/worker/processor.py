@@ -23,6 +23,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from ._paths import safe_segment
 from .bundle import BundleHandle
 
 
@@ -114,7 +115,7 @@ async def run_bundle(
     execution_env: dict[str, str] | None = None,
     progress_url: str | None = None,
 ) -> ProcessResult:
-    work_dir = Path(tempfile.mkdtemp(prefix=f"g-{granule_id}-", dir=work_root))
+    work_dir = Path(tempfile.mkdtemp(prefix=f"g-{safe_segment(granule_id)}-", dir=work_root))
     input_dir = work_dir / "input"
     output_dir = work_dir / bundle.manifest.outputs.get("watch_dir", "output")
     input_dir.mkdir(parents=True)
@@ -168,7 +169,7 @@ async def run_bundle(
             return ProcessResult(False, [], stdout, stderr + "\n[no outputs produced]", proc.returncode or 0)
 
         # Copy outputs out of work_dir before cleanup, so caller keeps them.
-        kept_root = work_root / "_staged" / granule_id
+        kept_root = work_root / "_staged" / safe_segment(granule_id)
         kept_root.mkdir(parents=True, exist_ok=True)
         kept = []
         for p in outputs:
