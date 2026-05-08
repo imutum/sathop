@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import secrets
 import shutil
 import ssl
 import sys
@@ -146,7 +147,13 @@ def load() -> Settings:
 
 async def _pull_http(url: str, dest: Path, *, verify: bool | str = True) -> tuple[str, int]:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".part")
+    # Per-pull random tmp name: a fixed `<dest>.part` would race when two
+    # tasks (concurrent same-key offers across pull batches, multi-receiver
+    # bind-mount sharing the volume, or restart-overlap with orphan workers)
+    # write the same path simultaneously. The first rename wins, the second
+    # would FileNotFoundError on src. Token + atomic rename = idempotent,
+    # last-writer-wins on dest, no contention.
+    tmp = dest.with_suffix(dest.suffix + f".part-{secrets.token_hex(4)}")
     h = hashlib.sha256()
     size = 0
     try:
@@ -162,9 +169,8 @@ async def _pull_http(url: str, dest: Path, *, verify: bool | str = True) -> tupl
                         size += len(chunk)
         tmp.replace(dest)
     except BaseException:
-        # Mid-stream failure (network, cancel, disk full): drop the partial.
-        # Otherwise an orphan `<dest>.part` lingers if the orchestrator stops
-        # offering this object before the next pull attempt overwrites it.
+        # Mid-stream failure (network, cancel, disk full): drop our own partial.
+        # Other tasks' `.part-<token>` are theirs to clean — we never touch them.
         tmp.unlink(missing_ok=True)
         raise
     return h.hexdigest(), size

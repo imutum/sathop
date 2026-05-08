@@ -110,6 +110,46 @@ async def test_fetch_one_sha_mismatch_deletes_and_acks_false(tmp_path):
         srv.shutdown()
 
 
+async def test_concurrent_pulls_same_dest_do_not_race(tmp_path):
+    """Two tasks pulling the SAME object_key concurrently must both finish
+    cleanly — no `tmp not found` rename error. This used to corrupt: with a
+    fixed `<dest>.part`, the first rename would atomically move it to dest
+    while the second was still writing, and the second's rename would then
+    ENOENT on src. Per-pull random `.part-<token>` makes the writes
+    independent; the rename is last-writer-wins, which is fine."""
+    payload = b"shared-dest-bytes"
+    srv, port = _serve(payload)
+    try:
+        r, acks = _make_receiver(tmp_path)
+        url = f"http://127.0.0.1:{port}/"
+        item = PullItem(
+            granule_id="g1",
+            batch_id="b1",
+            object_id=1,
+            object_key="b1/g1/shared.bin",
+            presigned_url=url,
+            sha256=hashlib.sha256(payload).hexdigest(),
+            size=len(payload),
+        )
+        # Two object_ids, identical key — simulates the race shape (orch
+        # offering twice, multi-receiver shared volume, etc).
+        item2 = item.model_copy(update={"object_id": 2})
+        sem = asyncio.Semaphore(2)
+        await asyncio.gather(r._fetch_one(sem, item), r._fetch_one(sem, item2))
+
+        # Both acks should be success — neither task's rename should have
+        # tripped over the other's tmp.
+        assert len(acks) == 2
+        assert all(a.success for a in acks), [a.error for a in acks]
+        # Final dest exists; no leftover .part-* files.
+        dest = tmp_path / "archive" / "b1" / "g1" / "shared.bin"
+        assert dest.read_bytes() == payload
+        leftovers = list(dest.parent.glob("*.part*"))
+        assert leftovers == [], leftovers
+    finally:
+        srv.shutdown()
+
+
 async def test_fetch_one_pull_error_acks_false_with_exception_text(tmp_path):
     r, acks = _make_receiver(tmp_path)
     it = PullItem(
