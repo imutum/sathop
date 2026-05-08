@@ -223,17 +223,59 @@ def test_config_load_tls_trust_orch_off_when_explicitly_false(monkeypatch, tmp_p
 
 
 def test_is_cert_error_walks_cause_chain():
-    """httpx wraps ssl.SSLError in ConnectError — surface check must follow __cause__."""
-    inner = ssl.SSLError("certificate verify failed")
+    """`raise ... from e` sets __cause__ (explicit chaining)."""
     try:
         try:
-            raise inner
+            raise ssl.SSLError("certificate verify failed")
         except ssl.SSLError as e:
             raise RuntimeError("connect failed") from e
     except RuntimeError as e:
         assert _is_cert_error(e) is True
 
     assert _is_cert_error(RuntimeError("network down")) is False
+
+
+def test_is_cert_error_walks_context_chain():
+    """Bare `raise X` inside an `except:` block sets __context__ implicitly —
+    this is exactly how httpx wraps the underlying httpcore/ssl error, and a
+    walker that only follows __cause__ misses it (regression: v0.3.3 shipped
+    with a __cause__-only walk that left receivers permanently stuck on cert
+    errors despite the lazy-refresh path being wired in)."""
+    try:
+        try:
+            raise ssl.SSLError("certificate verify failed")
+        except ssl.SSLError:
+            raise RuntimeError("wrapped — no `from` clause")
+    except RuntimeError as e:
+        assert _is_cert_error(e) is True
+
+
+def test_is_cert_error_handles_real_httpx_self_signed_chain():
+    """Reproduce the exact exception shape httpx raises on a self-signed cert
+    so a future refactor that breaks the chain walk fails this test loudly."""
+    import httpx
+
+    # 127.0.0.1:1 refuses fast on most platforms; flip a real httpx call to a
+    # self-signed endpoint instead would require a server, so we manually
+    # rebuild the chain shape httpx actually emits (verified by inspection).
+    try:
+        try:
+            try:
+                raise ssl.SSLCertVerificationError(
+                    1,
+                    "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate",
+                )
+            except ssl.SSLCertVerificationError:
+                raise httpx.ConnectError(
+                    "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate"
+                )
+        except httpx.ConnectError:
+            raise httpx.ConnectError(
+                "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: self-signed certificate"
+            )
+    except httpx.ConnectError as e:
+        assert isinstance(e, ssl.SSLError) is False, "sanity: top-level is not SSLError"
+        assert _is_cert_error(e) is True
 
 
 async def test_pull_retries_once_after_refreshing_trust_on_cert_error(tmp_path, monkeypatch):
@@ -264,7 +306,13 @@ async def test_pull_retries_once_after_refreshing_trust_on_cert_error(tmp_path, 
             nonlocal calls
             calls += 1
             if calls == 1:
-                raise ssl.SSLError("certificate verify failed: self-signed certificate")
+                # Emit the same __context__-wrapped shape httpx produces on a
+                # real cert verify failure — bare ssl.SSLError used to pass
+                # because the chain was trivial. v0.3.4 walks __context__ too.
+                try:
+                    raise ssl.SSLError("certificate verify failed: self-signed certificate")
+                except ssl.SSLError:
+                    raise RuntimeError("ConnectError wrap")
             return await real_pull(url, dest, verify=verify)
 
         monkeypatch.setattr(recv_mod, "_pull_http", flaky_pull)
@@ -304,7 +352,10 @@ async def test_pull_does_not_refresh_when_trust_orch_disabled(tmp_path, monkeypa
     from sathop.receiver import main as recv_mod
 
     async def always_cert_error(url, dest, *, verify):
-        raise ssl.SSLError("certificate verify failed")
+        try:
+            raise ssl.SSLError("certificate verify failed")
+        except ssl.SSLError:
+            raise RuntimeError("ConnectError wrap")
 
     monkeypatch.setattr(recv_mod, "_pull_http", always_cert_error)
     monkeypatch.setattr(r, "_refresh_trust", fake_refresh)

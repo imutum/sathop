@@ -112,14 +112,20 @@ def _parse_bool(s: str, default: bool) -> bool:
 
 
 def _is_cert_error(e: BaseException) -> bool:
-    """Detect 'system trust said no, refresh might fix it' down the cause chain.
-    httpx wraps the underlying ssl.SSLCertVerificationError in ConnectError, so
-    a plain isinstance on the top-level exception misses it."""
+    """Detect 'system trust said no, refresh might fix it' down the chain.
+    httpx wraps ssl.SSLCertVerificationError twice: top-level httpx.ConnectError
+    via __context__ (implicit chaining inside its `except:` block), then
+    httpcore.ConnectError → ssl.SSLCertVerificationError via __context__ again.
+    We follow both __cause__ and __context__ — checking only one misses it
+    (this was the v0.3.3 bug that left receivers permanently stuck on cert
+    error). Cycle guard via id() in case some library raises pathologically."""
     cur: BaseException | None = e
-    while cur is not None:
+    seen: set[int] = set()
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
         if isinstance(cur, ssl.SSLError):
             return True
-        cur = cur.__cause__
+        cur = cur.__cause__ or cur.__context__
     return False
 
 
