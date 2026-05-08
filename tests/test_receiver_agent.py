@@ -86,6 +86,10 @@ async def test_heartbeat_posts_disk_free(captured_client):
     assert captured[0].url.path == "/api/receivers/heartbeat"
     assert json.loads(captured[0].content) == {
         "receiver_id": "r1",
+        # Defaulted to "" when caller doesn't supply it — orchestrator skips
+        # version-flap detection when empty, preserving compat for clients
+        # that pre-date the field.
+        "version": "",
         "disk_free_gb": 512.5,
         # Defaulted to 0 when caller doesn't supply them — exercised here so a
         # silent rename of the field would surface in this test, not just in

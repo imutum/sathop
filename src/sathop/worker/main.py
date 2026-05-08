@@ -156,6 +156,7 @@ class Worker:
                 resp = await self.client.heartbeat(
                     WorkerHeartbeat(
                         worker_id=self.s.worker_id,
+                        version=__version__,
                         disk_used_gb=(du.total - du.free) / 1024**3,
                         disk_total_gb=du.total / 1024**3,
                         cpu_percent=psutil.cpu_percent(interval=None),

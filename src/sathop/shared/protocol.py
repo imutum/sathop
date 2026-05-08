@@ -94,6 +94,11 @@ class WorkerHeartbeatResponse(BaseModel):
 
 class WorkerHeartbeat(BaseModel):
     worker_id: str
+    # Carried on every heartbeat so the orchestrator can spot version flapping
+    # — two containers with the same worker_id sharing the volume (orphan from a
+    # botched compose redeploy) cause subtle bugs (concurrent .part writes,
+    # mixed TLS trust modes); a flapping `version` field is the cheapest signal.
+    version: str = ""
     disk_used_gb: float = 0.0
     disk_total_gb: float = 0.0
     cpu_percent: float = 0.0
@@ -133,6 +138,9 @@ class ReceiverRegister(BaseModel):
 
 class ReceiverHeartbeat(BaseModel):
     receiver_id: str
+    # Carried on every heartbeat so the orchestrator can spot version flapping
+    # — see WorkerHeartbeat.version note. Same orphan-container scenario.
+    version: str = ""
     disk_free_gb: float = 0.0
     # Number of pulls currently in flight (mirrors worker.queue_*). Lets
     # operators tell "idle" from "actively pulling" without watching logs.

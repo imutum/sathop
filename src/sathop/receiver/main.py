@@ -237,6 +237,7 @@ class Receiver:
                 await self.client.heartbeat(
                     ReceiverHeartbeat(
                         receiver_id=self.s.receiver_id,
+                        version=__version__,
                         disk_free_gb=free,
                         queue_pulling=self.stats.in_flight,
                         recent_pull_bps=self.stats.recent_bps(),

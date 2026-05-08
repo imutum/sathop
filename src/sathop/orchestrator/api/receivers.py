@@ -46,6 +46,18 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
     r = await s.get(Receiver, req.receiver_id)
     if r is None:
         raise HTTPException(404, "receiver not registered")
+    # Version flap detection — see workers.heartbeat for the rationale. Same
+    # orphan-container symptom on the receiver side: pulls split between two
+    # processes, half failing on stale TLS trust / fixed `.part` filename.
+    if req.version and req.version != r.version:
+        await log(
+            s,
+            req.receiver_id,
+            f"receiver version changed {r.version!r} → {req.version!r} "
+            "(if this keeps flipping, two containers likely share the receiver_id)",
+            level="warn",
+        )
+        r.version = req.version
     r.last_seen = utcnow()
     r.disk_free_gb = req.disk_free_gb
     r.queue_pulling = req.queue_pulling

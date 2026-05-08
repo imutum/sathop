@@ -166,6 +166,19 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     if w is None:
         raise HTTPException(404, "worker not registered")
     now = utcnow()
+    # Version flap detection: a stable worker_id whose `version` keeps changing
+    # between heartbeats almost always means two containers share the ID (orphan
+    # from a botched compose redeploy). Quiet under normal operation; loud the
+    # moment a second process starts heartbeating with a different version.
+    if req.version and req.version != w.version:
+        await log(
+            s,
+            req.worker_id,
+            f"worker version changed {w.version!r} → {req.version!r} "
+            "(if this keeps flipping, two containers likely share the worker_id)",
+            level="warn",
+        )
+        w.version = req.version
     w.last_seen = now
     w.disk_used_gb = req.disk_used_gb
     w.disk_total_gb = req.disk_total_gb
