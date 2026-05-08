@@ -18,6 +18,7 @@ from typing import Literal, cast
 
 import httpx
 
+from sathop import __version__
 from sathop.shared.config import resolve_orch
 from sathop.shared.http import make_orch_client
 from sathop.shared.protocol import (
@@ -219,11 +220,11 @@ class Receiver:
         await self.client.register(
             ReceiverRegister(
                 receiver_id=self.s.receiver_id,
-                version="0.1.0",
+                version=__version__,
                 platform=self.s.platform,
             )
         )
-        log.info("registered as %s (%s)", self.s.receiver_id, self.s.platform)
+        log.info("registered as %s v%s (%s)", self.s.receiver_id, __version__, self.s.platform)
 
         async with asyncio.TaskGroup() as tg:
             tg.create_task(self._heartbeat_loop())

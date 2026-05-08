@@ -259,8 +259,9 @@ def main() -> int:
         while time.time() < deadline:
             try:
                 workers = _http_json("GET", f"{orch_url}/api/workers", token)
-                if workers and any(w.get("worker_id") == "wkr-e2e" for w in workers):
-                    print("[harness] worker registered")
+                w = next((x for x in workers if x.get("worker_id") == "wkr-e2e"), None)
+                if w is not None:
+                    print(f"[harness] worker registered (reported version: {w.get('version')!r})")
                     break
             except Exception:
                 pass
@@ -292,8 +293,9 @@ def main() -> int:
         while time.time() < deadline:
             try:
                 receivers = _http_json("GET", f"{orch_url}/api/receivers", token)
-                if receivers and any(r.get("receiver_id") == "rcv-e2e" for r in receivers):
-                    print("[harness] receiver registered")
+                rcv = next((r for r in receivers if r.get("receiver_id") == "rcv-e2e"), None)
+                if rcv is not None:
+                    print(f"[harness] receiver registered (reported version: {rcv.get('version')!r})")
                     break
             except Exception:
                 pass

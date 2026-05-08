@@ -72,6 +72,12 @@ const pending = computed(() => enable.isPending.value || forget.isPending.value)
         <div class="flex items-center gap-1 font-mono text-[13px] font-semibold">
           <span class="truncate">{{ receiver.receiver_id }}</span>
           <CopyButton :value="receiver.receiver_id" title="复制接收端 ID" />
+          <HintTip
+            v-if="receiver.version"
+            :text="`接收端上报的运行版本（来自 sathop 包元数据）— 排查问题时确认是不是最新镜像`"
+          >
+            <Badge tone="info" class="ml-1 font-mono">v{{ receiver.version }}</Badge>
+          </HintTip>
         </div>
         <div class="mt-0.5 text-2xs text-muted-foreground">
           平台 · {{ PLATFORM_ZH[receiver.platform] ?? receiver.platform }}

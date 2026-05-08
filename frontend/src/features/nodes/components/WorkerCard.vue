@@ -139,6 +139,12 @@ function onKey(e: KeyboardEvent) {
           <div class="flex items-center gap-1 font-mono text-[13px] font-semibold">
             <span class="truncate">{{ worker.worker_id }}</span>
             <CopyButton :value="worker.worker_id" title="复制节点 ID" />
+            <HintTip
+              v-if="worker.version"
+              :text="`worker 上报的运行版本（来自 sathop 包元数据）— 排查问题时确认是不是最新镜像`"
+            >
+              <Badge tone="info" class="ml-1 font-mono">v{{ worker.version }}</Badge>
+            </HintTip>
           </div>
           <div class="mt-0.5 truncate font-mono text-2xs text-muted-foreground" :title="worker.public_url ?? ''">
             {{ worker.public_url ?? "—" }}

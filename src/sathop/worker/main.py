@@ -22,6 +22,7 @@ from pathlib import Path
 import httpx
 import psutil
 
+from sathop import __version__
 from sathop.shared.protocol import (
     Credential,
     GranuleState,
@@ -113,15 +114,16 @@ class Worker:
         await self.client.register(
             WorkerRegister(
                 worker_id=self.s.worker_id,
-                version="0.1.0",
+                version=__version__,
                 capacity=self.s.capacity,
                 public_url=self.s.public_url,
                 ca_pem=ca_pem,
             )
         )
         log.info(
-            "registered as %s (downloader=%s, storage=%s, tls=%s)",
+            "registered as %s v%s (downloader=%s, storage=%s, tls=%s)",
             self.s.worker_id,
+            __version__,
             type(self.downloader).__name__,
             type(self.storage).__name__,
             "on" if ca_pem else "off",
