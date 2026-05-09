@@ -209,6 +209,52 @@ class _SegmentNotSupportedError(RuntimeError):
     didn't honor Range once won't honor it next time)."""
 
 
+# Tunables for per-segment retry. Module-level rather than env-driven —
+# 3 attempts with 0.5/1/2s backoff covers transient blips without making
+# a permanently-broken segment hang the whole pull for tens of seconds.
+_SEGMENT_MAX_RETRIES = 3
+_SEGMENT_BACKOFF_BASE_SEC = 0.5
+
+
+def _is_transient_segment_error(e: BaseException) -> bool:
+    """Worth a retry? RequestError covers connection drops / read timeouts
+    (httpx.ConnectError, ReadError, WriteError, TimeoutException — all
+    network-layer transients). 5xx is server hiccup. 4xx (auth, 404, 416
+    range-not-satisfiable) is permanent — don't waste retry budget. Plain
+    RuntimeError raised by us for short-read counts as transient because
+    that's a stream-end-early symptom, often network-induced."""
+    if isinstance(e, _SegmentNotSupportedError):
+        return False
+    if isinstance(e, httpx.RequestError):
+        return True
+    if isinstance(e, httpx.HTTPStatusError):
+        return 500 <= e.response.status_code < 600
+    if isinstance(e, RuntimeError):
+        return True
+    return False
+
+
+async def _stream_range(
+    client: httpx.AsyncClient,
+    url: str,
+    pos: int,
+    end: int,
+    f,
+) -> int:
+    """Stream bytes [pos, end] inclusive into `f` at offset pos. Returns the
+    final position (== end+1 on a complete read; < end+1 if the stream ended
+    early — caller can call again with the returned pos to resume)."""
+    async with client.stream("GET", url, headers={"Range": f"bytes={pos}-{end}"}) as r:
+        if r.status_code == 200:
+            raise _SegmentNotSupportedError(f"server ignored Range {pos}-{end}, returned 200")
+        r.raise_for_status()
+        async for chunk in r.aiter_bytes(_CHUNK):
+            f.seek(pos)
+            f.write(chunk)
+            pos += len(chunk)
+    return pos
+
+
 async def _fetch_segment(
     client: httpx.AsyncClient,
     url: str,
@@ -216,21 +262,44 @@ async def _fetch_segment(
     end: int,
     f,
 ) -> None:
-    """Stream one byte range into `f` at the segment's offset. `f` is shared
-    by all segments — single-event-loop atomicity makes seek+write safe:
-    asyncio coroutines don't preempt mid-sync-call, so no other coroutine can
-    re-seek between our seek and write. Disjoint ranges = no byte collision."""
+    """Stream one byte range into `f` at the segment's offset, with internal
+    retry on transient failure. `f` is shared by all segments — single-
+    event-loop atomicity makes seek+write safe (no `await` between seek and
+    write means no coroutine interleaving). Disjoint ranges = no collision.
+
+    Bytes-aware resume: each retry asks for `bytes=pos-end` where pos is
+    where the previous attempt actually stopped writing, not the original
+    start. A 99%-complete segment hit by a network blip re-downloads the
+    missing 1%, not the whole 99%. A persistent failure (4xx, exhausted
+    retries) propagates so the outer pull cleans up tmp and surfaces ack
+    failure to the orchestrator."""
     pos = start
-    async with client.stream("GET", url, headers={"Range": f"bytes={start}-{end}"}) as r:
-        if r.status_code == 200:
-            raise _SegmentNotSupportedError(f"server ignored Range {start}-{end}, returned 200")
-        r.raise_for_status()
-        async for chunk in r.aiter_bytes(_CHUNK):
-            f.seek(pos)
-            f.write(chunk)
-            pos += len(chunk)
-    if pos != end + 1:
-        raise RuntimeError(f"segment {start}-{end} short read: got {pos - start}/{end - start + 1}")
+    delay = _SEGMENT_BACKOFF_BASE_SEC
+    for attempt in range(_SEGMENT_MAX_RETRIES + 1):
+        try:
+            pos = await _stream_range(client, url, pos, end, f)
+            if pos == end + 1:
+                return
+            # Stream closed cleanly but short — server hung up early without
+            # raising. Treat as transient (most common cause: TCP RST).
+            raise RuntimeError(f"segment {start}-{end} stream ended at {pos}, short by {end + 1 - pos}")
+        except _SegmentNotSupportedError:
+            raise  # never retry — outer falls back to single-stream
+        except Exception as e:
+            if attempt == _SEGMENT_MAX_RETRIES or not _is_transient_segment_error(e):
+                raise
+            log.warning(
+                "segment %d-%d (got to %d) attempt %d/%d failed (%s) — retry in %.1fs",
+                start,
+                end,
+                pos,
+                attempt + 1,
+                _SEGMENT_MAX_RETRIES + 1,
+                e,
+                delay,
+            )
+            await asyncio.sleep(delay)
+            delay *= 2
 
 
 async def _pull_segmented(
