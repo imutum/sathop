@@ -1,0 +1,20 @@
+name: hello-world
+version: 1.0.0
+description: Minimal SatHop bundle — smoke test + author reference. Tags input text files with granule/batch/meta.
+
+execution:
+  entrypoint: "python run.py"
+  timeout_sec: 60
+
+outputs:
+  watch_dir: output
+  extensions: [".txt"]
+  object_key_template: "hello/{tag}/{name}"
+
+inputs:
+  slots:
+    - name: payload
+      product: text/plain
+  meta:
+    - name: tag
+      pattern: "^[A-Za-z0-9_-]+$"
