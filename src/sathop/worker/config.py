@@ -36,6 +36,16 @@ class Settings:
     disk_resume_pct: float
     backpressure_interval: int
 
+    # Local cache GC. 0 = disable. venv + bundle source dirs accumulate
+    # per-version (~200-500 MB each for typical satellite bundles), so an
+    # operator who keeps bumping versions during dev will fill the disk
+    # within weeks. The GC loop walks venv_cache + bundle_cache periodically
+    # and evicts the oldest (by ensure() last-used sidecar) until total
+    # drops below the limit. Active bundles never evict — ensure() refreshes
+    # their mtime on every lease.
+    venv_cache_limit_gb: float
+    gc_interval_sec: int
+
     # Self-signed TLS cert + key for the storage server. Generated on first
     # boot (see worker.tls) when SATHOP_PUBLIC_URL is https://; the cert
     # doubles as the ca_pem uploaded at register time. Operator can supply
@@ -87,6 +97,8 @@ def load() -> Settings:
         disk_pause_pct=float(os.getenv("SATHOP_DISK_PAUSE_PCT", "0.85")),
         disk_resume_pct=float(os.getenv("SATHOP_DISK_RESUME_PCT", "0.70")),
         backpressure_interval=int(os.getenv("SATHOP_BACKPRESSURE_INTERVAL", "10")),
+        venv_cache_limit_gb=float(os.getenv("SATHOP_VENV_CACHE_LIMIT_GB", "10")),
+        gc_interval_sec=int(os.getenv("SATHOP_GC_INTERVAL", "3600")),
         tls_cert_path=Path(os.getenv("SATHOP_TLS_CERT", "./data/tls/cert.pem")),
         tls_key_path=Path(os.getenv("SATHOP_TLS_KEY", "./data/tls/key.pem")),
     )

@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import tempfile
 import threading
 import urllib.request
 from pathlib import Path
 
 from sathop.shared.http import bearer_headers
+
+log = logging.getLogger("sathop.worker.shared")
 
 _name_locks: dict[str, threading.Lock] = {}
 _name_locks_guard = threading.Lock()
@@ -54,6 +57,51 @@ def sync(names: list[str], shared_root: Path, orchestrator_url: str, token: str)
     for name in names:
         with _lock_for(name):
             _sync_one(name, shared_root, orchestrator_url, token)
+
+
+def prune_orphans(shared_root: Path, orchestrator_url: str, token: str) -> dict:
+    """Remove cached shared files whose name is no longer in the orchestrator
+    registry. Returns {removed, freed_bytes}. Sidecars (`.sha256/<name>`) are
+    cleaned up alongside their data file. The per-name lock keeps a concurrent
+    `_sync_one()` from re-creating a file we just unlinked (sync acquires
+    first ⇒ we wait; we acquire first ⇒ sync sees missing local + refetches).
+
+    Re-uploading a previously-deleted name to the orch registry is the safety
+    net for a wrongly-pruned file: the next ensure() on a bundle declaring it
+    will re-fetch."""
+    if not shared_root.is_dir():
+        return {"removed": 0, "freed_bytes": 0}
+
+    base = orchestrator_url.rstrip("/")
+    req = urllib.request.Request(f"{base}/api/shared", headers=bearer_headers(token))
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"shared list failed: HTTP {resp.status}")
+        rows = json.loads(resp.read().decode("utf-8"))
+    valid: set[str] = {row["name"] for row in rows}
+
+    sidecar_dir = shared_root / ".sha256"
+    removed = 0
+    freed = 0
+    for entry in shared_root.iterdir():
+        if entry.name.startswith(".") or entry.is_dir():
+            continue
+        if entry.name in valid:
+            continue
+        with _lock_for(entry.name):
+            try:
+                size = entry.stat().st_size
+            except OSError:
+                size = 0
+            try:
+                entry.unlink()
+            except OSError:
+                continue
+            (sidecar_dir / entry.name).unlink(missing_ok=True)
+        removed += 1
+        freed += size
+        log.info("dropped orphan shared %s (%d bytes)", entry.name, size)
+    return {"removed": removed, "freed_bytes": freed}
 
 
 def _sync_one(name: str, shared_root: Path, orchestrator_url: str, token: str) -> None:

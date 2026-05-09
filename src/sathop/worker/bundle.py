@@ -9,6 +9,8 @@ venv_cache. First-time fetch + venv build is serialized per ref."""
 from __future__ import annotations
 
 import io
+import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -23,6 +25,10 @@ import yaml
 from sathop.shared.http import bearer_headers
 
 from . import shared as shared_sync
+
+log = logging.getLogger("sathop.worker.bundle")
+
+_LAST_USED_DIR = ".last_used"
 
 _ref_locks: dict[str, threading.Lock] = {}
 _ref_locks_guard = threading.Lock()
@@ -101,12 +107,105 @@ def ensure(
         manifest = BundleManifest.load(bundle_dir / "manifest.yaml")
         venv_python = _ensure_venv(manifest, bundle_dir, venv_root)
         shared_sync.sync(manifest.shared_files, shared_root, orchestrator_url, token)
+        # Touch the LRU sidecar after a successful ensure(): prune_caches uses
+        # this mtime to pick the oldest venv to evict. Done inside the lock so
+        # a concurrent prune can't see "fresh dir, stale sidecar" and delete it.
+        _touch_last_used(venv_root, name, version)
         return BundleHandle(
             manifest=manifest,
             root=bundle_dir,
             venv_python=venv_python,
             shared_dir=shared_root,
         )
+
+
+def _touch_last_used(venv_root: Path, name: str, version: str) -> None:
+    """Update the LRU mtime sidecar for `<name>@<version>`. Created lazily on
+    first ensure(); subsequent calls just refresh mtime via os.utime."""
+    sidecar_dir = venv_root / _LAST_USED_DIR
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    sidecar = sidecar_dir / f"{name}@{version}"
+    if sidecar.exists():
+        os.utime(sidecar, None)
+    else:
+        sidecar.touch()
+
+
+def _dir_size_bytes(path: Path) -> int:
+    """Sum file sizes recursively. Misses stat() races on freshly-deleted
+    files (concurrent ensure builds tmp dirs); we ignore-and-continue rather
+    than retry, since the size is just a hint for the LRU decision."""
+    total = 0
+    for p in path.rglob("*"):
+        if p.is_file():
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def prune_caches(venv_root: Path, cache_root: Path, limit_bytes: int) -> dict:
+    """Evict oldest cached venvs (and their sibling bundle source dirs) until
+    total size drops below `limit_bytes`. last-used order from the sidecar
+    mtime; ensure() refreshes the mtime on every lease so an actively-used
+    bundle is never the oldest. Returns {removed, freed_bytes, total_bytes}.
+
+    Skips refs whose `_lock_for` is held — those are mid-fetch or mid-build
+    and removing them under another worker's hands would race. Stale sidecars
+    (sidecar exists but venv dir doesn't) are cleaned up opportunistically.
+
+    `limit_bytes <= 0` disables pruning entirely (no-op fast path)."""
+    if limit_bytes <= 0:
+        return {"removed": 0, "freed_bytes": 0, "total_bytes": 0}
+    sidecar_dir = venv_root / _LAST_USED_DIR
+    if not sidecar_dir.is_dir():
+        return {"removed": 0, "freed_bytes": 0, "total_bytes": 0}
+
+    items: list[tuple[float, str, Path, int]] = []
+    for sidecar in sidecar_dir.iterdir():
+        if not sidecar.is_file():
+            continue
+        ref_dirname = sidecar.name
+        venv_dir = venv_root / ref_dirname
+        if not venv_dir.is_dir():
+            sidecar.unlink(missing_ok=True)
+            continue
+        try:
+            mtime = sidecar.stat().st_mtime
+        except OSError:
+            continue
+        size = _dir_size_bytes(venv_dir)
+        items.append((mtime, ref_dirname, venv_dir, size))
+
+    total = sum(it[3] for it in items)
+    if total <= limit_bytes:
+        return {"removed": 0, "freed_bytes": 0, "total_bytes": total}
+
+    items.sort(key=lambda it: it[0])  # oldest first
+
+    removed = 0
+    freed = 0
+    for _mtime, ref_dirname, venv_dir, size in items:
+        if total - freed <= limit_bytes:
+            break
+        # ref_dirname is `<name>@<version>`; locks key on `orch:<name>@<version>`.
+        ref = f"orch:{ref_dirname}"
+        lock = _lock_for(ref)
+        if not lock.acquire(blocking=False):
+            log.debug("skipping %s — in use by ensure()", ref_dirname)
+            continue
+        try:
+            shutil.rmtree(venv_dir, ignore_errors=True)
+            shutil.rmtree(cache_root / ref_dirname, ignore_errors=True)
+            (sidecar_dir / ref_dirname).unlink(missing_ok=True)
+        finally:
+            lock.release()
+        removed += 1
+        freed += size
+        log.info("evicted %s (%d bytes)", ref_dirname, size)
+
+    return {"removed": removed, "freed_bytes": freed, "total_bytes": total - freed}
 
 
 def _fetch_from_orch(orchestrator_url: str, token: str, name: str, version: str, dest: Path) -> None:

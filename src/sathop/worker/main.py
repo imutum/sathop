@@ -38,6 +38,7 @@ from sathop.shared.protocol import (
 )
 
 from . import bundle, downloader, storage, tls
+from . import shared as shared_sync
 from ._paths import safe_segment
 from .agent import OrchestratorClient
 from .config import Settings, load
@@ -201,6 +202,7 @@ class Worker:
             tg.create_task(self._pipeline_loop())
             tg.create_task(self._janitor_loop())
             tg.create_task(self._backpressure_loop())
+            tg.create_task(self._gc_loop())
             tg.create_task(self._drain_watchdog_loop())
             tg.create_task(self.progress.serve())
             if getattr(self.storage, "needs_static_server", False):
@@ -546,6 +548,54 @@ class Worker:
             except Exception as e:
                 log.warning("backpressure check failed: %s", e)
             await asyncio.sleep(self.s.backpressure_interval)
+
+    async def _gc_loop(self) -> None:
+        """Periodic local disk cleanup. Two jobs:
+          1. Evict oldest cached venvs (+ matching bundle source dirs) once
+             the venv cache exceeds SATHOP_VENV_CACHE_LIMIT_GB. ensure()
+             refreshes the LRU sidecar on each lease, so an actively-used
+             bundle can never be the oldest.
+          2. Drop shared-file cache files whose name is no longer in the
+             orchestrator registry — bundles can drift faster than the cache
+             notices, and an orphan can shadow a re-uploaded name on the
+             next ensure().
+
+        SATHOP_GC_INTERVAL=0 disables the loop entirely. Each job runs
+        under asyncio.to_thread because they're stat()/rmtree-heavy."""
+        if self.s.gc_interval_sec <= 0:
+            log.info("gc loop disabled (SATHOP_GC_INTERVAL=0)")
+            return
+        limit_bytes = int(self.s.venv_cache_limit_gb * 1024**3)
+        while True:
+            try:
+                r = await asyncio.to_thread(
+                    bundle.prune_caches,
+                    self.s.venv_cache,
+                    self.s.bundle_cache,
+                    limit_bytes,
+                )
+                if r["removed"]:
+                    log.info(
+                        "venv LRU evicted %d entr(ies), freed %.1f GB (now %.1f GB total)",
+                        r["removed"],
+                        r["freed_bytes"] / 1024**3,
+                        r["total_bytes"] / 1024**3,
+                    )
+                shared_r = await asyncio.to_thread(
+                    shared_sync.prune_orphans,
+                    self.s.shared_cache,
+                    self.s.orchestrator_url,
+                    self.s.token,
+                )
+                if shared_r["removed"]:
+                    log.info(
+                        "shared orphan cleanup removed %d file(s), freed %.1f MB",
+                        shared_r["removed"],
+                        shared_r["freed_bytes"] / 1024**2,
+                    )
+            except Exception as e:
+                log.warning("gc loop iteration failed: %s", e)
+            await asyncio.sleep(self.s.gc_interval_sec)
 
     async def _janitor_loop(self) -> None:
         while True:

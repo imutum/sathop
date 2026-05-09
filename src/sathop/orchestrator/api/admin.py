@@ -16,7 +16,9 @@ from sathop import __version__
 from sathop.shared.protocol import NON_TERMINAL_STATES, GranuleState
 
 from ..config import require_token, settings
-from ..db import Event, Granule, session
+from ..db import Batch, Bundle, Event, Granule, session, utcnow
+from ..pubsub import log_event as log
+from ..pubsub import publish
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_token)])
 
@@ -180,6 +182,87 @@ class OrchestratorInfo(BaseModel):
     stuck_age_hours: int
     dev_mode: bool
     auth_open: bool
+
+
+@router.post("/gc/bundles")
+async def gc_bundles(
+    dry_run: bool = True,
+    age_days: int = 30,
+    s: AsyncSession = Depends(session),
+) -> dict:
+    """Garbage-collect orphaned bundle versions: rows with `in_use_count == 0`
+    AND `uploaded_at < now - age_days`. Sweeps the registry of stale `bump
+    version → upload → discard` cycles that otherwise pile up indefinitely.
+    Default `dry_run=True` returns the candidate list only; pass `dry_run=
+    false` to actually delete (rows + their orphaned blob files).
+
+    `age_days` lower bound exists to avoid racing with batch-create flows
+    that just uploaded a bundle but haven't created the batch yet — 30 days
+    is a generous default; operators can pass a smaller value if they know
+    they don't have such flows in flight."""
+    if age_days < 0:
+        return {"error": "age_days must be ≥ 0"}
+    threshold = utcnow() - timedelta(days=age_days)
+    bundles = (await s.execute(select(Bundle))).scalars().all()
+    counts_stmt = select(Batch.bundle_ref, func.count(Batch.batch_id)).group_by(Batch.bundle_ref)
+    in_use = {ref: n for ref, n in (await s.execute(counts_stmt)).all()}
+
+    candidates: list[Bundle] = [
+        b for b in bundles if in_use.get(f"orch:{b.name}@{b.version}", 0) == 0 and b.uploaded_at < threshold
+    ]
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "age_days": age_days,
+            "candidates": [
+                {
+                    "name": b.name,
+                    "version": b.version,
+                    "size": b.size,
+                    "sha256": b.sha256,
+                    "uploaded_at": b.uploaded_at.isoformat(),
+                    "age_days": (utcnow() - b.uploaded_at).days,
+                }
+                for b in candidates
+            ],
+            "freed_bytes_estimate": sum(b.size for b in candidates),
+        }
+
+    # Actual delete: drop rows then resolve blob orphans. Two-phase so the
+    # blob unlink decision sees post-delete row counts (a sha shared by two
+    # rows where we delete one must keep the blob).
+    deleted_meta: list[dict[str, Any]] = []
+    freed = 0
+    shas: set[str] = set()
+    for b in candidates:
+        deleted_meta.append({"name": b.name, "version": b.version, "size": b.size, "sha256": b.sha256})
+        freed += b.size
+        shas.add(b.sha256)
+        await s.delete(b)
+    await s.flush()
+
+    unlinked: list[str] = []
+    for sha in shas:
+        others = await s.scalar(select(func.count()).select_from(Bundle).where(Bundle.sha256 == sha))
+        if not others:
+            blob = settings.bundle_storage / f"{sha}.zip"
+            if blob.is_file():
+                blob.unlink()
+                unlinked.append(sha)
+
+    if deleted_meta:
+        await log(s, "bundles", f"GC deleted {len(deleted_meta)} bundle(s) ({freed} bytes)")
+    await s.commit()
+    if deleted_meta:
+        publish({"scope": "bundles"})
+    return {
+        "dry_run": False,
+        "age_days": age_days,
+        "deleted": deleted_meta,
+        "freed_bytes": freed,
+        "unlinked_blobs": len(unlinked),
+    }
 
 
 @router.get("/settings/info", response_model=OrchestratorInfo)
