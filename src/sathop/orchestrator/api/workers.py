@@ -381,6 +381,11 @@ async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
     g.leased_by = None
     g.lease_expires_at = None
     g.error = None
+    # Clear subprocess output tails on success — they were from a previous
+    # failed attempt and are no longer relevant. Keeping them around would
+    # confuse operators looking at a now-uploaded granule.
+    g.stdout_tail = None
+    g.stderr_tail = None
     g.updated_at = now
     _record_stage(s, g, "upload", prev_at, now)
     await log(s, req.worker_id, f"uploaded {len(req.objects)} objects", granule_id=g.granule_id)
@@ -404,6 +409,13 @@ async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> di
 
     g.retry_count += 1
     g.error = req.error[:2000]
+    # Persist subprocess output tails so operators can inspect bundle prints /
+    # tracebacks from the UI. Capped per-column at 16 KB; the worker also caps
+    # before sending so the request body stays bounded.
+    if req.stdout_tail is not None:
+        g.stdout_tail = req.stdout_tail[:16000]
+    if req.stderr_tail is not None:
+        g.stderr_tail = req.stderr_tail[:16000]
     g.leased_by = None
     g.lease_expires_at = None
     g.state = (

@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import shutil
+import signal
 import time
 import traceback
 from collections import Counter
@@ -47,6 +48,11 @@ log = logging.getLogger("sathop.worker")
 
 _PROCESSING_FAILURE_TAIL_CHARS = 2000
 _WORKER_TRACEBACK_TAIL_CHARS = 1500
+# Bundle subprocess stdout/stderr tails forwarded to orchestrator on failure.
+# 16 KB ≈ 4 screens of text — enough to see full Python tracebacks plus a
+# reasonable prelude, without bloating the failure POST body. Orchestrator
+# caps to the same value when persisting.
+_PROCESS_OUTPUT_TAIL_CHARS = 16000
 
 
 class LeaseRevoked(Exception):
@@ -58,6 +64,13 @@ class LeaseRevoked(Exception):
 
 _DOWNLOAD_PROGRESS_MIN_INTERVAL_SECONDS = 2.0
 _DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT = 5.0
+# Drain watchdog: once draining is set, wait up to this long for in-flight
+# handlers to finish naturally before forcing exit. Tuned for the typical
+# bundle (1-3 min process); a runaway 10 min process gets cut off and the
+# orchestrator's lease sweeper picks the granule back up after the 30 min
+# lease expiry. Trade-off matches docker-compose stop_grace_period: 60s.
+_DRAIN_WATCHDOG_TIMEOUT_SEC = 60
+_DRAIN_POLL_INTERVAL_SEC = 1.0
 _StageTransition = Callable[[str], None]
 _StageExit = Callable[[], None]
 
@@ -77,6 +90,11 @@ class Worker:
         )
         self.stage: Counter[str] = Counter()
         self._pause_lease = False
+        # Set to True on SIGTERM/SIGINT or operator-requested restart. The
+        # pipeline loop stops requesting new leases; in-flight handlers run to
+        # completion. _drain_watchdog_loop forces exit after the timeout if
+        # handlers don't finish on their own (e.g. a stuck process subprocess).
+        self._draining = False
         self._download_sem = asyncio.Semaphore(s.download_concurrency)
         # CPU 是 process 阶段的硬瓶颈 — modis 重投影/解压都是计算密集型，让
         # 多个粒同时跑只会线性拉长每个粒的耗时（实测 6 并发下单粒 6.2 min，
@@ -93,6 +111,53 @@ class Worker:
         self.progress = ProgressServer(self.client, port=s.progress_port)
         for p in (s.work_root, s.bundle_cache, s.venv_cache, s.shared_cache, s.storage_root):
             p.mkdir(parents=True, exist_ok=True)
+
+    def _start_drain(self, reason: str) -> None:
+        """Idempotent. Logs once on first call; subsequent calls are no-ops so
+        a SIGTERM hot on the heels of a SIGINT (or vice versa) doesn't spam
+        the log or reset any state."""
+        if self._draining:
+            return
+        self._draining = True
+        log.warning("entering graceful drain (%s) — will exit after in-flight handlers complete", reason)
+
+    def _install_signal_handlers(self) -> None:
+        """SIGTERM = docker stop / kubectl drain; SIGINT = Ctrl+C in dev.
+        Either should trigger drain instead of immediate exit. We try the
+        asyncio API first (clean integration with the running loop) and fall
+        back to signal.signal on Windows where add_signal_handler raises
+        NotImplementedError. The fallback runs the callback in a separate
+        thread and that thread can't touch loop-bound state safely, so it
+        only flips a plain boolean — which is exactly what _start_drain does."""
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, self._start_drain, f"signal {sig.name}")
+            except NotImplementedError:
+                signal.signal(sig, lambda _s, _f, name=sig.name: self._start_drain(f"signal {name}"))
+
+    async def _drain_watchdog_loop(self) -> None:
+        """While not draining: sleep. Once draining: poll handler count; exit 0
+        when all handlers have finished or after the timeout. Hard exit (not
+        TaskGroup cancel) because janitor / heartbeat / progress server would
+        otherwise keep the process alive — we want a clean docker SIGTERM-
+        triggered exit so the container restart policy can take over."""
+        while not self._draining:
+            await asyncio.sleep(_DRAIN_POLL_INTERVAL_SEC)
+        deadline = time.monotonic() + _DRAIN_WATCHDOG_TIMEOUT_SEC
+        log.info("drain watchdog armed; %d handler(s) in flight", len(self._handlers))
+        while time.monotonic() < deadline:
+            if not self._handlers:
+                log.info("drain complete — all handlers finished, exiting")
+                os._exit(0)
+            await asyncio.sleep(_DRAIN_POLL_INTERVAL_SEC)
+        log.warning(
+            "drain timeout (%ds) reached with %d handler(s) still in flight — forcing exit; "
+            "lease sweeper will reclaim",
+            _DRAIN_WATCHDOG_TIMEOUT_SEC,
+            len(self._handlers),
+        )
+        os._exit(0)
 
     def _ensure_tls(self) -> str | None:
         """SATHOP_PUBLIC_URL https? ⇒ generate (or reuse) a self-signed cert
@@ -111,6 +176,7 @@ class Worker:
         return pem
 
     async def run(self) -> None:
+        self._install_signal_handlers()
         ca_pem = self._ensure_tls()
         await self.client.register(
             WorkerRegister(
@@ -135,6 +201,7 @@ class Worker:
             tg.create_task(self._pipeline_loop())
             tg.create_task(self._janitor_loop())
             tg.create_task(self._backpressure_loop())
+            tg.create_task(self._drain_watchdog_loop())
             tg.create_task(self.progress.serve())
             if getattr(self.storage, "needs_static_server", False):
                 tg.create_task(
@@ -172,13 +239,13 @@ class Worker:
                     )
                 )
                 if resp.restart_requested:
-                    # Operator clicked "重启" — exit hard so docker
-                    # `restart: unless-stopped` brings us back fresh. Lease
-                    # sweeper reclaims in-flight granules; finally-block
-                    # cleanup is skipped on _exit, but tmp work_dirs are
-                    # purgeable and idempotent. Atexit handlers also skipped.
-                    log.warning("restart requested via orchestrator — exiting")
-                    os._exit(0)
+                    # Operator clicked "重启". Don't os._exit here — instead
+                    # flip the drain flag so the pipeline stops accepting
+                    # new work and in-flight handlers finish naturally. The
+                    # drain watchdog calls os._exit once handlers are done
+                    # (or after timeout). Docker `restart: unless-stopped`
+                    # then brings us back fresh.
+                    self._start_drain("restart_requested via orchestrator")
                 # Cancel any handler whose lease the orchestrator no longer
                 # credits to us — batch cancel, granule cancel, sweeper reclaim
                 # all surface here. CancelledError propagates through _handle's
@@ -216,7 +283,7 @@ class Worker:
                 self.s.process_concurrency + self.s.download_concurrency,
             )
             free = ceiling - sum(self.stage.values())
-            if free <= 0 or self._pause_lease:
+            if free <= 0 or self._pause_lease or self._draining:
                 await asyncio.sleep(self.s.lease_poll_interval)
                 continue
             try:
@@ -273,6 +340,8 @@ class Worker:
                         granule_id=gid,
                         worker_id=self.s.worker_id,
                         error=_processing_failure_message(result.stderr),
+                        stdout_tail=_tail_or_none(result.stdout, _PROCESS_OUTPUT_TAIL_CHARS),
+                        stderr_tail=_tail_or_none(result.stderr, _PROCESS_OUTPUT_TAIL_CHARS),
                         exit_code=result.exit_code,
                     )
                 )
@@ -504,6 +573,16 @@ def _auth_for(creds: dict[str, Credential], name: str | None, gid: str) -> Crede
 
 def _processing_failure_message(stderr: str) -> str:
     return (stderr or "no output")[-_PROCESSING_FAILURE_TAIL_CHARS:]
+
+
+def _tail_or_none(s: str, n: int) -> str | None:
+    """Return the last n chars of s, or None if s is empty/None. Used for
+    optional `stdout_tail`/`stderr_tail` carried on ProcessFailure: an
+    empty string would clear a previous attempt's tail in the DB and the
+    UI would show 'empty stdout' instead of 'no stdout reported'."""
+    if not s:
+        return None
+    return s if len(s) <= n else s[-n:]
 
 
 def _traceback_tail(exc: Exception) -> str:

@@ -93,6 +93,10 @@ export type GranuleRow = {
   retry_count: number;
   leased_by: string | null;
   error: string | null;
+  // Bundle subprocess output tails captured on the failing attempt; null on
+  // success or for granules that haven't failed yet. Surfaced in ErrorCell.
+  stdout_tail: string | null;
+  stderr_tail: string | null;
   updated_at: string;
   objects_exhausted: number;
 };

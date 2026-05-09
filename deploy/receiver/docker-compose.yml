@@ -7,3 +7,16 @@ services:
       SATHOP_STORAGE_DIR: /data/archive
     volumes:
       - ${RECEIVER_HOST_ARCHIVE:-./archive}:/data/archive
+    # SIGTERM ⇒ graceful drain (producer stops, in-flight pulls finish + ack).
+    # 30s matches the receiver's drain watchdog; pulls are short relative to
+    # worker process steps so the bound is tighter.
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    # Receiver is otherwise outbound-only; the embedded _HealthServer binds
+    # 127.0.0.1:9003 inside the container so docker can probe liveness.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9003/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s

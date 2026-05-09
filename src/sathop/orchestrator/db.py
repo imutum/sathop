@@ -117,6 +117,12 @@ class Granule(Base):
     leased_by: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Last-attempt bundle subprocess output tails. Populated by report_failure;
+    # cleared by the orchestrator when a granule transitions to UPLOADED so old
+    # tails don't linger past the success that overrode them. Nullable so
+    # _ensure_columns can ALTER TABLE ADD on existing DBs cleanly.
+    stdout_tail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stderr_tail: Mapped[str | None] = mapped_column(Text, nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)

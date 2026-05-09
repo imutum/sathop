@@ -97,8 +97,15 @@ function stripBatchPrefix(gid: string) {
           </span>
           <span>{{ fmtAge(g.updated_at) }}</span>
         </div>
-        <div v-if="g.error" class="font-mono text-cell text-danger">
-          <ErrorCell :error="g.error" />
+        <div
+          v-if="g.error || g.stdout_tail || g.stderr_tail"
+          class="font-mono text-cell text-danger"
+        >
+          <ErrorCell
+            :error="g.error"
+            :stdout-tail="g.stdout_tail"
+            :stderr-tail="g.stderr_tail"
+          />
         </div>
         <div
           v-if="cancellable.has(g.state) || retryable.has(g.state)"
@@ -192,7 +199,11 @@ function stripBatchPrefix(gid: string) {
             </TableCell>
             <TableCell class="py-2.5 text-cell text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
             <TableCell class="max-w-[320px] py-2.5 font-mono text-cell text-danger">
-              <ErrorCell :error="g.error" />
+              <ErrorCell
+                :error="g.error"
+                :stdout-tail="g.stdout_tail"
+                :stderr-tail="g.stderr_tail"
+              />
             </TableCell>
             <TableCell class="space-x-1 whitespace-nowrap px-5 py-2.5 text-right">
               <Button

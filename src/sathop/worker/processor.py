@@ -38,6 +38,50 @@ class ProcessResult:
 
 _GRACEFUL_KILL_WAIT_SEC = 5.0
 
+# Bundle subprocesses are user-supplied code with full filesystem access; we
+# don't sandbox them. But we DO refuse to leak the worker's own secrets — most
+# critically SATHOP_TOKEN, which would let a malicious bundle call the
+# orchestrator API as the worker. Whitelisted vars cover what programs need to
+# resolve interpreters, locate temp dirs, and emit localized output, and
+# nothing else. Unknown SATHOP_* values are explicitly NOT inherited; the
+# worker injects the small set bundles legitimately need (SATHOP_INPUT_DIR /
+# OUTPUT_DIR / WORK_DIR / SHARED_DIR / GRANULE_ID / BATCH_ID / META_JSON /
+# VENV_PYTHON / PROGRESS_URL) below.
+_ENV_WHITELIST: frozenset[str] = frozenset(
+    {
+        # Cross-platform
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LC_MESSAGES",
+        "TZ",
+        # POSIX
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        # Windows
+        "SYSTEMROOT",
+        "WINDIR",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "PATHEXT",
+        "COMSPEC",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "OS",
+        "COMPUTERNAME",
+    }
+)
+
 
 def _build_env(
     bundle: BundleHandle,
@@ -51,12 +95,15 @@ def _build_env(
     execution_env: dict[str, str] | None,
     progress_url: str | None,
 ) -> dict[str, str]:
-    """Env precedence (later wins): os ⇒ bundle manifest ⇒ batch override ⇒
-    internal SATHOP_* (system-owned, not operator-tunable). PATH is prefixed
-    with the bundle venv's bin dir so the entrypoint can just invoke
-    `python ...` cross-platform (cmd.exe doesn't expand $VAR)."""
+    """Env precedence (later wins): whitelisted os ⇒ bundle manifest ⇒ batch
+    override ⇒ internal SATHOP_* (system-owned, not operator-tunable). PATH is
+    prefixed with the bundle venv's bin dir so the entrypoint can just invoke
+    `python ...` cross-platform (cmd.exe doesn't expand $VAR).
+
+    The whitelist filter prevents worker-process secrets (e.g. SATHOP_TOKEN)
+    from being inherited by user bundle code. See _ENV_WHITELIST above."""
     venv_bin = str(bundle.venv_python.parent)
-    env = dict(os.environ)
+    env = {k: v for k, v in os.environ.items() if k in _ENV_WHITELIST}
     env.update(bundle.manifest.execution.get("env", {}))
     if execution_env:
         env.update(execution_env)

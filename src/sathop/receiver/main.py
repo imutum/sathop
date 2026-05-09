@@ -8,6 +8,7 @@ import logging
 import os
 import secrets
 import shutil
+import signal
 import ssl
 import sys
 import time
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import Literal, cast
 
 import httpx
+import uvicorn
+from fastapi import FastAPI
 
 from sathop import __version__
 from sathop.shared.config import resolve_orch
@@ -63,6 +66,11 @@ log = logging.getLogger("sathop.receiver")
 
 _CHUNK = 256 * 1024
 _THROUGHPUT_WINDOW_SEC = 60.0
+# Drain watchdog: see worker/main.py for the matching constant. Shorter here
+# (30s) because individual pulls are short relative to a worker's process step,
+# so the bound on natural completion is much tighter — we don't need 60s.
+_DRAIN_WATCHDOG_TIMEOUT_SEC = 30
+_DRAIN_POLL_INTERVAL_SEC = 1.0
 
 
 class _PullStats:
@@ -124,6 +132,11 @@ class Settings:
     # from parallelism without paying range overhead on tiny config blobs.
     pull_segments: int = 4
     pull_segment_min_bytes: int = 4 * 1024 * 1024  # 4 MB
+    # Bind a tiny FastAPI server on 127.0.0.1:<health_port> exposing /health,
+    # so docker (and a future K8s liveness probe) can tell "process is alive
+    # and event loop responsive" from "process is alive but stuck". Receiver
+    # is otherwise an outbound-only agent.
+    health_port: int = 9003
 
 
 def _parse_bool(s: str, default: bool) -> bool:
@@ -166,6 +179,7 @@ def load() -> Settings:
         tls_trust_orch=_parse_bool(os.getenv("SATHOP_TLS_TRUST_ORCH", ""), True),
         pull_segments=int(os.getenv("SATHOP_PULL_SEGMENTS", "4")),
         pull_segment_min_bytes=int(os.getenv("SATHOP_PULL_SEGMENT_MIN_BYTES", str(4 * 1024 * 1024))),
+        health_port=int(os.getenv("SATHOP_HEALTH_PORT", "9003")),
     )
 
 
@@ -357,6 +371,33 @@ async def _pull_single(client: httpx.AsyncClient, url: str, dest: Path) -> tuple
     return h.hexdigest(), size
 
 
+class _HealthServer:
+    """Minimal FastAPI server exposing /health on 127.0.0.1:<port>. Lives in
+    receiver because receiver is otherwise outbound-only (no HTTP server) —
+    docker healthcheck needs *something* to curl. Worker piggybacks the same
+    /health route on its existing ProgressServer instead."""
+
+    def __init__(self, port: int, host: str = "127.0.0.1") -> None:
+        self._host = host
+        self._port = port
+        self.app = FastAPI()
+
+        @self.app.get("/health")
+        async def health() -> dict:
+            return {"status": "ok"}
+
+    async def serve(self) -> None:
+        config = uvicorn.Config(
+            self.app,
+            host=self._host,
+            port=self._port,
+            log_level="warning",
+            access_log=False,
+            lifespan="off",
+        )
+        await uvicorn.Server(config).serve()
+
+
 class Receiver:
     def __init__(self, s: Settings) -> None:
         self.s = s
@@ -372,6 +413,12 @@ class Receiver:
         # TLS sessions warm and let the OS skip TCP slow-start on each new
         # range request, which is doubly important for segmented downloads.
         self._pull_client: httpx.AsyncClient = self._build_pull_client()
+        self._health = _HealthServer(s.health_port)
+        # SIGTERM/SIGINT and operator-requested restart flip this; the pull
+        # producer stops requesting new offers, in-flight pulls finish, and
+        # _drain_watchdog_loop exits the process. See worker/main.py for the
+        # matching pattern.
+        self._draining = False
         # In-flight object_ids — the orchestrator's /pull endpoint re-offers
         # any not-yet-acked object on every call (it has no notion of "this
         # receiver already started fetching this"), so without dedup the
@@ -379,6 +426,42 @@ class Receiver:
         # mutations are sync-no-await so single-threaded asyncio makes this
         # race-free without a lock.
         self._inflight: set[int] = set()
+
+    def _start_drain(self, reason: str) -> None:
+        if self._draining:
+            return
+        self._draining = True
+        log.warning("entering graceful drain (%s) — will exit after in-flight pulls complete", reason)
+
+    def _install_signal_handlers(self) -> None:
+        """SIGTERM = docker stop / kubectl drain; SIGINT = Ctrl+C in dev.
+        Asyncio API where available; signal.signal fallback on Windows."""
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, self._start_drain, f"signal {sig.name}")
+            except NotImplementedError:
+                signal.signal(sig, lambda _s, _f, name=sig.name: self._start_drain(f"signal {name}"))
+
+    async def _drain_watchdog_loop(self) -> None:
+        """Hard exit once draining + in-flight set is empty (or after timeout).
+        See worker/main.py for the rationale."""
+        while not self._draining:
+            await asyncio.sleep(_DRAIN_POLL_INTERVAL_SEC)
+        deadline = time.monotonic() + _DRAIN_WATCHDOG_TIMEOUT_SEC
+        log.info("drain watchdog armed; %d pull(s) in flight", len(self._inflight))
+        while time.monotonic() < deadline:
+            if not self._inflight:
+                log.info("drain complete — all pulls finished, exiting")
+                os._exit(0)
+            await asyncio.sleep(_DRAIN_POLL_INTERVAL_SEC)
+        log.warning(
+            "drain timeout (%ds) reached with %d pull(s) still in flight — forcing exit; "
+            "orchestrator will re-offer un-acked objects",
+            _DRAIN_WATCHDOG_TIMEOUT_SEC,
+            len(self._inflight),
+        )
+        os._exit(0)
 
     def _build_pull_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -433,6 +516,7 @@ class Receiver:
         log.info("trusting orchestrator-managed CA bundle at %s (%d bytes)", bundle_path, len(r.text))
 
     async def run(self) -> None:
+        self._install_signal_handlers()
         await self._resolve_trust()
         await self.client.register(
             ReceiverRegister(
@@ -446,6 +530,8 @@ class Receiver:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(self._heartbeat_loop())
             tg.create_task(self._pull_loop())
+            tg.create_task(self._drain_watchdog_loop())
+            tg.create_task(self._health.serve())
 
     async def _heartbeat_loop(self) -> None:
         while True:
@@ -461,12 +547,11 @@ class Receiver:
                     )
                 )
                 if resp.restart_requested:
-                    # Operator clicked "重启" — exit hard so docker
-                    # `restart: unless-stopped` brings us back fresh. In-flight
-                    # pulls drop their `.part-<token>` tmp; re-offer happens
-                    # naturally when the orch hasn't seen an ack yet.
-                    log.warning("restart requested via orchestrator — exiting")
-                    os._exit(0)
+                    # Operator clicked "重启". Flip drain instead of os._exit
+                    # so in-flight pulls finish their bytes (saving the partial
+                    # work + ack round-trip) before docker restarts us. Worker
+                    # main.py has the same pattern.
+                    self._start_drain("restart_requested via orchestrator")
             except Exception as e:
                 log.warning("heartbeat failed: %s", e)
             await asyncio.sleep(self.s.poll_interval)
@@ -496,8 +581,15 @@ class Receiver:
         """Single producer task: ask orch for `concurrent_pulls * 2` items,
         push into queue. queue.put blocks when full so we don't accumulate
         more offers than workers can drain. Dedups against in-flight ids
-        because /pull keeps re-offering not-yet-acked objects."""
+        because /pull keeps re-offering not-yet-acked objects.
+
+        While draining: stop calling /pull but keep the task alive (idle
+        sleep) so the TaskGroup doesn't unwind before the watchdog gets to
+        os._exit. In-flight workers continue draining the queue."""
         while True:
+            if self._draining:
+                await asyncio.sleep(_DRAIN_POLL_INTERVAL_SEC)
+                continue
             try:
                 resp = await self.client.pull(
                     PullRequest(

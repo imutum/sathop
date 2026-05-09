@@ -107,6 +107,8 @@ def _granule_row(granule: Granule, *, objects_exhausted: int = 0) -> GranuleRow:
         retry_count=granule.retry_count,
         leased_by=granule.leased_by,
         error=granule.error,
+        stdout_tail=granule.stdout_tail,
+        stderr_tail=granule.stderr_tail,
         updated_at=granule.updated_at,
         objects_exhausted=objects_exhausted,
     )

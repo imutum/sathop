@@ -32,6 +32,14 @@ class ProgressServer:
         self.base_url = f"http://{host}:{port}"
         self.app = FastAPI()
 
+        # /health is unauthenticated by design — bound to 127.0.0.1 only, used
+        # by docker healthcheck (curl from inside the container) and operators
+        # poking the worker locally. No DB call, no I/O — must stay cheap so a
+        # 1s healthcheck interval can't pile up backlog.
+        @self.app.get("/health")
+        async def health() -> dict:
+            return {"status": "ok"}
+
         @self.app.post("/progress/{nonce}")
         async def progress(nonce: str, req: Request) -> dict:
             gid = self._tokens.get(nonce)

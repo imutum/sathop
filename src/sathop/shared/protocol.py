@@ -229,6 +229,11 @@ class GranuleRow(BaseModel):
     retry_count: int
     leased_by: str | None
     error: str | None
+    # Bundle subprocess output tails captured on the failing attempt; None on
+    # success or for granules that haven't failed yet. Lets the UI surface
+    # bundle prints/tracebacks without operators ssh'ing into a worker.
+    stdout_tail: str | None = None
+    stderr_tail: str | None = None
     updated_at: datetime
     # Count of this granule's objects that have hit max_pull_failures and are
     # no longer offered to receivers. Lets the UI flag granules stuck in
@@ -274,7 +279,15 @@ class UploadReport(BaseModel):
 class ProcessFailure(BaseModel):
     granule_id: str
     worker_id: str
+    # Short summary used by the worker logger and the orchestrator events feed.
+    # Historically the only failure-context field; kept as-is for back-compat.
     error: str
+    # Full(er) bundle subprocess output tails. None when the failure happened
+    # before the subprocess produced any output (e.g. worker-side exception).
+    # Capped at the worker side (~16 KB per stream) so a runaway log doesn't
+    # blow the request body; orchestrator caps again on persist.
+    stdout_tail: str | None = None
+    stderr_tail: str | None = None
     exit_code: int | None = None
 
 

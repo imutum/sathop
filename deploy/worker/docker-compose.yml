@@ -31,3 +31,17 @@ services:
     volumes:
       - ./data:/app/data
       - ./aria2-downloads:/downloads
+    # SIGTERM ⇒ graceful drain (stop accepting new leases, finish in-flight).
+    # 60s matches the worker's drain watchdog; longer downloads/processes that
+    # don't finish in time get cut off and the orchestrator's lease sweeper
+    # reclaims them on the 30 min lease expiry.
+    stop_signal: SIGTERM
+    stop_grace_period: 60s
+    # /health is served by the worker's progress server (default 9002, bound
+    # to 127.0.0.1 inside the container). Curl is available in the base image.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9002/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s

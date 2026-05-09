@@ -287,6 +287,35 @@ async def test_batch_env_cannot_hijack_progress_url(tmp_path, work_root):
     assert r.outputs[0].read_text(encoding="utf-8") == "http://127.0.0.1:9002/progress/real"
 
 
+async def test_worker_secrets_not_leaked_to_bundle(tmp_path, work_root, monkeypatch):
+    """Critical security guarantee: bundle subprocesses must NOT inherit the
+    worker's SATHOP_TOKEN (or any other non-whitelisted env var) — otherwise a
+    malicious bundle could call the orchestrator API with worker-level
+    privileges. The env whitelist in processor._ENV_WHITELIST enforces this;
+    SATHOP_* variables the bundle legitimately needs are injected explicitly
+    by _build_env (granule id, batch id, dirs, ...) and aren't inherited as
+    a class."""
+    monkeypatch.setenv("SATHOP_TOKEN", "secret-token-xyz")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "leaky-aws-key")
+    monkeypatch.setenv("SATHOP_INTERNAL_ARBITRARY", "should-not-leak")
+    script = (
+        "import os, pathlib\n"
+        "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
+        "(o / 'env.txt').write_text(\n"
+        "    f\"token={os.environ.get('SATHOP_TOKEN','MISSING')};\"\n"
+        "    f\"aws={os.environ.get('AWS_SECRET_ACCESS_KEY','MISSING')};\"\n"
+        "    f\"arb={os.environ.get('SATHOP_INTERNAL_ARBITRARY','MISSING')}\"\n"
+        ")\n"
+    )
+    h = _make_bundle(tmp_path, "python run.py", script)
+    r = await run_bundle(h, "g", "b", [], {}, work_root)
+    assert r.ok
+    out = r.outputs[0].read_text(encoding="utf-8")
+    assert "token=MISSING" in out, f"SATHOP_TOKEN leaked to bundle: {out!r}"
+    assert "aws=MISSING" in out, f"AWS_SECRET_ACCESS_KEY leaked: {out!r}"
+    assert "arb=MISSING" in out, f"non-whitelisted SATHOP_* leaked: {out!r}"
+
+
 async def test_cancel_kills_subprocess_promptly(tmp_path, work_root):
     """The whole reason run_bundle is async: when the worker's handler task
     is cancelled (operator hit "取消批次"), the child must die within a few

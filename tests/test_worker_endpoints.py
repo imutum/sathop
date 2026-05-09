@@ -157,3 +157,61 @@ async def test_failure_rejects_when_other_worker_owns(client):
     await _seed_granule(state=GranuleState.PROCESSING.value, leased_by="w2")
     r = client.post("/api/workers/failure", json=_failure_payload(worker_id="w1"))
     assert r.status_code == 409
+
+
+async def test_failure_persists_stdout_stderr_tails(client):
+    """Bundle subprocess output captured at failure time is persisted so the UI
+    can show it without operators ssh'ing into a worker."""
+    await _seed_granule(state=GranuleState.PROCESSING.value)
+    payload = {
+        **_failure_payload(),
+        "stdout_tail": "step 1: ok\nstep 2: ok\nstep 3: BOOM",
+        "stderr_tail": "Traceback (most recent call last):\n  ...\nValueError: bad",
+    }
+    r = client.post("/api/workers/failure", json=payload)
+    assert r.status_code == 200
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, "g1")
+        assert g.stdout_tail == "step 1: ok\nstep 2: ok\nstep 3: BOOM"
+        assert g.stderr_tail.startswith("Traceback")
+
+
+async def test_failure_caps_oversized_tails(client):
+    """Worker is supposed to cap before sending, but the orch must not trust
+    that — a misbehaving / older worker mustn't be able to write multi-MB rows."""
+    await _seed_granule(state=GranuleState.PROCESSING.value)
+    huge = "x" * 50_000
+    r = client.post(
+        "/api/workers/failure",
+        json={**_failure_payload(), "stdout_tail": huge, "stderr_tail": huge},
+    )
+    assert r.status_code == 200
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, "g1")
+        assert len(g.stdout_tail) == 16000
+        assert len(g.stderr_tail) == 16000
+
+
+async def test_upload_clears_previous_failure_tails(client):
+    """A retried granule whose previous attempt failed (stdout_tail set) and
+    then succeeded (PROCESSED → UPLOADED) shouldn't keep the stale tails."""
+    await _seed_granule(state=GranuleState.PROCESSING.value)
+    # First attempt fails with tails.
+    client.post(
+        "/api/workers/failure",
+        json={**_failure_payload(), "stdout_tail": "noisy", "stderr_tail": "broken"},
+    )
+    # Operator clicks retry → state back to PENDING; assume worker leases and
+    # marches all the way to PROCESSED. Simulate by directly setting state.
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, "g1")
+        g.state = GranuleState.PROCESSED.value
+        g.leased_by = "w1"
+        g.lease_expires_at = utcnow() + timedelta(minutes=30)
+        await s.commit()
+    r = client.post("/api/workers/upload", json=_upload_payload())
+    assert r.status_code == 200
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, "g1")
+        assert g.stdout_tail is None
+        assert g.stderr_tail is None
