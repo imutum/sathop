@@ -189,7 +189,15 @@ export type ProgressRow = {
   detail: string | null;
 };
 
-export type TimingStage = "download" | "process" | "upload";
+// 6 阶段：每个"真实工作阶段"配一个 *_wait 表示在 sem 排队等槽位的时间。
+// 老批次的 *_wait 行不存在 → batch_timing 返回全零 stats，UI 可无脑渲染。
+export type TimingStage =
+  | "download_wait"
+  | "download"
+  | "process_wait"
+  | "process"
+  | "upload_wait"
+  | "upload";
 
 export type TimingRow = {
   id: number;

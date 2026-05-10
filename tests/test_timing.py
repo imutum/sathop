@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -49,8 +49,9 @@ def _state(client, gid: str, state: str):
     )
 
 
-def _full_lifecycle(client, gid: str = "g1") -> None:
-    """Drive PENDING → UPLOADED through the public API."""
+def _full_lifecycle(client, gid: str = "g1", *, upload_started_at: str | None = None) -> None:
+    """Drive PENDING → UPLOADED through the public API. Pass `upload_started_at`
+    to exercise the worker→orch upload_wait/upload split."""
     r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 1})
     assert r.status_code == 200
     assert any(it["granule_id"] == gid for it in r.json()["items"])
@@ -58,23 +59,31 @@ def _full_lifecycle(client, gid: str = "g1") -> None:
     assert _state(client, gid, GranuleState.DOWNLOADED.value).status_code == 200
     assert _state(client, gid, GranuleState.PROCESSING.value).status_code == 200
     assert _state(client, gid, GranuleState.PROCESSED.value).status_code == 200
-    r = client.post(
-        "/api/workers/upload",
-        json={"granule_id": gid, "worker_id": "w1", "objects": []},
-    )
+    payload: dict = {"granule_id": gid, "worker_id": "w1", "objects": []}
+    if upload_started_at is not None:
+        payload["upload_started_at"] = upload_started_at
+    r = client.post("/api/workers/upload", json=payload)
     assert r.status_code == 200, r.text
 
 
 # ─── recording on the happy path ───────────────────────────────────────────
 
 
-async def test_full_lifecycle_records_three_stages(client):
+async def test_full_lifecycle_records_five_stages_legacy(client):
+    """Default lifecycle (worker omits upload_started_at) → wait+work pairs
+    for download/process plus a single upload row."""
     await _seed_worker_batch_granule()
     _full_lifecycle(client)
 
     async with orch_db._session_maker() as s:
         rows = (await s.execute(select(GranuleStageTiming).order_by(GranuleStageTiming.id))).scalars().all()
-    assert [r.stage for r in rows] == ["download", "process", "upload"]
+    assert [r.stage for r in rows] == [
+        "download_wait",
+        "download",
+        "process_wait",
+        "process",
+        "upload",
+    ]
     for r in rows:
         assert r.granule_id == "g1"
         assert r.batch_id == "b"
@@ -82,9 +91,64 @@ async def test_full_lifecycle_records_three_stages(client):
         assert r.finished_at >= r.started_at
 
 
+async def test_full_lifecycle_with_upload_started_at_splits_upload(client):
+    """Worker reports upload_started_at → upload_wait + upload rows in place
+    of the single legacy upload row."""
+    await _seed_worker_batch_granule()
+    # Drive PENDING → PROCESSED first so we can capture `upload_started_at`
+    # inside the [PROCESSED, UPLOADED] window — picking the timestamp before
+    # PROCESSED was reported would (correctly) fall back to legacy single-row.
+    r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 1})
+    assert r.status_code == 200
+    for st in (
+        GranuleState.DOWNLOADING.value,
+        GranuleState.DOWNLOADED.value,
+        GranuleState.PROCESSING.value,
+        GranuleState.PROCESSED.value,
+    ):
+        assert _state(client, "g1", st).status_code == 200
+    upload_started_at = datetime.now(UTC).isoformat()
+    r = client.post(
+        "/api/workers/upload",
+        json={
+            "granule_id": "g1",
+            "worker_id": "w1",
+            "objects": [],
+            "upload_started_at": upload_started_at,
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    async with orch_db._session_maker() as s:
+        rows = (await s.execute(select(GranuleStageTiming).order_by(GranuleStageTiming.id))).scalars().all()
+    assert [r.stage for r in rows] == [
+        "download_wait",
+        "download",
+        "process_wait",
+        "process",
+        "upload_wait",
+        "upload",
+    ]
+
+
+async def test_upload_started_at_outside_window_falls_back(client):
+    """A bogus upload_started_at outside [PROCESSED, UPLOADED] falls back to
+    the legacy single-row recording — orchestrator never produces a negative
+    duration row."""
+    await _seed_worker_batch_granule()
+    # Wildly future timestamp ⇒ must not split.
+    bogus = (datetime.now(UTC) + timedelta(hours=24)).isoformat()
+    _full_lifecycle(client, upload_started_at=bogus)
+    async with orch_db._session_maker() as s:
+        rows = (await s.execute(select(GranuleStageTiming).order_by(GranuleStageTiming.id))).scalars().all()
+    stages = [r.stage for r in rows]
+    assert "upload_wait" not in stages
+    assert stages.count("upload") == 1
+
+
 async def test_failure_records_only_completed_stages(client):
-    """Worker downloads, reports DOWNLOADED, then fails before PROCESSING — only
-    the download row should exist."""
+    """Worker reports DOWNLOADING + DOWNLOADED then fails — exactly the
+    download_wait + download rows are recorded."""
     await _seed_worker_batch_granule()
     r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 1})
     assert r.status_code == 200
@@ -97,15 +161,15 @@ async def test_failure_records_only_completed_stages(client):
     assert r.status_code == 200
 
     async with orch_db._session_maker() as s:
-        rows = (await s.execute(select(GranuleStageTiming))).scalars().all()
-    assert [r.stage for r in rows] == ["download"]
+        rows = (await s.execute(select(GranuleStageTiming).order_by(GranuleStageTiming.id))).scalars().all()
+    assert [r.stage for r in rows] == ["download_wait", "download"]
 
 
 async def test_retry_records_each_attempt(client):
-    """Two leases (after a failure) → two `download` rows."""
+    """Failed-before-DOWNLOADING attempt → 0 rows; second full lifecycle →
+    the full 5-stage sequence."""
     await _seed_worker_batch_granule()
 
-    # Attempt 1: fail before DOWNLOADED so no rows recorded.
     r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 1})
     assert r.status_code == 200
     r = client.post(
@@ -114,12 +178,17 @@ async def test_retry_records_each_attempt(client):
     )
     assert r.status_code == 200
 
-    # Attempt 2: full lifecycle.
     _full_lifecycle(client)
 
     async with orch_db._session_maker() as s:
         rows = (await s.execute(select(GranuleStageTiming).order_by(GranuleStageTiming.id))).scalars().all()
-    assert [r.stage for r in rows] == ["download", "process", "upload"]
+    assert [r.stage for r in rows] == [
+        "download_wait",
+        "download",
+        "process_wait",
+        "process",
+        "upload",
+    ]
 
 
 # ─── /api/granules/{id}/timing ─────────────────────────────────────────────
@@ -132,7 +201,13 @@ async def test_granule_timing_endpoint_returns_rows(client):
     r = client.get("/api/granules/g1/timing")
     assert r.status_code == 200
     rows = r.json()
-    assert [x["stage"] for x in rows] == ["download", "process", "upload"]
+    assert [x["stage"] for x in rows] == [
+        "download_wait",
+        "download",
+        "process_wait",
+        "process",
+        "upload",
+    ]
     for x in rows:
         assert x["duration_ms"] >= 0
         assert "started_at" in x and "finished_at" in x
@@ -235,7 +310,7 @@ async def test_batch_timing_empty_batch(client):
     r = client.get("/api/batches/b/timing")
     assert r.status_code == 200
     data = r.json()
-    for st in ("download", "process", "upload"):
+    for st in ("download_wait", "download", "process_wait", "process", "upload_wait", "upload"):
         assert data["stages"][st]["count"] == 0
     assert data["wall_ms"] == 0
     assert data["first_started_at"] is None

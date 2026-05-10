@@ -16,7 +16,15 @@ import Field from "@/components/Field.vue";
 
 const props = defineProps<{ batchId: string; remaining: number; etaSeconds: number | null }>();
 
-const STAGE_ORDER: TimingStage[] = ["download", "process", "upload"];
+// 显示顺序：每对 (等待, 工作) 紧挨着，让用户一眼看出 sem 排队 vs 实际跑。
+const STAGE_ORDER: TimingStage[] = [
+  "download_wait",
+  "download",
+  "process_wait",
+  "process",
+  "upload_wait",
+  "upload",
+];
 
 const q = useQuery({
   queryKey: computed(() => ["batch-timing", props.batchId]),

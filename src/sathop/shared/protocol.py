@@ -276,6 +276,12 @@ class UploadReport(BaseModel):
     granule_id: str
     worker_id: str
     objects: list[UploadedObject]
+    # Wall-clock instant the worker actually started the upload work — i.e.
+    # right after acquiring the upload semaphore. Lets the orchestrator split
+    # the PROCESSED → UPLOADED window into `upload_wait` (sem queue) vs
+    # `upload` (storage write). Older workers without upload_sem omit this;
+    # the orchestrator records a single `upload` row in that case.
+    upload_started_at: datetime | None = None
 
 
 class ProcessFailure(BaseModel):

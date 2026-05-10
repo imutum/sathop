@@ -304,12 +304,20 @@ _STATE_PREDECESSOR = {
     GranuleState.PROCESSED.value: GranuleState.PROCESSING.value,
 }
 
-# Map "transition that closes the stage" → stage name. Idle DOWNLOADED→PROCESSING
-# isn't recorded (worker calls bundle.ensure() back-to-back; near-zero).
+# Map "transition that closes the stage" → stage name. Each phase is recorded
+# separately so the operator can tell sem-queue waits from real work:
+#   QUEUED   → DOWNLOADING   download_wait  (pending_download sem queue)
+#   DOWNLOADING → DOWNLOADED download       (actual byte transfer)
+#   DOWNLOADED  → PROCESSING process_wait   (process_sem queue + bundle.ensure)
+#   PROCESSING  → PROCESSED  process        (bundle subprocess wall time)
+#   PROCESSED   → UPLOADED   upload         (split into upload_wait + upload by
+#                                            the upload handler if the worker
+#                                            sent upload_started_at)
 _STAGE_BY_CLOSER = {
+    GranuleState.DOWNLOADING.value: "download_wait",
     GranuleState.DOWNLOADED.value: "download",
+    GranuleState.PROCESSING.value: "process_wait",
     GranuleState.PROCESSED.value: "process",
-    GranuleState.UPLOADED.value: "upload",
 }
 
 
@@ -388,7 +396,16 @@ async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
     g.stdout_tail = None
     g.stderr_tail = None
     g.updated_at = now
-    _record_stage(s, g, "upload", prev_at, now)
+    # Split the PROCESSED → UPLOADED window into upload_wait (sem queue) +
+    # upload (storage write) when the worker reports `upload_started_at`.
+    # Older workers without upload_sem omit it; we record a single `upload`
+    # row spanning the whole window — same as before this knob existed.
+    started = req.upload_started_at
+    if started is not None and prev_at <= started <= now:
+        _record_stage(s, g, "upload_wait", prev_at, started)
+        _record_stage(s, g, "upload", started, now)
+    else:
+        _record_stage(s, g, "upload", prev_at, now)
     await log(s, req.worker_id, f"uploaded {len(req.objects)} objects", granule_id=g.granule_id)
     await s.commit()
     publish({"scope": "batches"})

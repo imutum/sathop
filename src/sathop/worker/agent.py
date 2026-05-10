@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sathop.shared.http import make_orch_client
 from sathop.shared.protocol import (
     DeletableGranule,
@@ -42,9 +44,20 @@ class OrchestratorClient:
         r.raise_for_status()
         return LeaseResponse.model_validate(r.json())
 
-    async def report_upload(self, granule_id: str, worker_id: str, objects: list[UploadedObject]) -> None:
-        req = UploadReport(granule_id=granule_id, worker_id=worker_id, objects=objects)
-        r = await self._client.post("/api/workers/upload", json=req.model_dump())
+    async def report_upload(
+        self,
+        granule_id: str,
+        worker_id: str,
+        objects: list[UploadedObject],
+        upload_started_at: datetime | None = None,
+    ) -> None:
+        req = UploadReport(
+            granule_id=granule_id,
+            worker_id=worker_id,
+            objects=objects,
+            upload_started_at=upload_started_at,
+        )
+        r = await self._client.post("/api/workers/upload", json=req.model_dump(mode="json"))
         r.raise_for_status()
 
     async def report_failure(self, req: ProcessFailure) -> None:

@@ -16,7 +16,19 @@ from ..db import Batch, Granule, GranuleStageTiming, session
 
 router = APIRouter(tags=["timing"], dependencies=[Depends(require_token)])
 
-_STAGES = ("download", "process", "upload")
+# Six stages: each "real" stage paired with its sem-queue wait. `*_wait`
+# series are absent on legacy data — the response keeps an all-zero stat for
+# them so the UI can render them unconditionally. `upload_wait` is also
+# missing when the worker omits upload_started_at (pre-upload-sem builds);
+# same handling.
+_STAGES = (
+    "download_wait",
+    "download",
+    "process_wait",
+    "process",
+    "upload_wait",
+    "upload",
+)
 
 
 def _stats(durations: list[int]) -> dict:

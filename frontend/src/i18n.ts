@@ -49,8 +49,11 @@ export const PLATFORM_ZH: Record<string, string> = {
 };
 
 export const TIMING_STAGE_ZH: Record<TimingStage, string> = {
+  download_wait: "等下载",
   download: "下载",
+  process_wait: "等处理",
   process: "处理",
+  upload_wait: "等上传",
   upload: "上传",
 };
 

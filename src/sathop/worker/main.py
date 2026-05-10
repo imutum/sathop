@@ -19,6 +19,7 @@ import time
 import traceback
 from collections import Counter
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -477,12 +478,15 @@ class Worker:
         async with self._upload_sem:
             exit_stage()
             enter_stage("uploading")
+            # Capture instant we left the sem queue so the orchestrator can
+            # split this window into upload_wait (sem) vs upload (work).
+            upload_started_at = datetime.now(UTC)
             uploaded: list[UploadedObject] = []
             key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
             for out in outputs:
                 key = _render_key(key_tpl, out, item.meta)
                 uploaded.append(self.storage.put(out, key))
-            await self.client.report_upload(gid, self.s.worker_id, uploaded)
+            await self.client.report_upload(gid, self.s.worker_id, uploaded, upload_started_at)
         exit_stage()
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
 
