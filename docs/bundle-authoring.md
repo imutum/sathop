@@ -61,7 +61,7 @@ requirements:                 # all optional
 shared_files: [coast.shp]     # optional; auxiliary files uploaded once to /api/shared
 ```
 
-**Re-upload rule.** Same `(name, version)` returns 409. Bump `version` (any string differing from the previous works) when iterating. The orchestrator's GC sweeper (`POST /api/admin/gc/bundles`) eventually reclaims orphaned old versions — see `docs/` … (or just delete via UI/API).
+**Re-upload rule.** Same `(name, version)` returns 409. Bump `version` when iterating. The orchestrator's GC sweeper (`POST /api/admin/gc/bundles`) eventually reclaims orphaned old versions; you can also delete them via UI/API.
 
 ---
 

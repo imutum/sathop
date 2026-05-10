@@ -80,11 +80,6 @@ class BundleHandle:
     python: Path
     shared_dir: Path
 
-    @property
-    def venv_python(self) -> Path:
-        """Backward-compatible alias for older callers/tests."""
-        return self.python
-
 
 @dataclass(frozen=True)
 class PythonDepsSource:
@@ -206,13 +201,22 @@ def _fetch_from_orch(orchestrator_url: str, token: str, name: str, version: str,
     dest.mkdir(parents=True, exist_ok=True)
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as zf:
-            zf.extractall(dest)
+            _extract_bundle_zip(zf, dest)
         _flatten_wrapper_dir(dest)
         if not (dest / "manifest.yaml").is_file():
             raise FileNotFoundError(f"manifest.yaml not found in fetched bundle {name}@{version}")
     except Exception:
         shutil.rmtree(dest, ignore_errors=True)
         raise
+
+
+def _extract_bundle_zip(zf: zipfile.ZipFile, dest: Path) -> None:
+    root = dest.resolve()
+    for member in zf.infolist():
+        target = (dest / member.filename).resolve()
+        if target != root and root not in target.parents:
+            raise ValueError(f"bundle archive member escapes target directory: {member.filename!r}")
+        zf.extract(member, dest)
 
 
 def _flatten_wrapper_dir(dest: Path) -> None:
@@ -247,10 +251,6 @@ def python_deps_source(requirements: dict, bundle_dir: Path) -> PythonDepsSource
         return PythonDepsSource("requirements.txt", values, req_file) if values else None
     pip_deps = tuple(requirements.get("pip", []) or [])
     return PythonDepsSource("manifest.pip", pip_deps) if pip_deps else None
-
-
-def _has_python_deps(manifest: BundleManifest, bundle_dir: Path) -> bool:
-    return python_deps_source(manifest.requirements, bundle_dir) is not None
 
 
 _PIP_OPTION_PREFIXES = (

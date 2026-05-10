@@ -157,6 +157,21 @@ def test_fetch_from_orch_missing_manifest_in_zip_raises(tmp_path, monkeypatch):
     assert not dest.exists()
 
 
+def test_fetch_from_orch_rejects_archive_path_traversal(tmp_path, monkeypatch):
+    payload = _make_zip(extras={"../evil.txt": "x"})
+
+    monkeypatch.setattr(
+        bundle.urllib.request,
+        "urlopen",
+        lambda req, timeout=120: _FakeResp(payload, 200),
+    )
+    dest = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="escapes target directory"):
+        bundle._fetch_from_orch("http://orch:8000", "tok", "z", "0.1", dest)
+    assert not dest.exists()
+    assert not (tmp_path / "evil.txt").exists()
+
+
 # ─── flatten wrapper ──────────────────────────────────────────────────────
 
 
@@ -287,4 +302,4 @@ def test_requirements_comments_only_do_not_force_venv(tmp_path):
     (root / "requirements.txt").write_text("\n# stdlib only\n", encoding="utf-8")
     manifest = bundle.BundleManifest.load(root / "manifest.yaml")
 
-    assert bundle._has_python_deps(manifest, root) is False
+    assert bundle.python_deps_source(manifest.requirements, root) is None
