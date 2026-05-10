@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from sathop.receiver.main import OrchestratorClient
+from sathop.receiver.agent import OrchestratorClient
 from sathop.shared.protocol import (
     AckReport,
     PullRequest,

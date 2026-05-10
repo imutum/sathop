@@ -20,7 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from sathop.receiver.main import Receiver, Settings
+from sathop.receiver.config import Settings
+from sathop.receiver.runtime import Receiver
 from sathop.shared.protocol import AckReport, PullItem, PullRequest, PullResponse
 
 

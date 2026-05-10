@@ -19,14 +19,18 @@ from pathlib import Path
 
 import pytest
 
-from sathop.receiver import main as recv_mod
-from sathop.receiver.main import (
-    Receiver,
-    Settings,
-    _byte_ranges,
-    _pull_segmented,
-    _SegmentNotSupportedError,
+from sathop.receiver import puller as recv_mod
+from sathop.receiver.config import Settings
+from sathop.receiver.puller import (
+    SegmentNotSupportedError as _SegmentNotSupportedError,
 )
+from sathop.receiver.puller import (
+    byte_ranges as _byte_ranges,
+)
+from sathop.receiver.puller import (
+    pull_segmented as _pull_segmented,
+)
+from sathop.receiver.runtime import Receiver
 from sathop.shared.protocol import AckReport, PullItem
 
 
@@ -35,7 +39,7 @@ def _no_retry_backoff(monkeypatch):
     """Squash retry sleeps so retry-loop tests don't take seconds. The
     backoff schedule (0.5/1/2s) is correct in production but irrelevant
     to test correctness."""
-    monkeypatch.setattr(recv_mod, "_SEGMENT_BACKOFF_BASE_SEC", 0.0)
+    monkeypatch.setattr(recv_mod, "SEGMENT_BACKOFF_BASE_SEC", 0.0)
 
 
 def _serve_range(payload: bytes, *, support_range: bool = True) -> tuple[ThreadingHTTPServer, int]:
@@ -384,7 +388,7 @@ async def test_segmented_gives_up_after_max_retries(tmp_path):
                 expected_size=len(payload),
                 segments=4,
             )
-        assert state["request_counts"][0] == recv_mod._SEGMENT_MAX_RETRIES + 1
+        assert state["request_counts"][0] == recv_mod.SEGMENT_MAX_RETRIES + 1
         # Tmp cleaned up; no leftover .part-* files.
         assert not dest.exists()
         assert list(dest.parent.glob("*.part-*")) == []

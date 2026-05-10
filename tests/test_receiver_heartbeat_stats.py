@@ -17,9 +17,9 @@ from sathop.orchestrator import db as orch_db
 from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Receiver
 from sathop.orchestrator.main import app
-from sathop.receiver.main import Receiver as ReceiverAgent
-from sathop.receiver.main import Settings as RecvSettings
-from sathop.receiver.main import _PullStats
+from sathop.receiver.config import Settings as RecvSettings
+from sathop.receiver.puller import PullStats as _PullStats
+from sathop.receiver.runtime import Receiver as ReceiverAgent
 from sathop.shared.protocol import AckReport, PullItem
 
 # ─── _PullStats unit tests ────────────────────────────────────────────────
@@ -51,11 +51,9 @@ def test_pullstats_recent_bps_average_over_window():
     assert s.recent_bps() == 300
 
 
-def test_pullstats_evicts_events_outside_window(monkeypatch):
-    s = _PullStats(window_sec=5.0)
-
+def test_pullstats_evicts_events_outside_window():
     fake_now = [1000.0]
-    monkeypatch.setattr("sathop.receiver.main.time", type("T", (), {"monotonic": lambda: fake_now[0]}))
+    s = _PullStats(window_sec=5.0, clock=lambda: fake_now[0])
 
     s.begin()
     s.end(500)  # at t=1000

@@ -16,7 +16,8 @@ import sys
 from pathlib import Path
 from typing import Literal, cast
 
-from sathop.receiver.main import Receiver, Settings
+from sathop.receiver.config import Settings
+from sathop.receiver.runtime import Receiver
 from sathop.shared.config import cli_resolve_orch
 
 

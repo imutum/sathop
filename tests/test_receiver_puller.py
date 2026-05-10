@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import httpx
 import pytest
 
-from sathop.receiver.main import _pull_single
+from sathop.receiver.puller import pull_single as _pull_single
 
 
 async def _pull(url: str, dest):

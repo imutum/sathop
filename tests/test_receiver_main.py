@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from sathop.receiver.main import Receiver, Settings, _is_cert_error, load
+from sathop.receiver.config import Settings, load
+from sathop.receiver.runtime import Receiver
+from sathop.receiver.runtime import is_cert_error as _is_cert_error
 from sathop.shared.protocol import AckReport, PullItem
 
 
@@ -340,9 +342,9 @@ async def test_pull_retries_once_after_refreshing_trust_on_cert_error(tmp_path, 
         # Wrap _pull_single so the FIRST call simulates an SSL cert error and
         # subsequent calls fall through to the real implementation. (Sub-MB
         # payload skips segmented dispatch, so single is the only path here.)
-        from sathop.receiver import main as recv_mod
+        from sathop.receiver import puller as recv_mod
 
-        real_pull = recv_mod._pull_single
+        real_pull = recv_mod.pull_single
         calls = 0
 
         async def flaky_pull(client, url, dest):
@@ -358,7 +360,7 @@ async def test_pull_retries_once_after_refreshing_trust_on_cert_error(tmp_path, 
                     raise RuntimeError("ConnectError wrap")
             return await real_pull(client, url, dest)
 
-        monkeypatch.setattr(recv_mod, "_pull_single", flaky_pull)
+        monkeypatch.setattr(recv_mod, "pull_single", flaky_pull)
         monkeypatch.setattr(r, "_refresh_trust", fake_refresh)
 
         it = PullItem(
@@ -392,7 +394,7 @@ async def test_pull_does_not_refresh_when_trust_orch_disabled(tmp_path, monkeypa
         nonlocal refreshes
         refreshes += 1
 
-    from sathop.receiver import main as recv_mod
+    from sathop.receiver import puller as recv_mod
 
     async def always_cert_error(client, url, dest):
         try:
@@ -400,7 +402,7 @@ async def test_pull_does_not_refresh_when_trust_orch_disabled(tmp_path, monkeypa
         except ssl.SSLError:
             raise RuntimeError("ConnectError wrap")
 
-    monkeypatch.setattr(recv_mod, "_pull_single", always_cert_error)
+    monkeypatch.setattr(recv_mod, "pull_single", always_cert_error)
     monkeypatch.setattr(r, "_refresh_trust", fake_refresh)
 
     it = PullItem(
