@@ -191,12 +191,11 @@ class Worker:
         self._draining = True
         log.warning("entering graceful drain (%s) — will exit after in-flight handlers complete", reason)
 
-    def _fatal_auth(self, where: str) -> None:
-        """401 from the orchestrator means SATHOP_TOKEN is wrong on this side
-        (or auth was just enabled). Silent retry would hide that — exit 1 so
-        docker `restart: unless-stopped` makes the misconfiguration loud."""
-        log.error("%s returned 401 — SATHOP_TOKEN mismatch; exiting for container restart", where)
-        os._exit(1)
+    def _bump_backoff(self) -> int:
+        """Double the lease backoff factor (capped) and return the next sleep
+        in seconds. Reset to 1 on the next /lease success."""
+        self._lease_backoff_factor = min(_LEASE_MAX_BACKOFF_FACTOR, self._lease_backoff_factor * 2)
+        return self.s.lease_poll_interval * self._lease_backoff_factor
 
     def _install_signal_handlers(self) -> None:
         """SIGTERM = docker stop / kubectl drain; SIGINT = Ctrl+C in dev.
@@ -269,12 +268,10 @@ class Worker:
     async def run(self) -> None:
         self._install_signal_handlers()
         self._ca_pem = self._ensure_tls()
-        try:
-            await self._register()
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 401:
-                self._fatal_auth("register")
-            raise
+        # 401 on register would already have triggered fatal exit inside the
+        # agent; anything else (network blip, 5xx) bubbles out and lets the
+        # container restart policy retry from scratch.
+        await self._register()
         log.info(
             "registered as %s v%s (downloader=%s, storage=%s, tls=%s)",
             self.s.worker_id,
@@ -371,10 +368,7 @@ class Worker:
                     )
                     self._effective_capacity = new_eff
             except httpx.HTTPStatusError as e:
-                code = e.response.status_code
-                if code == 401:
-                    self._fatal_auth("heartbeat")
-                elif code == 404:
+                if e.response.status_code == 404:
                     # Operator deleted the worker row (DELETE /workers/{id})
                     # while we were still up. Re-establish identity instead
                     # of looping on 404 forever.
@@ -405,29 +399,24 @@ class Worker:
             if free <= 0 or self._pause_lease or self._remote_pause or self._draining:
                 await asyncio.sleep(self.s.lease_poll_interval)
                 continue
+            # 403 = worker disabled; 5xx / network blip = orch down. Both
+            # want us to back off so logs don't fill at the poll rate.
+            # _bump_backoff caps the doubling at _LEASE_MAX_BACKOFF_FACTOR
+            # (~60s max between polls), and a 200 reply resets it to 1.
             try:
                 resp = await self.client.lease(LeaseRequest(worker_id=self.s.worker_id, capacity=free))
                 self._lease_backoff_factor = 1
             except httpx.HTTPStatusError as e:
+                sleep_for = self._bump_backoff()
                 code = e.response.status_code
-                if code == 401:
-                    self._fatal_auth("lease")
-                # 403 = worker disabled; 5xx / network = orch down. Both want
-                # us to back off so logs don't fill at the poll rate. Bumping
-                # _lease_backoff_factor on every failure (capped) gives ~60s
-                # max between polls — fast enough to resume on re-enable, slow
-                # enough to not spam stderr while it's off.
-                self._lease_backoff_factor = min(_LEASE_MAX_BACKOFF_FACTOR, self._lease_backoff_factor * 2)
-                if code == 403:
-                    log.warning("lease 403 (worker disabled) — slowing poll ×%d", self._lease_backoff_factor)
-                else:
-                    log.warning("lease failed (%d) — slowing poll ×%d", code, self._lease_backoff_factor)
-                await asyncio.sleep(self.s.lease_poll_interval * self._lease_backoff_factor)
+                reason = "worker disabled" if code == 403 else f"HTTP {code}"
+                log.warning("lease failed (%s) — slowing poll ×%d", reason, self._lease_backoff_factor)
+                await asyncio.sleep(sleep_for)
                 continue
             except Exception as e:
-                self._lease_backoff_factor = min(_LEASE_MAX_BACKOFF_FACTOR, self._lease_backoff_factor * 2)
+                sleep_for = self._bump_backoff()
                 log.warning("lease failed: %s — slowing poll ×%d", e, self._lease_backoff_factor)
-                await asyncio.sleep(self.s.lease_poll_interval * self._lease_backoff_factor)
+                await asyncio.sleep(sleep_for)
                 continue
 
             if not resp.items:

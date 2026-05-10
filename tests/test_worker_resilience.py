@@ -11,7 +11,14 @@ from pathlib import Path
 import httpx
 import pytest
 
-from sathop.shared.protocol import LeaseResponse, WorkerHeartbeatResponse
+from sathop.shared.protocol import (
+    LeaseRequest,
+    LeaseResponse,
+    WorkerHeartbeat,
+    WorkerHeartbeatResponse,
+    WorkerRegister,
+)
+from sathop.worker.agent import OrchestratorClient
 from sathop.worker.config import Settings
 from sathop.worker.main import Worker, _prune_work_dir_orphans
 
@@ -136,67 +143,55 @@ async def test_heartbeat_404_triggers_re_register(tmp_path):
         await w.client.aclose()
 
 
-# ─── 401 → fatal exit ──────────────────────────────────────────────────────
+# ─── agent-level 401 → fatal exit (single policy applies to every method) ──
 
 
-async def test_heartbeat_401_triggers_fatal(tmp_path, monkeypatch):
-    s = _settings(tmp_path)
-    w = Worker(s)
+def _client_with_401(endpoint_filter: str | None = None) -> OrchestratorClient:
+    """Build an OrchestratorClient whose underlying httpx transport returns
+    401 for every (or only matching) request — the perfect way to exercise
+    `_check_auth` without spinning up a real server."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if endpoint_filter is None or endpoint_filter in request.url.path:
+            return httpx.Response(401, json={"detail": "invalid token"})
+        return httpx.Response(200, json={})
+
+    c = OrchestratorClient("http://orch", "wrong-token")
+    c._client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="http://orch",
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+    return c
+
+
+@pytest.mark.parametrize(
+    "name,call",
+    [
+        ("heartbeat", lambda c: c.heartbeat(WorkerHeartbeat(worker_id="t"))),
+        ("lease", lambda c: c.lease(LeaseRequest(worker_id="t", capacity=1))),
+        ("register", lambda c: c.register(WorkerRegister(worker_id="t"))),
+        ("get_deletable", lambda c: c.get_deletable("t")),
+    ],
+)
+async def test_agent_401_fatal(name, call, monkeypatch):
+    """Every orch endpoint shares one auth policy: 401 ⇒ os._exit(1). One
+    parametrized test catches a regression on any of the 4 entry points
+    (POST and GET both go through _post / _get)."""
+    exits: list[int] = []
+
+    def fake_exit(code: int) -> None:
+        exits.append(code)
+        raise _FakeExit(code)
+
+    monkeypatch.setattr("os._exit", fake_exit)
+    c = _client_with_401()
     try:
-        exits: list[int] = []
-
-        def fake_exit(code: int) -> None:
-            exits.append(code)
-            raise _FakeExit(code)
-
-        monkeypatch.setattr("os._exit", fake_exit)
-
-        async def fake_heartbeat(req):
-            raise _http_error(401)
-
-        w.client.heartbeat = fake_heartbeat  # type: ignore[method-assign]
-
-        task = asyncio.create_task(w._heartbeat_loop())
-        await asyncio.sleep(1.5)
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, _FakeExit):
-            pass
-
-        assert exits == [1], "expected fatal exit(1) on heartbeat 401"
+        with pytest.raises(_FakeExit):
+            await call(c)
+        assert exits == [1], f"expected fatal exit on {name} 401"
     finally:
-        await w.client.aclose()
-
-
-async def test_lease_401_triggers_fatal(tmp_path, monkeypatch):
-    s = _settings(tmp_path)
-    w = Worker(s)
-    try:
-        exits: list[int] = []
-
-        def fake_exit(code: int) -> None:
-            exits.append(code)
-            raise _FakeExit(code)
-
-        monkeypatch.setattr("os._exit", fake_exit)
-
-        async def fake_lease(req):
-            raise _http_error(401)
-
-        w.client.lease = fake_lease  # type: ignore[method-assign]
-
-        task = asyncio.create_task(w._pipeline_loop())
-        await asyncio.sleep(1.5)
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, _FakeExit):
-            pass
-
-        assert exits == [1], "expected fatal exit(1) on lease 401"
-    finally:
-        await w.client.aclose()
+        await c.aclose()
 
 
 # ─── lease 403 / 5xx → exponential backoff ─────────────────────────────────
