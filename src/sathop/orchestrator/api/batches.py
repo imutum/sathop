@@ -76,7 +76,6 @@ async def _granule_in_batch_or_404(s: AsyncSession, batch_id: str, granule_id: s
     return granule
 
 
-
 def _batch_summary(
     batch: Batch,
     *,

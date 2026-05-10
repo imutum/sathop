@@ -10,7 +10,7 @@ from pathlib import Path
 
 from sathop.shared.protocol import LeaseResponse
 from sathop.worker.config import Settings
-from sathop.worker.main import Worker
+from sathop.worker.runtime import Worker
 
 
 def _settings(tmp_path: Path) -> Settings:

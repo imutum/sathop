@@ -191,7 +191,7 @@ def _stub_worker(agent: _StubAgent):
     real __init__ which requires Settings, storage, semaphores, etc."""
     from types import SimpleNamespace
 
-    from sathop.worker.main import Worker
+    from sathop.worker.runtime import Worker
 
     w = Worker.__new__(Worker)
     w.client = agent  # type: ignore[assignment]
@@ -200,7 +200,7 @@ def _stub_worker(agent: _StubAgent):
 
 
 async def test_report_state_409_raises_lease_revoked():
-    from sathop.worker.main import LeaseRevoked
+    from sathop.worker.runtime import LeaseRevoked
 
     w = _stub_worker(_StubAgent([409]))
     with pytest.raises(LeaseRevoked):
@@ -208,7 +208,7 @@ async def test_report_state_409_raises_lease_revoked():
 
 
 async def test_report_state_404_raises_lease_revoked():
-    from sathop.worker.main import LeaseRevoked
+    from sathop.worker.runtime import LeaseRevoked
 
     w = _stub_worker(_StubAgent([404]))
     with pytest.raises(LeaseRevoked):

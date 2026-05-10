@@ -21,7 +21,7 @@ from sathop.shared.protocol import (
 from sathop.worker.agent import OrchestratorClient
 from sathop.worker.cleanup import prune_work_dir_orphans
 from sathop.worker.config import Settings
-from sathop.worker.main import Worker
+from sathop.worker.runtime import Worker
 
 
 def _settings(tmp_path: Path) -> Settings:
