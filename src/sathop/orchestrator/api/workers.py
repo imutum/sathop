@@ -36,6 +36,36 @@ router = APIRouter(prefix="/workers", tags=["workers"], dependencies=[Depends(re
 
 LEASE_DURATION = timedelta(minutes=30)
 
+
+async def _worker_or_404(s: AsyncSession, worker_id: str, detail: str = "worker not found") -> Worker:
+    worker = await s.get(Worker, worker_id)
+    if worker is None:
+        raise HTTPException(404, detail)
+    return worker
+
+
+async def _enabled_worker_or_403(s: AsyncSession, worker_id: str) -> Worker:
+    worker = await s.get(Worker, worker_id)
+    if worker is None or not worker.enabled:
+        raise HTTPException(403, "worker not registered or disabled")
+    return worker
+
+
+async def _leased_granule_or_409(s: AsyncSession, granule_id: str, worker_id: str) -> Granule:
+    granule = await s.get(Granule, granule_id)
+    if granule is None:
+        raise HTTPException(404, "granule not found")
+    if granule.leased_by != worker_id:
+        raise HTTPException(409, "granule not leased by this worker")
+    return granule
+
+
+async def _commit_and_publish(s: AsyncSession, *scopes: str) -> None:
+    await s.commit()
+    for scope in dict.fromkeys(scopes):
+        publish({"scope": scope})
+
+
 # Serialize lease claims process-wide so two concurrent /lease calls can't
 # both observe the same PENDING rows and overwrite each other's UPDATE. The
 # SELECT-then-UPDATE pattern in lease() is racy without this — SQLAlchemy's
@@ -230,16 +260,13 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
         if req.ca_pem is not None:
             w.ca_pem = req.ca_pem
         w.last_seen = utcnow()
-    await s.commit()
-    publish({"scope": "workers"})
+    await _commit_and_publish(s, "workers")
     return WorkerRegisterResponse()
 
 
 @router.post("/heartbeat", response_model=WorkerHeartbeatResponse)
 async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) -> WorkerHeartbeatResponse:
-    w = await s.get(Worker, req.worker_id)
-    if w is None:
-        raise HTTPException(404, "worker not registered")
+    w = await _worker_or_404(s, req.worker_id, "worker not registered")
     now = utcnow()
     await _record_worker_version(s, w, req)
     _apply_worker_heartbeat(w, req, now)
@@ -252,8 +279,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     restart_requested = await _consume_restart_signal(s, w)
     gc_requested = await _consume_gc_signal(s, w)
 
-    await s.commit()
-    publish({"scope": "workers"})
+    await _commit_and_publish(s, "workers")
     return WorkerHeartbeatResponse(
         desired_capacity=w.desired_capacity,
         revoked_granule_ids=revoked,
@@ -270,20 +296,33 @@ async def lease(req: LeaseRequest, s: AsyncSession = Depends(session)) -> LeaseR
 
 
 async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
-    w = await s.get(Worker, req.worker_id)
-    if w is None or not w.enabled:
-        raise HTTPException(403, "worker not registered or disabled")
-
+    worker = await _enabled_worker_or_403(s, req.worker_id)
     now = utcnow()
     expires = now + LEASE_DURATION
 
     # Two clamps below req.capacity: queue-based backpressure (0 disables) and
     # per-worker runtime override (belt-and-braces against an old worker that
     # doesn't self-clamp).
-    limit = await _lease_limit(s, w, req)
+    limit = await _lease_limit(s, worker, req)
     if limit <= 0:
         return LeaseResponse(items=[], lease_expires_at=expires)
 
+    items = await _claim_pending_granules(s, req.worker_id, limit, now, expires)
+    if items:
+        await log(s, req.worker_id, f"leased {len(items)} granules")
+        await _commit_and_publish(s, "batches")
+    else:
+        await _commit_and_publish(s)
+    return LeaseResponse(items=items, lease_expires_at=expires)
+
+
+async def _claim_pending_granules(
+    s: AsyncSession,
+    worker_id: str,
+    limit: int,
+    now,
+    expires,
+) -> list[LeaseItem]:
     stmt = (
         select(Granule)
         .where(Granule.state == GranuleState.PENDING.value)
@@ -293,23 +332,14 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     rows = (await s.execute(stmt)).scalars().all()
 
     items: list[LeaseItem] = []
-    for g in rows:
-        # State starts at QUEUED — the worker promotes to DOWNLOADING once it
-        # actually acquires the download semaphore. Keeps the UI honest about
-        # what's actively transferring vs. queued behind concurrency limits.
-        g.state = GranuleState.QUEUED.value
-        g.leased_by = req.worker_id
-        g.lease_expires_at = expires
-        g.updated_at = now
-        batch = await s.get(Batch, g.batch_id)
-        items.append(_lease_item(g, batch))
-
-    if items:
-        await log(s, req.worker_id, f"leased {len(items)} granules")
-    await s.commit()
-    if items:
-        publish({"scope": "batches"})
-    return LeaseResponse(items=items, lease_expires_at=expires)
+    for granule in rows:
+        granule.state = GranuleState.QUEUED.value
+        granule.leased_by = worker_id
+        granule.lease_expires_at = expires
+        granule.updated_at = now
+        batch = await s.get(Batch, granule.batch_id)
+        items.append(_lease_item(granule, batch))
+    return items
 
 
 # Forward-only transitions reported by a leased worker. lease() writes QUEUED
@@ -357,11 +387,7 @@ async def report_state(req: StateUpdate, s: AsyncSession = Depends(session)) -> 
     expected = _STATE_PREDECESSOR.get(req.state.value)
     if expected is None:
         raise HTTPException(422, f"state {req.state.value!r} is not worker-reportable")
-    g = await s.get(Granule, req.granule_id)
-    if g is None:
-        raise HTTPException(404, "granule not found")
-    if g.leased_by != req.worker_id:
-        raise HTTPException(409, "granule not leased by this worker")
+    g = await _leased_granule_or_409(s, req.granule_id, req.worker_id)
     if g.state != expected:
         raise HTTPException(409, f"cannot transition {g.state!r} → {req.state.value!r}")
     prev_at = g.updated_at
@@ -371,18 +397,13 @@ async def report_state(req: StateUpdate, s: AsyncSession = Depends(session)) -> 
     stage = _STAGE_BY_CLOSER.get(req.state.value)
     if stage is not None:
         _record_stage(s, g, stage, prev_at, now)
-    await s.commit()
-    publish({"scope": "batches"})
+    await _commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
 
 
 @router.post("/upload")
 async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
-    g = await s.get(Granule, req.granule_id)
-    if g is None:
-        raise HTTPException(404, "granule not found")
-    if g.leased_by != req.worker_id:
-        raise HTTPException(409, "granule not leased by this worker")
+    g = await _leased_granule_or_409(s, req.granule_id, req.worker_id)
     # Worker must have already reported PROCESSED before uploading. A worker
     # that skipped PROCESSED would muddle the upload-stage timing (it would
     # absorb the entire process phase) and is a sign the worker code is out
@@ -390,75 +411,51 @@ async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
     if g.state != GranuleState.PROCESSED.value:
         raise HTTPException(409, f"upload requires state=processed; granule is in state {g.state!r}")
 
-    for o in req.objects:
+    _mark_uploaded(s, g, req)
+    await log(s, req.worker_id, f"uploaded {len(req.objects)} objects", granule_id=g.granule_id)
+    await _commit_and_publish(s, "batches")
+    return {"ok": True}
+
+
+def _mark_uploaded(s: AsyncSession, granule: Granule, req: UploadReport) -> None:
+    for obj in req.objects:
         s.add(
             GranuleObject(
-                granule_id=g.granule_id,
+                granule_id=granule.granule_id,
                 worker_id=req.worker_id,
-                object_key=o.object_key,
-                presigned_url=o.presigned_url,
-                sha256=o.sha256,
-                size=o.size,
+                object_key=obj.object_key,
+                presigned_url=obj.presigned_url,
+                sha256=obj.sha256,
+                size=obj.size,
             )
         )
-    prev_at = g.updated_at
+    prev_at = granule.updated_at
     now = utcnow()
-    g.state = GranuleState.UPLOADED.value
-    g.leased_by = None
-    g.lease_expires_at = None
-    g.error = None
-    # Clear subprocess output tails on success — they were from a previous
-    # failed attempt and are no longer relevant. Keeping them around would
-    # confuse operators looking at a now-uploaded granule.
-    g.stdout_tail = None
-    g.stderr_tail = None
-    g.updated_at = now
-    # Split the PROCESSED → UPLOADED window into upload_wait (sem queue) +
-    # upload (storage write) when the worker reports `upload_started_at`.
-    # Older workers without upload_sem omit it; we record a single `upload`
-    # row spanning the whole window — same as before this knob existed.
+    granule.state = GranuleState.UPLOADED.value
+    granule.leased_by = None
+    granule.lease_expires_at = None
+    granule.error = None
+    granule.stdout_tail = None
+    granule.stderr_tail = None
+    granule.updated_at = now
     started = req.upload_started_at
     if started is not None and prev_at <= started <= now:
-        _record_stage(s, g, "upload_wait", prev_at, started)
-        _record_stage(s, g, "upload", started, now)
+        _record_stage(s, granule, "upload_wait", prev_at, started)
+        _record_stage(s, granule, "upload", started, now)
     else:
-        _record_stage(s, g, "upload", prev_at, now)
-    await log(s, req.worker_id, f"uploaded {len(req.objects)} objects", granule_id=g.granule_id)
-    await s.commit()
-    publish({"scope": "batches"})
-    return {"ok": True}
+        _record_stage(s, granule, "upload", prev_at, now)
 
 
 @router.post("/failure")
 async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> dict:
-    g = await s.get(Granule, req.granule_id)
-    if g is None:
-        raise HTTPException(404, "granule not found")
-    if g.leased_by != req.worker_id:
-        raise HTTPException(409, "granule not leased by this worker")
+    g = await _leased_granule_or_409(s, req.granule_id, req.worker_id)
     # The failure path can only fire while the worker still genuinely owns
     # the granule. Anything outside the leased states means cancel/sweeper
     # got there first; the worker should swallow the 409 and stop reporting.
     if g.state not in LEASED_STATES:
         raise HTTPException(409, f"failure not accepted in state {g.state!r} (lease was revoked)")
 
-    g.retry_count += 1
-    g.error = req.error[:2000]
-    # Persist subprocess output tails so operators can inspect bundle prints /
-    # tracebacks from the UI. Capped per-column at 16 KB; the worker also caps
-    # before sending so the request body stays bounded.
-    if req.stdout_tail is not None:
-        g.stdout_tail = req.stdout_tail[:16000]
-    if req.stderr_tail is not None:
-        g.stderr_tail = req.stderr_tail[:16000]
-    g.leased_by = None
-    g.lease_expires_at = None
-    g.state = (
-        GranuleState.BLACKLISTED.value
-        if g.retry_count >= settings.max_retries
-        else GranuleState.PENDING.value
-    )
-    g.updated_at = utcnow()
+    _mark_failed(g, req)
     await log(
         s,
         req.worker_id,
@@ -466,9 +463,25 @@ async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> di
         level="error" if g.state == GranuleState.BLACKLISTED.value else "warn",
         granule_id=g.granule_id,
     )
-    await s.commit()
-    publish({"scope": "batches"})
+    await _commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
+
+
+def _mark_failed(granule: Granule, req: ProcessFailure) -> None:
+    granule.retry_count += 1
+    granule.error = req.error[:2000]
+    if req.stdout_tail is not None:
+        granule.stdout_tail = req.stdout_tail[:16000]
+    if req.stderr_tail is not None:
+        granule.stderr_tail = req.stderr_tail[:16000]
+    granule.leased_by = None
+    granule.lease_expires_at = None
+    granule.state = (
+        GranuleState.BLACKLISTED.value
+        if granule.retry_count >= settings.max_retries
+        else GranuleState.PENDING.value
+    )
+    granule.updated_at = utcnow()
 
 
 @router.get("/deletable/{worker_id}")
@@ -506,13 +519,10 @@ async def set_capacity(
     Positive int clamps lease size + propagates to worker via heartbeat reply."""
     if desired_capacity is not None and desired_capacity < 1:
         raise HTTPException(422, "desired_capacity must be a positive int or null")
-    w = await s.get(Worker, worker_id)
-    if w is None:
-        raise HTTPException(404, "worker not found")
+    w = await _worker_or_404(s, worker_id)
     w.desired_capacity = desired_capacity
     await log(s, worker_id, f"capacity override → {desired_capacity} (env cap {w.capacity})")
-    await s.commit()
-    publish({"scope": "workers"})
+    await _commit_and_publish(s, "workers")
     return {"ok": True, "desired_capacity": desired_capacity}
 
 
@@ -521,13 +531,10 @@ async def request_restart(worker_id: str, s: AsyncSession = Depends(session)) ->
     """Operator-triggered restart. Sets a one-shot flag the worker picks up on
     its next heartbeat and exits 0 on. Idempotent — re-clicks while a previous
     request hasn't been consumed just refresh the timestamp."""
-    w = await s.get(Worker, worker_id)
-    if w is None:
-        raise HTTPException(404, "worker not found")
+    w = await _worker_or_404(s, worker_id)
     w.restart_requested_at = utcnow()
     await log(s, worker_id, "restart requested via UI")
-    await s.commit()
-    publish({"scope": "workers"})
+    await _commit_and_publish(s, "workers")
     return {"ok": True}
 
 
@@ -539,13 +546,10 @@ async def set_enabled(
 ) -> dict:
     """Runtime kill-switch. Disabled workers receive 403 on next lease call,
     so in-flight work drains naturally before the worker goes idle."""
-    w = await s.get(Worker, worker_id)
-    if w is None:
-        raise HTTPException(404, "worker not found")
+    w = await _worker_or_404(s, worker_id)
     w.enabled = enabled
     await log(s, worker_id, f"worker {'enabled' if enabled else 'disabled'}")
-    await s.commit()
-    publish({"scope": "workers"})
+    await _commit_and_publish(s, "workers")
     return {"ok": True, "enabled": enabled}
 
 
@@ -559,13 +563,10 @@ async def set_paused(
       - paused: keep the worker registered + drain in-flight; resume any time
       - disabled: prelude to forgetting the row entirely
     Heartbeat reply propagates the flag; worker stops new leases until cleared."""
-    w = await s.get(Worker, worker_id)
-    if w is None:
-        raise HTTPException(404, "worker not found")
+    w = await _worker_or_404(s, worker_id)
     w.pause_requested = paused
     await log(s, worker_id, f"worker {'paused' if paused else 'resumed'} via UI")
-    await s.commit()
-    publish({"scope": "workers"})
+    await _commit_and_publish(s, "workers")
     return {"ok": True, "pause_requested": paused}
 
 
@@ -580,9 +581,17 @@ async def revoke_all_leases(worker_id: str, s: AsyncSession = Depends(session)) 
 
     In-flight progress on these granules is discarded; retry_count bumps so
     the orchestrator's max_retries cap still applies."""
-    w = await s.get(Worker, worker_id)
-    if w is None:
-        raise HTTPException(404, "worker not found")
+    await _worker_or_404(s, worker_id)
+    revoked = await _revoke_worker_leases(s, worker_id, utcnow())
+    if revoked:
+        await log(s, worker_id, f"force-revoked {revoked} lease(s) via UI")
+        await _commit_and_publish(s, "batches", "workers")
+    else:
+        await _commit_and_publish(s, "workers")
+    return {"ok": True, "revoked": revoked}
+
+
+async def _revoke_worker_leases(s: AsyncSession, worker_id: str, now) -> int:
     rows = (
         (
             await s.execute(
@@ -592,20 +601,13 @@ async def revoke_all_leases(worker_id: str, s: AsyncSession = Depends(session)) 
         .scalars()
         .all()
     )
-    now = utcnow()
-    for g in rows:
-        g.state = GranuleState.PENDING.value
-        g.leased_by = None
-        g.lease_expires_at = None
-        g.retry_count = (g.retry_count or 0) + 1
-        g.updated_at = now
-    if rows:
-        await log(s, worker_id, f"force-revoked {len(rows)} lease(s) via UI")
-    await s.commit()
-    if rows:
-        publish({"scope": "batches"})
-    publish({"scope": "workers"})
-    return {"ok": True, "revoked": len(rows)}
+    for granule in rows:
+        granule.state = GranuleState.PENDING.value
+        granule.leased_by = None
+        granule.lease_expires_at = None
+        granule.retry_count = (granule.retry_count or 0) + 1
+        granule.updated_at = now
+    return len(rows)
 
 
 @router.post("/{worker_id}/gc")
@@ -613,13 +615,10 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
     """Operator-triggered remote GC. Same one-shot pattern as restart: orch
     sets a timestamp, next heartbeat reply forwards it, worker runs prune_caches
     out-of-band of its periodic loop."""
-    w = await s.get(Worker, worker_id)
-    if w is None:
-        raise HTTPException(404, "worker not found")
+    w = await _worker_or_404(s, worker_id)
     w.gc_requested_at = utcnow()
     await log(s, worker_id, "cache GC requested via UI")
-    await s.commit()
-    publish({"scope": "workers"})
+    await _commit_and_publish(s, "workers")
     return {"ok": True}
 
 
@@ -628,9 +627,7 @@ async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> d
     """Permanently remove a decommissioned worker row. Refuses if the worker is
     still enabled or still holding any granule storage — operator must disable
     and let it drain first."""
-    w = await s.get(Worker, worker_id)
-    if w is None:
-        raise HTTPException(404, "worker not found")
+    w = await _worker_or_404(s, worker_id)
     if w.enabled:
         raise HTTPException(409, "worker is still enabled — disable it first")
     inflight = await _count_inflight(s, worker_id)
@@ -643,8 +640,7 @@ async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> d
         )
     await s.delete(w)
     await log(s, worker_id, "worker forgotten (row deleted)")
-    await s.commit()
-    publish({"scope": "workers"})
+    await _commit_and_publish(s, "workers")
     return {"ok": True}
 
 
@@ -658,6 +654,5 @@ async def delete_confirmed(req: DeletableGranule, s: AsyncSession = Depends(sess
     if g is not None:
         g.state = GranuleState.DELETED.value
         g.updated_at = now
-    await s.commit()
-    publish({"scope": "batches"})
+    await _commit_and_publish(s, "batches")
     return {"ok": True}
