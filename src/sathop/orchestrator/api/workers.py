@@ -29,8 +29,8 @@ from sathop.shared.protocol import (
 
 from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, GranuleStageTiming, Worker, session, utcnow
+from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ..pubsub import publish
 
 router = APIRouter(prefix="/workers", tags=["workers"], dependencies=[Depends(require_token)])
 
@@ -58,12 +58,6 @@ async def _leased_granule_or_409(s: AsyncSession, granule_id: str, worker_id: st
     if granule.leased_by != worker_id:
         raise HTTPException(409, "granule not leased by this worker")
     return granule
-
-
-async def _commit_and_publish(s: AsyncSession, *scopes: str) -> None:
-    await s.commit()
-    for scope in dict.fromkeys(scopes):
-        publish({"scope": scope})
 
 
 # Serialize lease claims process-wide so two concurrent /lease calls can't
@@ -260,7 +254,7 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
         if req.ca_pem is not None:
             w.ca_pem = req.ca_pem
         w.last_seen = utcnow()
-    await _commit_and_publish(s, "workers")
+    await commit_and_publish(s, "workers")
     return WorkerRegisterResponse()
 
 
@@ -279,7 +273,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     restart_requested = await _consume_restart_signal(s, w)
     gc_requested = await _consume_gc_signal(s, w)
 
-    await _commit_and_publish(s, "workers")
+    await commit_and_publish(s, "workers")
     return WorkerHeartbeatResponse(
         desired_capacity=w.desired_capacity,
         revoked_granule_ids=revoked,
@@ -310,9 +304,9 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     items = await _claim_pending_granules(s, req.worker_id, limit, now, expires)
     if items:
         await log(s, req.worker_id, f"leased {len(items)} granules")
-        await _commit_and_publish(s, "batches")
+        await commit_and_publish(s, "batches")
     else:
-        await _commit_and_publish(s)
+        await commit_and_publish(s)
     return LeaseResponse(items=items, lease_expires_at=expires)
 
 
@@ -397,7 +391,7 @@ async def report_state(req: StateUpdate, s: AsyncSession = Depends(session)) -> 
     stage = _STAGE_BY_CLOSER.get(req.state.value)
     if stage is not None:
         _record_stage(s, g, stage, prev_at, now)
-    await _commit_and_publish(s, "batches")
+    await commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
 
 
@@ -413,7 +407,7 @@ async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
 
     _mark_uploaded(s, g, req)
     await log(s, req.worker_id, f"uploaded {len(req.objects)} objects", granule_id=g.granule_id)
-    await _commit_and_publish(s, "batches")
+    await commit_and_publish(s, "batches")
     return {"ok": True}
 
 
@@ -463,7 +457,7 @@ async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> di
         level="error" if g.state == GranuleState.BLACKLISTED.value else "warn",
         granule_id=g.granule_id,
     )
-    await _commit_and_publish(s, "batches")
+    await commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
 
 
@@ -522,7 +516,7 @@ async def set_capacity(
     w = await _worker_or_404(s, worker_id)
     w.desired_capacity = desired_capacity
     await log(s, worker_id, f"capacity override → {desired_capacity} (env cap {w.capacity})")
-    await _commit_and_publish(s, "workers")
+    await commit_and_publish(s, "workers")
     return {"ok": True, "desired_capacity": desired_capacity}
 
 
@@ -534,7 +528,7 @@ async def request_restart(worker_id: str, s: AsyncSession = Depends(session)) ->
     w = await _worker_or_404(s, worker_id)
     w.restart_requested_at = utcnow()
     await log(s, worker_id, "restart requested via UI")
-    await _commit_and_publish(s, "workers")
+    await commit_and_publish(s, "workers")
     return {"ok": True}
 
 
@@ -549,7 +543,7 @@ async def set_enabled(
     w = await _worker_or_404(s, worker_id)
     w.enabled = enabled
     await log(s, worker_id, f"worker {'enabled' if enabled else 'disabled'}")
-    await _commit_and_publish(s, "workers")
+    await commit_and_publish(s, "workers")
     return {"ok": True, "enabled": enabled}
 
 
@@ -566,7 +560,7 @@ async def set_paused(
     w = await _worker_or_404(s, worker_id)
     w.pause_requested = paused
     await log(s, worker_id, f"worker {'paused' if paused else 'resumed'} via UI")
-    await _commit_and_publish(s, "workers")
+    await commit_and_publish(s, "workers")
     return {"ok": True, "pause_requested": paused}
 
 
@@ -585,9 +579,9 @@ async def revoke_all_leases(worker_id: str, s: AsyncSession = Depends(session)) 
     revoked = await _revoke_worker_leases(s, worker_id, utcnow())
     if revoked:
         await log(s, worker_id, f"force-revoked {revoked} lease(s) via UI")
-        await _commit_and_publish(s, "batches", "workers")
+        await commit_and_publish(s, "batches", "workers")
     else:
-        await _commit_and_publish(s, "workers")
+        await commit_and_publish(s, "workers")
     return {"ok": True, "revoked": revoked}
 
 
@@ -618,7 +612,7 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
     w = await _worker_or_404(s, worker_id)
     w.gc_requested_at = utcnow()
     await log(s, worker_id, "cache GC requested via UI")
-    await _commit_and_publish(s, "workers")
+    await commit_and_publish(s, "workers")
     return {"ok": True}
 
 
@@ -640,7 +634,7 @@ async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> d
         )
     await s.delete(w)
     await log(s, worker_id, "worker forgotten (row deleted)")
-    await _commit_and_publish(s, "workers")
+    await commit_and_publish(s, "workers")
     return {"ok": True}
 
 
@@ -654,5 +648,5 @@ async def delete_confirmed(req: DeletableGranule, s: AsyncSession = Depends(sess
     if g is not None:
         g.state = GranuleState.DELETED.value
         g.updated_at = now
-    await _commit_and_publish(s, "batches")
+    await commit_and_publish(s, "batches")
     return {"ok": True}

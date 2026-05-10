@@ -34,8 +34,8 @@ from ..db import (
     session,
     utcnow,
 )
+from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ..pubsub import publish
 
 
 def _parse_orch_ref(ref: str) -> tuple[str, str]:
@@ -75,11 +75,6 @@ async def _granule_in_batch_or_404(s: AsyncSession, batch_id: str, granule_id: s
         raise HTTPException(404, "granule not found in batch")
     return granule
 
-
-async def _commit_and_publish(s: AsyncSession, *scopes: str) -> None:
-    await s.commit()
-    for scope in dict.fromkeys(scopes):
-        publish({"scope": scope})
 
 
 def _batch_summary(
@@ -307,7 +302,7 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
     await log(s, "orchestrator", f"created batch {batch_id} with {len(req.granules)} granules")
     for w in all_warnings[:20]:
         await log(s, "orchestrator", w, level="warn")
-    await _commit_and_publish(s, "batches")
+    await commit_and_publish(s, "batches")
 
     return _batch_summary(b, counts=await _counts(s, b.batch_id))
 
@@ -361,9 +356,9 @@ async def add_granules(batch_id: str, req: GranuleBulkAdd, s: AsyncSession = Dep
         s.add(_new_granule(batch_id, g))
         added += 1
     if added:
-        await _commit_and_publish(s, "batches")
+        await commit_and_publish(s, "batches")
     else:
-        await _commit_and_publish(s)
+        await commit_and_publish(s)
     return {"added": added, "skipped": skipped}
 
 
@@ -407,9 +402,9 @@ async def reset_exhausted_objects(batch_id: str, s: AsyncSession = Depends(sessi
     reset = getattr(result, "rowcount", 0) or 0
     if reset:
         await log(s, "orchestrator", f"reset {reset} exhausted-pull objects in batch {batch_id}")
-        await _commit_and_publish(s, "batches")
+        await commit_and_publish(s, "batches")
     else:
-        await _commit_and_publish(s)
+        await commit_and_publish(s)
     return {"ok": True, "reset": reset}
 
 
@@ -425,9 +420,9 @@ async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dic
     for granule in rows:
         _retry_one(granule, now)
     if rows:
-        await _commit_and_publish(s, "batches")
+        await commit_and_publish(s, "batches")
     else:
-        await _commit_and_publish(s)
+        await commit_and_publish(s)
     return {"ok": True, "reset": len(rows)}
 
 
@@ -471,7 +466,7 @@ async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depen
     if not _cancel_one(g, utcnow()):
         raise HTTPException(409, f"cannot cancel granule in state {g.state!r}")
     await log(s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id)
-    await _commit_and_publish(s, "batches")
+    await commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
 
 
@@ -481,7 +476,7 @@ async def retry_granule(batch_id: str, granule_id: str, s: AsyncSession = Depend
     if not _retry_one(g, utcnow()):
         raise HTTPException(409, f"cannot retry granule in state {g.state!r}")
     await log(s, "admin", f"retried granule {granule_id}", granule_id=granule_id)
-    await _commit_and_publish(s, "batches")
+    await commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
 
 
@@ -505,9 +500,9 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
         _cancel_one(g, now)
     if rows:
         await log(s, "admin", f"cancelled batch {batch_id}: {len(rows)} granules blacklisted", level="warn")
-        await _commit_and_publish(s, "batches")
+        await commit_and_publish(s, "batches")
     else:
-        await _commit_and_publish(s)
+        await commit_and_publish(s)
     return {"ok": True, "cancelled": len(rows)}
 
 
@@ -568,7 +563,7 @@ async def delete_batch(
         level="warn",
     )
     if counts["events"]:
-        await _commit_and_publish(s, "batches", "events")
+        await commit_and_publish(s, "batches", "events")
     else:
-        await _commit_and_publish(s, "batches")
+        await commit_and_publish(s, "batches")
     return {"ok": True, **counts}
