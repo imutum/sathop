@@ -73,8 +73,55 @@ _DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT = 5.0
 # lease expiry. Trade-off matches docker-compose stop_grace_period: 60s.
 _DRAIN_WATCHDOG_TIMEOUT_SEC = 60
 _DRAIN_POLL_INTERVAL_SEC = 1.0
+# Lease/heartbeat backoff cap. lease_poll_interval × this = max sleep between
+# polls when the worker is disabled or the orch is down. 6 × 10s = 60s, which
+# keeps a disabled worker quiet without delaying re-enable past one minute.
+_LEASE_MAX_BACKOFF_FACTOR = 6
+# work_root/g-* dirs older than this with no active handler are SIGKILL
+# orphans (regular handler exit cleans up via finally). 1h is large enough
+# that a slow bundle (15-min timeout default) never trips it.
+_WORK_DIR_ORPHAN_AGE_SEC = 3600
 _StageTransition = Callable[[str], None]
 _StageExit = Callable[[], None]
+
+
+def _prune_work_dir_orphans(work_root: Path, active_segments: set[str]) -> dict[str, int]:
+    """Sweep `work_root/g-*-<ts>` directories, removing those whose ts is
+    older than _WORK_DIR_ORPHAN_AGE_SEC and whose granule_id segment is not
+    in `active_segments`. Caller passes the set so this stays
+    asyncio.to_thread-safe (no `self._handlers` access from the worker thread).
+
+    Returns {"removed": int, "freed_bytes": int}; missing/non-dir entries are
+    skipped silently — the caller's gc_loop already wraps the call in a
+    blanket except."""
+    threshold = time.time() - _WORK_DIR_ORPHAN_AGE_SEC
+    removed = 0
+    freed = 0
+    if not work_root.is_dir():
+        return {"removed": 0, "freed_bytes": 0}
+    for entry in work_root.iterdir():
+        if not entry.is_dir() or not entry.name.startswith("g-"):
+            continue
+        # Layout: g-<safe_segment>-<unix-ts>. ts is always the last `-`
+        # field; the segment may itself contain hyphens, so split from right.
+        try:
+            stem, ts_str = entry.name.rsplit("-", 1)
+            ts = int(ts_str)
+        except ValueError:
+            continue
+        if ts > threshold:
+            continue
+        segment = stem[2:]  # strip leading "g-"
+        if segment in active_segments:
+            continue
+        try:
+            size = sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
+        except OSError:
+            size = 0
+        shutil.rmtree(entry, ignore_errors=True)
+        removed += 1
+        freed += size
+    return {"removed": removed, "freed_bytes": freed}
 
 
 class Worker:
@@ -124,6 +171,13 @@ class Worker:
         self._handlers: dict[str, asyncio.Task[None]] = {}
         # Updated from heartbeat replies; orchestrator may clamp below s.capacity.
         self._effective_capacity = s.capacity
+        # PEM ca cert uploaded at register; cached so re-register on heartbeat
+        # 404 doesn't have to re-issue the cert.
+        self._ca_pem: str | None = None
+        # Lease backoff multiplier — reset on success, doubles on failure
+        # (403/5xx/network), capped at _LEASE_MAX_BACKOFF_FACTOR. Keeps log
+        # traffic bounded while a worker is disabled or the orch is down.
+        self._lease_backoff_factor = 1
         self.progress = ProgressServer(self.client, port=s.progress_port)
         for p in (s.work_root, s.bundle_cache, s.venv_cache, s.shared_cache, s.storage_root):
             p.mkdir(parents=True, exist_ok=True)
@@ -136,6 +190,13 @@ class Worker:
             return
         self._draining = True
         log.warning("entering graceful drain (%s) — will exit after in-flight handlers complete", reason)
+
+    def _fatal_auth(self, where: str) -> None:
+        """401 from the orchestrator means SATHOP_TOKEN is wrong on this side
+        (or auth was just enabled). Silent retry would hide that — exit 1 so
+        docker `restart: unless-stopped` makes the misconfiguration loud."""
+        log.error("%s returned 401 — SATHOP_TOKEN mismatch; exiting for container restart", where)
+        os._exit(1)
 
     def _install_signal_handlers(self) -> None:
         """SIGTERM = docker stop / kubectl drain; SIGINT = Ctrl+C in dev.
@@ -191,25 +252,36 @@ class Worker:
         )
         return pem
 
-    async def run(self) -> None:
-        self._install_signal_handlers()
-        ca_pem = self._ensure_tls()
+    async def _register(self) -> None:
+        """Push our identity to the orchestrator. Idempotent server-side; safe
+        to call again whenever heartbeat surfaces a 404 (operator clicked
+        '永久移除' but the container is still up — we just rebuild the row)."""
         await self.client.register(
             WorkerRegister(
                 worker_id=self.s.worker_id,
                 version=__version__,
                 capacity=self.s.capacity,
                 public_url=self.s.public_url,
-                ca_pem=ca_pem,
+                ca_pem=self._ca_pem,
             )
         )
+
+    async def run(self) -> None:
+        self._install_signal_handlers()
+        self._ca_pem = self._ensure_tls()
+        try:
+            await self._register()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                self._fatal_auth("register")
+            raise
         log.info(
             "registered as %s v%s (downloader=%s, storage=%s, tls=%s)",
             self.s.worker_id,
             __version__,
             type(self.downloader).__name__,
             type(self.storage).__name__,
-            "on" if ca_pem else "off",
+            "on" if self._ca_pem else "off",
         )
 
         async with asyncio.TaskGroup() as tg:
@@ -225,8 +297,8 @@ class Worker:
                     storage.serve_static(
                         self.s.storage_root,
                         self.s.storage_port,
-                        tls_cert=self.s.tls_cert_path if ca_pem else None,
-                        tls_key=self.s.tls_key_path if ca_pem else None,
+                        tls_cert=self.s.tls_cert_path if self._ca_pem else None,
+                        tls_key=self.s.tls_key_path if self._ca_pem else None,
                     )
                 )
 
@@ -298,6 +370,22 @@ class Worker:
                         desired,
                     )
                     self._effective_capacity = new_eff
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code
+                if code == 401:
+                    self._fatal_auth("heartbeat")
+                elif code == 404:
+                    # Operator deleted the worker row (DELETE /workers/{id})
+                    # while we were still up. Re-establish identity instead
+                    # of looping on 404 forever.
+                    log.warning("heartbeat 404 — worker row missing, re-registering")
+                    try:
+                        await self._register()
+                        log.info("re-registered after 404")
+                    except Exception as reg_e:
+                        log.warning("re-register failed (will retry next beat): %s", reg_e)
+                else:
+                    log.warning("heartbeat failed: %s", e)
             except Exception as e:
                 log.warning("heartbeat failed: %s", e)
             await asyncio.sleep(self.s.heartbeat_interval)
@@ -319,9 +407,27 @@ class Worker:
                 continue
             try:
                 resp = await self.client.lease(LeaseRequest(worker_id=self.s.worker_id, capacity=free))
+                self._lease_backoff_factor = 1
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code
+                if code == 401:
+                    self._fatal_auth("lease")
+                # 403 = worker disabled; 5xx / network = orch down. Both want
+                # us to back off so logs don't fill at the poll rate. Bumping
+                # _lease_backoff_factor on every failure (capped) gives ~60s
+                # max between polls — fast enough to resume on re-enable, slow
+                # enough to not spam stderr while it's off.
+                self._lease_backoff_factor = min(_LEASE_MAX_BACKOFF_FACTOR, self._lease_backoff_factor * 2)
+                if code == 403:
+                    log.warning("lease 403 (worker disabled) — slowing poll ×%d", self._lease_backoff_factor)
+                else:
+                    log.warning("lease failed (%d) — slowing poll ×%d", code, self._lease_backoff_factor)
+                await asyncio.sleep(self.s.lease_poll_interval * self._lease_backoff_factor)
+                continue
             except Exception as e:
-                log.warning("lease failed: %s", e)
-                await asyncio.sleep(self.s.lease_poll_interval)
+                self._lease_backoff_factor = min(_LEASE_MAX_BACKOFF_FACTOR, self._lease_backoff_factor * 2)
+                log.warning("lease failed: %s — slowing poll ×%d", e, self._lease_backoff_factor)
+                await asyncio.sleep(self.s.lease_poll_interval * self._lease_backoff_factor)
                 continue
 
             if not resp.items:
@@ -644,6 +750,22 @@ class Worker:
                         "shared orphan cleanup removed %d file(s), freed %.1f MB",
                         shared_r["removed"],
                         shared_r["freed_bytes"] / 1024**2,
+                    )
+                # work_dir orphans: SIGKILL kills the handler before its
+                # finally block runs, leaving g-* dirs behind. The handler's
+                # work dir uses safe_segment(gid) + a unix timestamp suffix,
+                # which lets us reliably distinguish stale dirs (no active
+                # handler + ts older than 1h) from in-progress ones.
+                wd_r = await asyncio.to_thread(
+                    _prune_work_dir_orphans,
+                    self.s.work_root,
+                    {safe_segment(g) for g in self._handlers.keys()},
+                )
+                if wd_r["removed"]:
+                    log.info(
+                        "work_dir orphan cleanup removed %d dir(s), freed %.1f MB",
+                        wd_r["removed"],
+                        wd_r["freed_bytes"] / 1024**2,
                     )
             except Exception as e:
                 log.warning("gc loop iteration failed: %s", e)
