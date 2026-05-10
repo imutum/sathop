@@ -1,6 +1,6 @@
 # Bundle Authoring
 
-A **bundle** is a zip containing user code (any language, runs in a Python venv on the worker) plus a `manifest.yaml`. The orchestrator stores it; workers fetch it once per `name@version`, build a venv from declared `pip` deps, and invoke the entrypoint per granule.
+A **bundle** is a zip containing user code (any language) plus a `manifest.yaml`. The orchestrator stores it; workers fetch it once per `name@version`, reuse the worker's current Python when no Python deps are declared, build a venv only for declared `pip` deps, and invoke the entrypoint per granule.
 
 This document covers everything you need to write, ship, and debug one.
 
@@ -32,7 +32,7 @@ version: 1.0.0                # required, [A-Za-z0-9._+-]+; cannot re-upload sam
 description: optional         # shown in UI bundle list
 
 execution:                    # required
-  entrypoint: "python run.py" # required; PATH-prefixed with venv bin
+  entrypoint: "python run.py" # required; PATH-prefixed with selected Python
   timeout_sec: 900            # optional, default 900; SIGTERM then SIGKILL
   env:                        # optional default env vars
     GDAL_NUM_THREADS: "2"
@@ -78,12 +78,13 @@ When the worker invokes `entrypoint`, it sets these env vars:
 | `SATHOP_GRANULE_ID` | per-granule unique id (composed `<batch>:<user_gid>`) |
 | `SATHOP_BATCH_ID` | the batch this granule belongs to |
 | `SATHOP_META_JSON` | JSON-encoded per-granule meta dict (e.g. `{"year": "2024"}`) |
-| `SATHOP_VENV_PYTHON` | absolute path to the bundle's Python interpreter |
+| `SATHOP_BUNDLE_PYTHON` | absolute path to the Python interpreter selected for this bundle |
+| `SATHOP_VENV_PYTHON` | compatibility alias for `SATHOP_BUNDLE_PYTHON` |
 | `SATHOP_PROGRESS_URL` | optional; POST checkpoints here (see Progress) |
 
 Plus a curated whitelist of OS vars (`PATH`, `HOME`/`USERPROFILE`, `TMP*`, `LANG`, etc.). **Worker secrets like `SATHOP_TOKEN` are NOT inherited** — the bundle cannot impersonate the worker against the orchestrator.
 
-`PATH` starts with the bundle venv's bin dir, so `python`, `pip`, plus any installed pip script work directly.
+`PATH` starts with the selected Python's bin dir. For dependency-free bundles this is the worker's current environment; for bundles with `requirements.txt` or `requirements.pip`, it is the cached per-bundle venv.
 
 ---
 
@@ -115,7 +116,7 @@ If the template references a meta key the granule doesn't have, the worker falls
 
 ## Requirements
 
-`requirements.pip` is the only one the worker actually installs (into the per-bundle venv at first ensure). `requirements.txt` at the bundle root takes precedence and the manifest list is ignored — pick one. `apt` is documented but the worker base image must already include those packages; the worker does NOT run apt.
+`requirements.pip` is the only manifest dependency list the worker actually installs. `requirements.txt` at the bundle root takes precedence and the manifest list is ignored — pick one. If neither declares Python deps, the worker reuses its current Python environment and skips venv creation. `apt` is documented but the worker base image must already include those packages; the worker does NOT run apt.
 
 `requirements.credentials` declares names the batch must populate via `BatchCreate.credentials`. The Web UI's batch-create dialog renders a form for each declared name. Schemes today: `basic` (`username`/`password`) and `bearer` (`token`).
 

@@ -132,6 +132,81 @@ async def _held_granule_sample(s: AsyncSession, worker_id: str, limit: int = 5) 
     return list({*leased, *uploaded})[:limit]
 
 
+async def _record_worker_version(s: AsyncSession, worker: Worker, req: WorkerHeartbeat) -> None:
+    """Update the heartbeat version and log only when a real value changes."""
+    if not req.version or req.version == worker.version:
+        return
+    await log(
+        s,
+        req.worker_id,
+        f"worker version changed {worker.version!r} → {req.version!r} "
+        "(if this keeps flipping, two containers likely share the worker_id)",
+        level="warn",
+    )
+    worker.version = req.version
+
+
+def _apply_worker_heartbeat(worker: Worker, req: WorkerHeartbeat, now) -> None:
+    worker.last_seen = now
+    worker.disk_used_gb = req.disk_used_gb
+    worker.disk_total_gb = req.disk_total_gb
+    worker.cpu_percent = req.cpu_percent
+    worker.mem_percent = req.mem_percent
+    worker.monthly_egress_gb = req.monthly_egress_gb
+    worker.queue_pending_download = req.queue_pending_download
+    worker.queue_downloading = req.queue_downloading
+    worker.queue_pending_processing = req.queue_pending_processing
+    worker.queue_processing = req.queue_processing
+    worker.queue_pending_upload = req.queue_pending_upload
+    worker.queue_uploading = req.queue_uploading
+    worker.paused = req.paused
+
+
+async def _renew_worker_leases(s: AsyncSession, worker_id: str, now) -> None:
+    await s.execute(
+        update(Granule)
+        .where(Granule.leased_by == worker_id)
+        .where(Granule.state.in_(LEASED_STATES))
+        .where(Granule.lease_expires_at < now + LEASE_DURATION / 2)
+        .values(lease_expires_at=now + LEASE_DURATION)
+    )
+
+
+async def _revoked_active_granules(s: AsyncSession, req: WorkerHeartbeat) -> list[str]:
+    if not req.active_granule_ids:
+        return []
+    still_owned = (
+        (
+            await s.execute(
+                select(Granule.granule_id)
+                .where(Granule.granule_id.in_(req.active_granule_ids))
+                .where(Granule.leased_by == req.worker_id)
+                .where(Granule.state.in_(LEASED_STATES))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    owned_set = set(still_owned)
+    return [gid for gid in req.active_granule_ids if gid not in owned_set]
+
+
+async def _consume_restart_signal(s: AsyncSession, worker: Worker) -> bool:
+    requested = worker.restart_requested_at is not None
+    if requested:
+        worker.restart_requested_at = None
+        await log(s, worker.worker_id, "restart signal delivered to worker")
+    return requested
+
+
+async def _consume_gc_signal(s: AsyncSession, worker: Worker) -> bool:
+    requested = worker.gc_requested_at is not None
+    if requested:
+        worker.gc_requested_at = None
+        await log(s, worker.worker_id, "cache GC signal delivered to worker")
+    return requested
+
+
 @router.post("/register", response_model=WorkerRegisterResponse)
 async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> WorkerRegisterResponse:
     w = await s.get(Worker, req.worker_id)
@@ -166,82 +241,16 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     if w is None:
         raise HTTPException(404, "worker not registered")
     now = utcnow()
-    # Version flap detection: a stable worker_id whose `version` keeps changing
-    # between heartbeats almost always means two containers share the ID (orphan
-    # from a botched compose redeploy). Quiet under normal operation; loud the
-    # moment a second process starts heartbeating with a different version.
-    if req.version and req.version != w.version:
-        await log(
-            s,
-            req.worker_id,
-            f"worker version changed {w.version!r} → {req.version!r} "
-            "(if this keeps flipping, two containers likely share the worker_id)",
-            level="warn",
-        )
-        w.version = req.version
-    w.last_seen = now
-    w.disk_used_gb = req.disk_used_gb
-    w.disk_total_gb = req.disk_total_gb
-    w.cpu_percent = req.cpu_percent
-    w.mem_percent = req.mem_percent
-    w.monthly_egress_gb = req.monthly_egress_gb
-    w.queue_pending_download = req.queue_pending_download
-    w.queue_downloading = req.queue_downloading
-    w.queue_pending_processing = req.queue_pending_processing
-    w.queue_processing = req.queue_processing
-    w.queue_pending_upload = req.queue_pending_upload
-    w.queue_uploading = req.queue_uploading
-    w.paused = req.paused
-    # Heartbeat doubles as lease renewal: as long as the worker keeps checking
-    # in, every granule it currently holds gets `lease_expires_at` pushed forward.
-    # 30 min is enough headroom for a single granule cycle but not for a whole
-    # batch; without renewal a slow processor (large MOD021KM + reprojection)
-    # has its lease swept while still working — DB flips the row back to PENDING,
-    # subsequent state reports 409, and the worker's in-memory pipeline turns
-    # into wasted "ghost work". Sweeper still reclaims if the worker actually
-    # goes silent (no heartbeat ⇒ no renewal ⇒ lease expires within 30 min).
-    await s.execute(
-        update(Granule)
-        .where(Granule.leased_by == req.worker_id)
-        .where(Granule.state.in_(LEASED_STATES))
-        .values(lease_expires_at=now + LEASE_DURATION)
-    )
+    await _record_worker_version(s, w, req)
+    _apply_worker_heartbeat(w, req, now)
+    await _renew_worker_leases(s, req.worker_id, now)
 
-    # Diff worker's active set vs. DB: anything the worker is still running
-    # but the DB no longer credits to this worker (cancel_batch / cancel_granule
-    # cleared leased_by, or a state change took it out of LEASED_STATES) is
-    # ghost work — return it so the worker can cancel the asyncio task.
-    revoked: list[str] = []
-    if req.active_granule_ids:
-        still_owned = (
-            (
-                await s.execute(
-                    select(Granule.granule_id)
-                    .where(Granule.granule_id.in_(req.active_granule_ids))
-                    .where(Granule.leased_by == req.worker_id)
-                    .where(Granule.state.in_(LEASED_STATES))
-                )
-            )
-            .scalars()
-            .all()
-        )
-        owned_set = set(still_owned)
-        revoked = [gid for gid in req.active_granule_ids if gid not in owned_set]
+    # Diff worker's active set vs. DB; any mismatch becomes a cancellation
+    # instruction in this heartbeat response.
+    revoked = await _revoked_active_granules(s, req)
 
-    # One-shot restart signal: pop the flag (clear column) and forward it to
-    # the worker exactly once. Worker exits 0 on receipt; docker brings it
-    # back. If the worker is already gone or never reads this beat, the flag
-    # is still cleared — re-click in the UI re-arms it cleanly.
-    restart_requested = w.restart_requested_at is not None
-    if restart_requested:
-        w.restart_requested_at = None
-        await log(s, req.worker_id, "restart signal delivered to worker")
-
-    # One-shot GC signal: same pop-on-deliver pattern as restart.
-    gc_requested = w.gc_requested_at is not None
-    if gc_requested:
-        w.gc_requested_at = None
-        await log(s, req.worker_id, "cache GC signal delivered to worker")
+    restart_requested = await _consume_restart_signal(s, w)
+    gc_requested = await _consume_gc_signal(s, w)
 
     await s.commit()
     publish({"scope": "workers"})

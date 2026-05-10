@@ -31,7 +31,7 @@
 ## Features
 
 - **加速下载** — 单节点 aria2c 多线程加速中转，多 worker 并行下载，吞吐线性扩展
-- **可编程预处理** — 用户 bundle 隔离 venv 运行，支持多级计算流水线，核心与数据产品解耦
+- **可编程预处理** — 用户 bundle 无依赖时复用 worker 当前 Python 环境；声明 pip 依赖时才构建隔离 venv，支持多级计算流水线
 - **Lease 制任务分发** — 30 分钟自动回收，passive + active 双重保障
 - **双后端基建** — 下载器 httpx / aria2c、存储 FS / MinIO，env 开关切换
 - **SSE + Web UI** — 实时状态推送，浏览器管理全部任务
@@ -140,7 +140,7 @@ Worker 如需 MinIO + aria2c 侧车，可用 `deploy/worker/docker-compose.yml`�
 
 ## Script Bundle
 
-用户处理逻辑打包为 bundle（`manifest.yaml` + 脚本）。Python 依赖可放在 bundle 内 `requirements.txt`（优先），或写在 `manifest.yaml` 的 `requirements.pip` 字段里。上传到 orchestrator 后 worker 自动拉取并在隔离 venv 中执行。
+用户处理逻辑打包为 bundle（`manifest.yaml` + 脚本）。无 Python 依赖的 bundle 直接复用 worker 当前 Python 环境；Python 依赖可放在 bundle 内 `requirements.txt`（优先），或写在 `manifest.yaml` 的 `requirements.pip` 字段里，worker 只在声明依赖时构建隔离 venv。
 
 ## 开发
 

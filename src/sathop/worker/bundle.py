@@ -1,10 +1,11 @@
-"""Script bundle fetch + cache + per-version venv management.
+"""Script bundle fetch + runtime preparation.
 
 Single ref format: `orch:<name>@<version>` — bundles live in the orchestrator's
 central registry and are pulled via `GET /api/bundles/<name>/<version>/download`
 with Bearer auth. Fetched zips are cached in the bundle cache dir under
-`<name>@<version>/`; venv is built in a sibling `<name>@<version>/` under
-venv_cache. First-time fetch + venv build is serialized per ref."""
+`<name>@<version>/`. Bundles without Python deps run on the worker's existing
+Python; bundles declaring deps get a cached per-version venv. First-time fetch
+and runtime prep are serialized per ref."""
 
 from __future__ import annotations
 
@@ -19,12 +20,14 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
 from sathop.shared.http import bearer_headers
 
 from . import shared as shared_sync
+from ._paths import dir_size_bytes
 
 log = logging.getLogger("sathop.worker.bundle")
 
@@ -74,8 +77,25 @@ class BundleManifest:
 class BundleHandle:
     manifest: BundleManifest
     root: Path
-    venv_python: Path
+    python: Path
     shared_dir: Path
+
+    @property
+    def venv_python(self) -> Path:
+        """Backward-compatible alias for older callers/tests."""
+        return self.python
+
+
+@dataclass(frozen=True)
+class PythonDepsSource:
+    kind: Literal["requirements.txt", "manifest.pip"]
+    values: tuple[str, ...]
+    requirements_file: Path | None = None
+
+    def pip_install_args(self) -> list[str]:
+        if self.requirements_file is not None:
+            return ["-r", str(self.requirements_file)]
+        return list(self.values)
 
 
 def _parse_ref(ref: str) -> tuple[str, str]:
@@ -104,24 +124,14 @@ def ensure(
         if not bundle_dir.exists():
             _fetch_from_orch(orchestrator_url, token, name, version, bundle_dir)
 
-        manifest = BundleManifest.load(bundle_dir / "manifest.yaml")
-        venv_python = _ensure_venv(manifest, bundle_dir, venv_root)
-        shared_sync.sync(manifest.shared_files, shared_root, orchestrator_url, token)
-        # Touch the LRU sidecar after a successful ensure(): prune_caches uses
-        # this mtime to pick the oldest venv to evict. Done inside the lock so
-        # a concurrent prune can't see "fresh dir, stale sidecar" and delete it.
         _touch_last_used(venv_root, name, version)
-        return BundleHandle(
-            manifest=manifest,
-            root=bundle_dir,
-            venv_python=venv_python,
-            shared_dir=shared_root,
-        )
+        manifest = BundleManifest.load(bundle_dir / "manifest.yaml")
+        python = _ensure_runtime(manifest, bundle_dir, venv_root)
+        shared_sync.sync(manifest.shared_files, shared_root, orchestrator_url, token)
+        return BundleHandle(manifest=manifest, root=bundle_dir, python=python, shared_dir=shared_root)
 
 
 def _touch_last_used(venv_root: Path, name: str, version: str) -> None:
-    """Update the LRU mtime sidecar for `<name>@<version>`. Created lazily on
-    first ensure(); subsequent calls just refresh mtime via os.utime."""
     sidecar_dir = venv_root / _LAST_USED_DIR
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     sidecar = sidecar_dir / f"{name}@{version}"
@@ -131,73 +141,50 @@ def _touch_last_used(venv_root: Path, name: str, version: str) -> None:
         sidecar.touch()
 
 
-def _dir_size_bytes(path: Path) -> int:
-    """Sum file sizes recursively. Misses stat() races on freshly-deleted
-    files (concurrent ensure builds tmp dirs); we ignore-and-continue rather
-    than retry, since the size is just a hint for the LRU decision."""
-    total = 0
-    for p in path.rglob("*"):
-        if p.is_file():
-            try:
-                total += p.stat().st_size
-            except OSError:
-                pass
-    return total
-
-
 def prune_caches(venv_root: Path, cache_root: Path, limit_bytes: int) -> dict:
-    """Evict oldest cached venvs (and their sibling bundle source dirs) until
-    total size drops below `limit_bytes`. last-used order from the sidecar
-    mtime; ensure() refreshes the mtime on every lease so an actively-used
-    bundle is never the oldest. Returns {removed, freed_bytes, total_bytes}.
-
-    Skips refs whose `_lock_for` is held — those are mid-fetch or mid-build
-    and removing them under another worker's hands would race. Stale sidecars
-    (sidecar exists but venv dir doesn't) are cleaned up opportunistically.
-
-    `limit_bytes <= 0` disables pruning entirely (no-op fast path)."""
     if limit_bytes <= 0:
         return {"removed": 0, "freed_bytes": 0, "total_bytes": 0}
     sidecar_dir = venv_root / _LAST_USED_DIR
     if not sidecar_dir.is_dir():
         return {"removed": 0, "freed_bytes": 0, "total_bytes": 0}
 
-    items: list[tuple[float, str, Path, int]] = []
+    items: list[tuple[float, str, Path, Path, int]] = []
     for sidecar in sidecar_dir.iterdir():
         if not sidecar.is_file():
             continue
         ref_dirname = sidecar.name
         venv_dir = venv_root / ref_dirname
-        if not venv_dir.is_dir():
+        bundle_dir = cache_root / ref_dirname
+        if not venv_dir.is_dir() and not bundle_dir.is_dir():
             sidecar.unlink(missing_ok=True)
             continue
         try:
             mtime = sidecar.stat().st_mtime
         except OSError:
             continue
-        size = _dir_size_bytes(venv_dir)
-        items.append((mtime, ref_dirname, venv_dir, size))
+        size = (dir_size_bytes(venv_dir) if venv_dir.is_dir() else 0) + (
+            dir_size_bytes(bundle_dir) if bundle_dir.is_dir() else 0
+        )
+        items.append((mtime, ref_dirname, venv_dir, bundle_dir, size))
 
-    total = sum(it[3] for it in items)
+    total = sum(it[4] for it in items)
     if total <= limit_bytes:
         return {"removed": 0, "freed_bytes": 0, "total_bytes": total}
 
-    items.sort(key=lambda it: it[0])  # oldest first
+    items.sort(key=lambda it: it[0])
 
     removed = 0
     freed = 0
-    for _mtime, ref_dirname, venv_dir, size in items:
+    for _mtime, ref_dirname, venv_dir, bundle_dir, size in items:
         if total - freed <= limit_bytes:
             break
-        # ref_dirname is `<name>@<version>`; locks key on `orch:<name>@<version>`.
-        ref = f"orch:{ref_dirname}"
-        lock = _lock_for(ref)
+        lock = _lock_for(f"orch:{ref_dirname}")
         if not lock.acquire(blocking=False):
             log.debug("skipping %s — in use by ensure()", ref_dirname)
             continue
         try:
             shutil.rmtree(venv_dir, ignore_errors=True)
-            shutil.rmtree(cache_root / ref_dirname, ignore_errors=True)
+            shutil.rmtree(bundle_dir, ignore_errors=True)
             (sidecar_dir / ref_dirname).unlink(missing_ok=True)
         finally:
             lock.release()
@@ -246,6 +233,43 @@ def _flatten_wrapper_dir(dest: Path) -> None:
     shutil.rmtree(wrapper, ignore_errors=True)
 
 
+def _ensure_runtime(manifest: BundleManifest, bundle_dir: Path, venv_root: Path) -> Path:
+    if python_deps_source(manifest.requirements, bundle_dir) is None:
+        return Path(sys.executable)
+    return _ensure_venv(manifest, bundle_dir, venv_root)
+
+
+def python_deps_source(requirements: dict, bundle_dir: Path) -> PythonDepsSource | None:
+    req_file = bundle_dir / "requirements.txt"
+    if req_file.exists():
+        lines = req_file.read_text(encoding="utf-8").splitlines()
+        values = tuple(line.strip() for line in lines if _meaningful_requirement(line))
+        return PythonDepsSource("requirements.txt", values, req_file) if values else None
+    pip_deps = tuple(requirements.get("pip", []) or [])
+    return PythonDepsSource("manifest.pip", pip_deps) if pip_deps else None
+
+
+def _has_python_deps(manifest: BundleManifest, bundle_dir: Path) -> bool:
+    return python_deps_source(manifest.requirements, bundle_dir) is not None
+
+
+_PIP_OPTION_PREFIXES = (
+    "--extra-index-url",
+    "--find-links",
+    "--index-url",
+    "--no-index",
+    "--require-hashes",
+    "--trusted-host",
+    "-f",
+    "-i",
+)
+
+
+def _meaningful_requirement(line: str) -> bool:
+    stripped = line.strip()
+    return bool(stripped and not stripped.startswith("#") and not stripped.startswith(_PIP_OPTION_PREFIXES))
+
+
 def _ensure_venv(manifest: BundleManifest, bundle_dir: Path, venv_root: Path) -> Path:
     """Build the venv in a sibling tmp dir then atomic-rename, so a half-built
     venv from a crashed previous run doesn't poison the cache."""
@@ -267,12 +291,11 @@ def _ensure_venv(manifest: BundleManifest, bundle_dir: Path, venv_root: Path) ->
         subprocess.run([sys.executable, "-m", "venv", str(tmp_dir)], check=True)
 
         tmp_python = tmp_dir / rel_python
-        req_file = bundle_dir / "requirements.txt"
-        pip_deps = manifest.requirements.get("pip", [])
-        if req_file.exists():
-            subprocess.run([str(tmp_python), "-m", "pip", "install", "-q", "-r", str(req_file)], check=True)
-        elif pip_deps:
-            subprocess.run([str(tmp_python), "-m", "pip", "install", "-q", *pip_deps], check=True)
+        deps = python_deps_source(manifest.requirements, bundle_dir)
+        if deps is not None:
+            subprocess.run(
+                [str(tmp_python), "-m", "pip", "install", "-q", *deps.pip_install_args()], check=True
+            )
 
         tmp_dir.rename(venv_dir)
     except Exception:

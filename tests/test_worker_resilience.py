@@ -19,8 +19,9 @@ from sathop.shared.protocol import (
     WorkerRegister,
 )
 from sathop.worker.agent import OrchestratorClient
+from sathop.worker.cleanup import prune_work_dir_orphans
 from sathop.worker.config import Settings
-from sathop.worker.main import Worker, _prune_work_dir_orphans
+from sathop.worker.main import Worker
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -83,7 +84,7 @@ def test_prune_work_dir_orphans_removes_stale(tmp_path):
     (work_root / "g-malformed").mkdir()
     (work_root / "loose-file").write_bytes(b"y")
 
-    r = _prune_work_dir_orphans(work_root, active_segments={"busy"})
+    r = prune_work_dir_orphans(work_root, active_segments={"busy"})
     assert r["removed"] == 1
     assert r["freed_bytes"] >= 1024
     assert fresh.exists()
@@ -94,7 +95,7 @@ def test_prune_work_dir_orphans_removes_stale(tmp_path):
 
 def test_prune_work_dir_orphans_missing_root(tmp_path):
     """Worker may run before its work_root is created. Don't crash on it."""
-    r = _prune_work_dir_orphans(tmp_path / "does-not-exist", active_segments=set())
+    r = prune_work_dir_orphans(tmp_path / "does-not-exist", active_segments=set())
     assert r == {"removed": 0, "freed_bytes": 0}
 
 
@@ -256,4 +257,32 @@ async def test_lease_success_resets_backoff(tmp_path):
         # backoff bumped during the 403 attempt; reset on the next success
         assert w._lease_backoff_factor == 1
     finally:
+        await w.client.aclose()
+
+
+async def test_pipeline_capacity_counts_handlers_not_stage_queue(tmp_path):
+    s = _settings(tmp_path)
+    w = Worker(s)
+    try:
+        w._handlers["g1"] = asyncio.create_task(asyncio.sleep(60))
+        w._handlers["g2"] = asyncio.create_task(asyncio.sleep(60))
+        lease_calls: list[int] = []
+
+        async def fake_lease(req):
+            lease_calls.append(req.capacity)
+            return LeaseResponse(items=[], lease_expires_at=datetime.now(UTC) + timedelta(minutes=30))
+
+        w.client.lease = fake_lease  # type: ignore[method-assign]
+        task = asyncio.create_task(w._pipeline_loop())
+        await asyncio.sleep(1.2)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        assert lease_calls == []
+    finally:
+        for t in w._handlers.values():
+            t.cancel()
         await w.client.aclose()

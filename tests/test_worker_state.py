@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
+from sathop.orchestrator.api.workers import _renew_worker_leases
 from sathop.orchestrator.background import sweep_expired_leases
 from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Granule, Worker, utcnow
@@ -163,3 +164,25 @@ async def test_sweeper_ignores_uploaded(client):
 async def test_sweeper_ignores_unexpired(client):
     await _seed(state=GranuleState.PROCESSING.value, expires_in=timedelta(minutes=5))
     assert await sweep_expired_leases() == 0
+
+
+async def test_heartbeat_renews_only_leases_near_expiry(client):
+    await _seed(granule_id="fresh", state=GranuleState.PROCESSING.value, expires_in=timedelta(minutes=25))
+    await _seed(granule_id="stale", state=GranuleState.PROCESSING.value, expires_in=timedelta(minutes=10))
+    now = utcnow()
+    async with orch_db._session_maker() as s:
+        fresh = await s.get(Granule, "fresh")
+        stale = await s.get(Granule, "stale")
+        assert fresh is not None and fresh.lease_expires_at is not None
+        assert stale is not None and stale.lease_expires_at is not None
+        fresh_before = fresh.lease_expires_at
+        stale_before = stale.lease_expires_at
+        await _renew_worker_leases(s, "w1", now)
+        await s.commit()
+
+    async with orch_db._session_maker() as s:
+        fresh = await s.get(Granule, "fresh")
+        stale = await s.get(Granule, "stale")
+        assert fresh is not None and fresh.lease_expires_at == fresh_before
+        assert stale is not None and stale.lease_expires_at is not None
+        assert stale.lease_expires_at > stale_before

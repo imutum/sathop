@@ -5,6 +5,7 @@ Venv building is covered by the smoke tests (needs subprocess + ~5s)."""
 from __future__ import annotations
 
 import io
+import sys
 import zipfile
 from pathlib import Path
 
@@ -238,3 +239,52 @@ def test_bundle_manifest_rejects_malformed_shared_files(tmp_path):
     )
     with pytest.raises(ValueError, match="non-empty strings"):
         bundle.BundleManifest.load(p)
+
+
+# ─── runtime selection ───────────────────────────────────────────────────
+
+
+def test_ensure_reuses_worker_python_when_bundle_has_no_python_deps(tmp_path, monkeypatch):
+    cache_root = tmp_path / "bundles"
+    bundle_dir = cache_root / "z@0.1"
+    _write_manifest(bundle_dir, name="z", version="0.1")
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("venv creation should not run for dependency-free bundles")
+
+    monkeypatch.setattr(bundle.subprocess, "run", fail_run)
+
+    handle = bundle.ensure(
+        "orch:z@0.1", cache_root, tmp_path / "venvs", tmp_path / "shared", "http://orch", "tok"
+    )
+
+    assert handle.python == Path(sys.executable)
+    assert (tmp_path / "venvs" / bundle._LAST_USED_DIR / "z@0.1").is_file()
+
+
+def test_ensure_builds_cached_venv_when_python_deps_are_declared(tmp_path, monkeypatch):
+    cache_root = tmp_path / "bundles"
+    bundle_dir = cache_root / "z@0.1"
+    _write_manifest(bundle_dir, name="z", version="0.1")
+    (bundle_dir / "requirements.txt").write_text("numpy\n", encoding="utf-8")
+    fake_python = (
+        tmp_path / "venvs" / "z@0.1" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    )
+
+    monkeypatch.setattr(bundle, "_ensure_venv", lambda *_args: fake_python)
+
+    handle = bundle.ensure(
+        "orch:z@0.1", cache_root, tmp_path / "venvs", tmp_path / "shared", "http://orch", "tok"
+    )
+
+    assert handle.python == fake_python
+    assert (tmp_path / "venvs" / bundle._LAST_USED_DIR / "z@0.1").is_file()
+
+
+def test_requirements_comments_only_do_not_force_venv(tmp_path):
+    root = tmp_path / "b"
+    _write_manifest(root)
+    (root / "requirements.txt").write_text("\n# stdlib only\n", encoding="utf-8")
+    manifest = bundle.BundleManifest.load(root / "manifest.yaml")
+
+    assert bundle._has_python_deps(manifest, root) is False

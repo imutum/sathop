@@ -50,7 +50,7 @@ class Worker(Base):
     cpu_percent: Mapped[float] = mapped_column(Float, default=0.0)
     mem_percent: Mapped[float] = mapped_column(Float, default=0.0)
     monthly_egress_gb: Mapped[float] = mapped_column(Float, default=0.0)
-    # 5 个 worker-side 阶段计数。命名跟 worker.stage Counter 一一对应。
+    # 6 个 worker-side 阶段计数。命名跟 worker.stages 快照一一对应。
     # 全部 nullable 以便 _ensure_columns 给老 DB 加列时旧行能保持 NULL；
     # 读端 `or 0` 兜底。
     queue_pending_download: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)

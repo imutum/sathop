@@ -18,6 +18,7 @@ from pathlib import Path
 import yaml
 
 from sathop.orchestrator.bundle_schema import InputsSchema, parse_shared_files
+from sathop.worker.bundle import python_deps_source
 
 REQUIRED_KEYS = {"name", "version", "execution", "outputs", "inputs"}
 RE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -101,17 +102,14 @@ def _check_entrypoint_resolves(manifest: dict, bundle_dir: Path, r: Report) -> N
 
 
 def _check_requirements(manifest: dict, bundle_dir: Path, r: Report) -> None:
-    has_req_txt = (bundle_dir / "requirements.txt").is_file()
-    req = manifest.get("requirements")
-    if req is None:
-        if has_req_txt:
-            r.passed.append("requirements.txt found — worker will install from it")
-        else:
-            r.passed.append("no requirements declared (bundle uses worker base image only)")
-        return
-    if not isinstance(req, dict):
+    raw_req = manifest.get("requirements")
+    if raw_req is None:
+        req = {}
+    elif not isinstance(raw_req, dict):
         r.errors.append("manifest.requirements must be a mapping")
         return
+    else:
+        req = raw_req
     for key in ("pip", "apt", "credentials"):
         v = req.get(key)
         if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
@@ -123,13 +121,17 @@ def _check_requirements(manifest: dict, bundle_dir: Path, r: Report) -> None:
     n_apt = len(req.get("apt") or [])
     n_creds = len(req.get("credentials") or [])
     r.passed.append(f"requirements: python={py!r}, pip={n_pip}, apt={n_apt}, credentials={n_creds}")
-    if has_req_txt and n_pip > 0:
-        r.warnings.append(
-            "both requirements.txt and manifest.requirements.pip declared — "
-            "worker uses requirements.txt and ignores manifest.pip"
-        )
-    elif has_req_txt:
+
+    deps = python_deps_source(req, bundle_dir)
+    if deps is None:
+        r.passed.append("no Python requirements declared (bundle uses worker Python)")
+    elif deps.kind == "requirements.txt":
         r.passed.append("requirements.txt found — worker will install from it")
+        if n_pip > 0:
+            r.warnings.append(
+                "both requirements.txt and manifest.requirements.pip declared — "
+                "worker uses requirements.txt and ignores manifest.pip"
+            )
 
 
 def _check_inputs_and_shared(manifest: dict, r: Report) -> None:
@@ -150,9 +152,10 @@ def _check_inputs_and_shared(manifest: dict, r: Report) -> None:
             r.passed.append(f"shared_files: {names}")
 
 
-def _try_build_venv(manifest: dict, r: Report) -> None:
-    pip_deps = (manifest.get("requirements") or {}).get("pip") or []
-    if not pip_deps:
+def _try_build_venv(manifest: dict, bundle_dir: Path, r: Report) -> None:
+    req = manifest.get("requirements") or {}
+    deps = python_deps_source(req, bundle_dir)
+    if deps is None:
         r.passed.append("(skipped venv build — no pip deps declared)")
         return
     try:
@@ -161,7 +164,7 @@ def _try_build_venv(manifest: dict, r: Report) -> None:
         r.warnings.append("(skipped venv build — `uv` not found on PATH)")
         return
 
-    py = (manifest.get("requirements") or {}).get("python") or ">=3.11"
+    py = req.get("python") or ">=3.11"
     py_minor = re.search(r"3\.\d+", py)
     py_arg = ["--python", py_minor.group()] if py_minor else []
 
@@ -169,8 +172,11 @@ def _try_build_venv(manifest: dict, r: Report) -> None:
         venv = Path(tmp) / "v"
         try:
             subprocess.run(["uv", "venv", *py_arg, str(venv)], capture_output=True, check=True, timeout=120)
+            install_cmd = ["uv", "pip", "install", "--python", str(venv)]
+            if deps.requirements_file is None:
+                install_cmd.append("--")
             subprocess.run(
-                ["uv", "pip", "install", "--python", str(venv), "--", *pip_deps],
+                [*install_cmd, *deps.pip_install_args()],
                 capture_output=True,
                 check=True,
                 timeout=600,
@@ -182,7 +188,7 @@ def _try_build_venv(manifest: dict, r: Report) -> None:
         except subprocess.TimeoutExpired:
             r.errors.append("venv build timed out (>10 min)")
             return
-        r.passed.append(f"venv build succeeded ({len(pip_deps)} pip deps installed)")
+        r.passed.append(f"venv build succeeded ({len(deps.values)} pip deps installed)")
 
 
 def validate(bundle_dir: Path, build_venv: bool = False) -> Report:
@@ -208,7 +214,7 @@ def validate(bundle_dir: Path, build_venv: bool = False) -> Report:
     _check_entrypoint_resolves(manifest, bundle_dir, r)
     _check_requirements(manifest, bundle_dir, r)
     if build_venv:
-        _try_build_venv(manifest, r)
+        _try_build_venv(manifest, bundle_dir, r)
     return r
 
 

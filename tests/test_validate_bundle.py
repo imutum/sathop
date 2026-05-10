@@ -162,6 +162,14 @@ def test_requirements_txt_and_manifest_pip_conflict_warns(tmp_path: Path):
     assert any("both requirements.txt and manifest.requirements.pip" in w for w in r.warnings)
 
 
+def test_requirements_txt_comments_only_is_dependency_free(tmp_path: Path):
+    bundle = _write(tmp_path / "b", GOOD_MANIFEST, {"run.sh": "", "requirements.txt": "\n# stdlib only\n"})
+    r = validator.validate(bundle)
+    assert r.ok, r.errors
+    assert any("no Python requirements declared" in p for p in r.passed)
+    assert not any("worker will install" in p for p in r.passed)
+
+
 def test_full_featured_manifest(tmp_path: Path):
     """Synthetic manifest exercising every optional field at once: timeout,
     extensions, multi-slot inputs + meta, full requirements (python/pip/apt/

@@ -1,7 +1,7 @@
 """Worker bundle runner: covers input staging, entrypoint exec, output collection,
 extension filter, non-zero exit, empty-output detection, env-var injection.
 
-Uses a stub BundleHandle that points venv_python at sys.executable — so the
+Uses a stub BundleHandle that points python at sys.executable — so the
 test doesn't pay the ~5s cost of `python -m venv` for every case."""
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ def _make_bundle(
     manifest = BundleManifest.load(root / "manifest.yaml")
     shared = tmp_path / "shared"
     shared.mkdir(exist_ok=True)
-    # Point venv_python at the test interpreter; processor PATH-prepends its parent.
-    return BundleHandle(manifest=manifest, root=root, venv_python=Path(sys.executable), shared_dir=shared)
+    # Point runtime python at the test interpreter; processor PATH-prepends its parent.
+    return BundleHandle(manifest=manifest, root=root, python=Path(sys.executable), shared_dir=shared)
 
 
 @pytest.fixture
@@ -134,6 +134,20 @@ async def test_env_vars_reach_entrypoint(tmp_path, work_root):
     assert r.outputs[0].read_text(encoding="utf-8") == "my-granule|my-batch"
 
 
+async def test_runtime_python_env_vars_reach_entrypoint(tmp_path, work_root):
+    script = (
+        "import os, pathlib\n"
+        "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
+        "(o / 'python.txt').write_text(\n"
+        "    os.environ['SATHOP_BUNDLE_PYTHON'] + '\\n' + os.environ['SATHOP_VENV_PYTHON']\n"
+        ")\n"
+    )
+    h = _make_bundle(tmp_path, "python run.py", script)
+    r = await run_bundle(h, "g", "b", [], {}, work_root)
+    assert r.ok
+    assert r.outputs[0].read_text(encoding="utf-8") == f"{sys.executable}\n{sys.executable}"
+
+
 async def test_custom_env_in_manifest_merged(tmp_path, work_root):
     script = (
         "import os, pathlib\n"
@@ -161,7 +175,7 @@ async def test_custom_env_in_manifest_merged(tmp_path, work_root):
     h = BundleHandle(
         manifest=BundleManifest.load(root / "manifest.yaml"),
         root=root,
-        venv_python=Path(sys.executable),
+        python=Path(sys.executable),
         shared_dir=tmp_path / "shared",
     )
     r = await run_bundle(h, "g", "b", [], {}, work_root)
@@ -198,7 +212,7 @@ async def test_batch_env_overrides_bundle_env(tmp_path, work_root):
     h = BundleHandle(
         manifest=BundleManifest.load(root / "manifest.yaml"),
         root=root,
-        venv_python=Path(sys.executable),
+        python=Path(sys.executable),
         shared_dir=tmp_path / "shared",
     )
     # Batch overrides the bundle default

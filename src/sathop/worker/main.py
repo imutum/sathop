@@ -17,8 +17,6 @@ import shutil
 import signal
 import time
 import traceback
-from collections import Counter
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -39,12 +37,22 @@ from sathop.shared.protocol import (
 )
 
 from . import bundle, downloader, storage, tls
-from . import shared as shared_sync
-from ._paths import safe_segment
+from ._paths import work_dir_path
 from .agent import OrchestratorClient
+from .cleanup import CacheCleaner
 from .config import Settings, load
 from .processor import ProcessResult, run_bundle
 from .progress import ProgressServer
+from .stages import (
+    DOWNLOADING,
+    PENDING_DOWNLOAD,
+    PENDING_PROCESSING,
+    PENDING_UPLOAD,
+    PROCESSING,
+    UPLOADING,
+    StageTracker,
+    WorkerStages,
+)
 
 log = logging.getLogger("sathop.worker")
 
@@ -77,51 +85,6 @@ _DRAIN_POLL_INTERVAL_SEC = 1.0
 # polls when the worker is disabled or the orch is down. 6 × 10s = 60s, which
 # keeps a disabled worker quiet without delaying re-enable past one minute.
 _LEASE_MAX_BACKOFF_FACTOR = 6
-# work_root/g-* dirs older than this with no active handler are SIGKILL
-# orphans (regular handler exit cleans up via finally). 1h is large enough
-# that a slow bundle (15-min timeout default) never trips it.
-_WORK_DIR_ORPHAN_AGE_SEC = 3600
-_StageTransition = Callable[[str], None]
-_StageExit = Callable[[], None]
-
-
-def _prune_work_dir_orphans(work_root: Path, active_segments: set[str]) -> dict[str, int]:
-    """Sweep `work_root/g-*-<ts>` directories, removing those whose ts is
-    older than _WORK_DIR_ORPHAN_AGE_SEC and whose granule_id segment is not
-    in `active_segments`. Caller passes the set so this stays
-    asyncio.to_thread-safe (no `self._handlers` access from the worker thread).
-
-    Returns {"removed": int, "freed_bytes": int}; missing/non-dir entries are
-    skipped silently — the caller's gc_loop already wraps the call in a
-    blanket except."""
-    threshold = time.time() - _WORK_DIR_ORPHAN_AGE_SEC
-    removed = 0
-    freed = 0
-    if not work_root.is_dir():
-        return {"removed": 0, "freed_bytes": 0}
-    for entry in work_root.iterdir():
-        if not entry.is_dir() or not entry.name.startswith("g-"):
-            continue
-        # Layout: g-<safe_segment>-<unix-ts>. ts is always the last `-`
-        # field; the segment may itself contain hyphens, so split from right.
-        try:
-            stem, ts_str = entry.name.rsplit("-", 1)
-            ts = int(ts_str)
-        except ValueError:
-            continue
-        if ts > threshold:
-            continue
-        segment = stem[2:]  # strip leading "g-"
-        if segment in active_segments:
-            continue
-        try:
-            size = sum(f.stat().st_size for f in entry.rglob("*") if f.is_file())
-        except OSError:
-            size = 0
-        shutil.rmtree(entry, ignore_errors=True)
-        removed += 1
-        freed += size
-    return {"removed": removed, "freed_bytes": freed}
 
 
 class Worker:
@@ -137,7 +100,8 @@ class Worker:
             minio_secret_key=s.minio_secret_key,
             minio_bucket=s.minio_bucket,
         )
-        self.stage: Counter[str] = Counter()
+        self.stages = WorkerStages()
+        self.cleaner = CacheCleaner(s, lambda: set(self._handlers.keys()))
         # Worker-side disk-watermark pause; set by _backpressure_loop.
         self._pause_lease = False
         # Operator-set pause delivered via heartbeat reply (pause_requested).
@@ -145,7 +109,7 @@ class Worker:
         # together as `paused` on the heartbeat so old UIs see one flag.
         self._remote_pause = False
         # Set by heartbeat when the orchestrator delivers a one-shot gc_requested.
-        # _gc_loop awaits the event and runs an out-of-cycle prune_caches pass.
+        # CacheCleaner awaits the event and runs an out-of-cycle prune pass.
         self._gc_event = asyncio.Event()
         # Set to True on SIGTERM/SIGINT or operator-requested restart. The
         # pipeline loop stops requesting new leases; in-flight handlers run to
@@ -286,7 +250,7 @@ class Worker:
             tg.create_task(self._pipeline_loop())
             tg.create_task(self._janitor_loop())
             tg.create_task(self._backpressure_loop())
-            tg.create_task(self._gc_loop())
+            tg.create_task(self.cleaner.loop(self._gc_event))
             tg.create_task(self._drain_watchdog_loop())
             tg.create_task(self.progress.serve())
             if getattr(self.storage, "needs_static_server", False):
@@ -304,9 +268,9 @@ class Worker:
             try:
                 du = psutil.disk_usage(str(self.s.storage_root))
                 vm = psutil.virtual_memory()
-                # 5 个 worker-side 阶段直接上报，跟 stage Counter 一一对应。
-                # 全局阶段（待分配/待分发/待清理/已完成/待重试）orchestrator
-                # 自己从 DB GranuleState 算，不在 heartbeat 里。
+                stage_snapshot = self.stages.snapshot()
+                # Worker-side 阶段直接上报；全局阶段（待分配/待分发/待清理/
+                # 已完成/待重试）由 orchestrator 从 DB GranuleState 计算。
                 resp = await self.client.heartbeat(
                     WorkerHeartbeat(
                         worker_id=self.s.worker_id,
@@ -315,14 +279,9 @@ class Worker:
                         disk_total_gb=du.total / 1024**3,
                         cpu_percent=psutil.cpu_percent(interval=None),
                         mem_percent=vm.percent,
-                        queue_pending_download=self.stage["pending_download"],
-                        queue_downloading=self.stage["downloading"],
-                        queue_pending_processing=self.stage["pending_processing"],
-                        queue_processing=self.stage["processing"],
-                        queue_pending_upload=self.stage["pending_upload"],
-                        queue_uploading=self.stage["uploading"],
                         paused=self._pause_lease or self._remote_pause,
                         active_granule_ids=list(self._handlers.keys()),
+                        **stage_snapshot.heartbeat_fields(),
                     )
                 )
                 if resp.restart_requested:
@@ -395,7 +354,7 @@ class Worker:
                 self._effective_capacity,
                 self.s.process_concurrency + self.s.download_concurrency,
             )
-            free = ceiling - sum(self.stage.values())
+            free = ceiling - len(self._handlers)
             if free <= 0 or self._pause_lease or self._remote_pause or self._draining:
                 await asyncio.sleep(self.s.lease_poll_interval)
                 continue
@@ -434,31 +393,16 @@ class Worker:
 
     async def _handle(self, item: LeaseItem) -> None:
         gid = item.granule_id
-        work_dir = self.s.work_root / f"g-{safe_segment(gid)}-{int(time.time())}"
+        work_dir = work_dir_path(self.s.work_root, gid)
         work_dir.mkdir(parents=True, exist_ok=True)
         input_dir = work_dir / "input"
         input_dir.mkdir()
         nonce, progress_url = self.progress.issue(gid)
 
-        # Track which stage counter we currently hold so the except-block
-        # decrements only this granule's contribution. Decrementing every
-        # non-zero counter would corrupt concurrent granules' queue display.
-        current: str | None = None
-
-        def _enter(stage: str) -> None:
-            nonlocal current
-            self.stage[stage] += 1
-            current = stage
-
-        def _exit() -> None:
-            nonlocal current
-            if current is not None:
-                self.stage[current] -= 1
-                current = None
-
+        stage = self.stages.tracker()
         try:
-            paths = await self._download_inputs(item, input_dir, _enter, _exit)
-            handle, result = await self._process_inputs(item, paths, progress_url, _enter, _exit)
+            paths = await self._download_inputs(item, input_dir, stage)
+            handle, result = await self._process_inputs(item, paths, progress_url, stage)
 
             if not result.ok:
                 await self.client.report_failure(
@@ -474,7 +418,7 @@ class Worker:
                 log.warning("[%s] processing failed exit=%s", gid, result.exit_code)
                 return
 
-            await self._upload_outputs(item, handle, result.outputs, _enter, _exit)
+            await self._upload_outputs(item, handle, result.outputs, stage)
 
         except LeaseRevoked:
             # Lease already gone from the DB row — failure report would 409
@@ -498,7 +442,7 @@ class Worker:
             except Exception:
                 pass
         finally:
-            _exit()
+            stage.exit()
             self.progress.revoke(nonce)
             shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -506,18 +450,16 @@ class Worker:
         self,
         item: LeaseItem,
         input_dir: Path,
-        enter_stage: _StageTransition,
-        exit_stage: _StageExit,
+        stage: StageTracker,
     ) -> list[Path]:
         gid = item.granule_id
         # Lease wrote state=QUEUED. Hold pending_download until the download
         # semaphore frees up, then promote QUEUED→DOWNLOADING so the UI only
         # flags rows whose bytes are actually moving.
-        enter_stage("pending_download")
+        stage.enter(PENDING_DOWNLOAD)
         paths: list[Path] = []
         async with self._download_sem:
-            exit_stage()
-            enter_stage("downloading")
+            stage.enter(DOWNLOADING)
             await self._report_state(gid, GranuleState.DOWNLOADING)
             log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
             for spec in item.inputs:
@@ -528,7 +470,7 @@ class Worker:
                 if spec.checksum:
                     await downloader.verify_sha256(dst, spec.checksum)
                 paths.append(dst)
-        exit_stage()
+        stage.exit()
         await self._report_state(gid, GranuleState.DOWNLOADED)
         return paths
 
@@ -537,8 +479,7 @@ class Worker:
         item: LeaseItem,
         paths: list[Path],
         progress_url: str,
-        enter_stage: _StageTransition,
-        exit_stage: _StageExit,
+        stage: StageTracker,
     ) -> tuple[bundle.BundleHandle, ProcessResult]:
         gid = item.granule_id
         # bundle.ensure 不占 process slot — 它是 first-time fetch + venv build，
@@ -555,10 +496,9 @@ class Worker:
         # 等 CPU 槽位时 DB state 留在 DOWNLOADED（"待处理"）— 只有真正拿到
         # process_sem、即将开跑时才报 PROCESSING（"处理中"）。这样耗时统计
         # 里的 process 阶段反映实际处理时长，不把排队等待算进去。
-        enter_stage("pending_processing")
+        stage.enter(PENDING_PROCESSING)
         async with self._process_sem:
-            exit_stage()
-            enter_stage("processing")
+            stage.enter(PROCESSING)
             await self._report_state(gid, GranuleState.PROCESSING)
             # run_bundle is now async + uses asyncio.create_subprocess_shell;
             # CancelledError propagates straight in and `_kill_and_wait` tears
@@ -573,7 +513,7 @@ class Worker:
                 item.execution_env,
                 progress_url,
             )
-        exit_stage()
+        stage.exit()
         return handle, result
 
     async def _upload_outputs(
@@ -581,8 +521,7 @@ class Worker:
         item: LeaseItem,
         handle: bundle.BundleHandle,
         outputs: list[Path],
-        enter_stage: _StageTransition,
-        exit_stage: _StageExit,
+        stage: StageTracker,
     ) -> None:
         gid = item.granule_id
         await self._report_state(gid, GranuleState.PROCESSED)
@@ -590,10 +529,9 @@ class Worker:
         # at PROCESSED on the orchestrator (no DB transition for "waiting on
         # upload sem") — the heartbeat counter is the sole signal so the
         # operator UI can tell "uploading" from "waiting to upload".
-        enter_stage("pending_upload")
+        stage.enter(PENDING_UPLOAD)
         async with self._upload_sem:
-            exit_stage()
-            enter_stage("uploading")
+            stage.enter(UPLOADING)
             # Capture instant we left the sem queue so the orchestrator can
             # split this window into upload_wait (sem) vs upload (work).
             upload_started_at = datetime.now(UTC)
@@ -603,7 +541,7 @@ class Worker:
                 key = _render_key(key_tpl, out, item.meta)
                 uploaded.append(self.storage.put(out, key))
             await self.client.report_upload(gid, self.s.worker_id, uploaded, upload_started_at)
-        exit_stage()
+        stage.exit()
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
 
     async def _report_state(self, gid: str, state: GranuleState) -> None:
@@ -682,82 +620,6 @@ class Worker:
             except Exception as e:
                 log.warning("backpressure check failed: %s", e)
             await asyncio.sleep(self.s.backpressure_interval)
-
-    async def _gc_loop(self) -> None:
-        """Periodic local disk cleanup. Two jobs:
-          1. Evict oldest cached venvs (+ matching bundle source dirs) once
-             the venv cache exceeds SATHOP_VENV_CACHE_LIMIT_GB. ensure()
-             refreshes the LRU sidecar on each lease, so an actively-used
-             bundle can never be the oldest.
-          2. Drop shared-file cache files whose name is no longer in the
-             orchestrator registry — bundles can drift faster than the cache
-             notices, and an orphan can shadow a re-uploaded name on the
-             next ensure().
-
-        SATHOP_GC_INTERVAL=0 disables the periodic firing but keeps the
-        event-driven path: an operator-triggered GC (heartbeat reply
-        gc_requested=True) still runs. Each job runs under asyncio.to_thread
-        because they're stat()/rmtree-heavy."""
-        periodic = self.s.gc_interval_sec > 0
-        if not periodic:
-            log.info("gc loop periodic disabled (SATHOP_GC_INTERVAL=0); event-driven GC still active")
-        limit_bytes = int(self.s.venv_cache_limit_gb * 1024**3)
-        # Fire once at startup so a worker that crashed mid-cycle (cache over
-        # quota, orphans accumulated) catches up before its first lease.
-        self._gc_event.set()
-        while True:
-            if periodic:
-                try:
-                    await asyncio.wait_for(self._gc_event.wait(), timeout=self.s.gc_interval_sec)
-                except TimeoutError:
-                    pass
-            else:
-                await self._gc_event.wait()
-            self._gc_event.clear()
-            try:
-                r = await asyncio.to_thread(
-                    bundle.prune_caches,
-                    self.s.venv_cache,
-                    self.s.bundle_cache,
-                    limit_bytes,
-                )
-                if r["removed"]:
-                    log.info(
-                        "venv LRU evicted %d entr(ies), freed %.1f GB (now %.1f GB total)",
-                        r["removed"],
-                        r["freed_bytes"] / 1024**3,
-                        r["total_bytes"] / 1024**3,
-                    )
-                shared_r = await asyncio.to_thread(
-                    shared_sync.prune_orphans,
-                    self.s.shared_cache,
-                    self.s.orchestrator_url,
-                    self.s.token,
-                )
-                if shared_r["removed"]:
-                    log.info(
-                        "shared orphan cleanup removed %d file(s), freed %.1f MB",
-                        shared_r["removed"],
-                        shared_r["freed_bytes"] / 1024**2,
-                    )
-                # work_dir orphans: SIGKILL kills the handler before its
-                # finally block runs, leaving g-* dirs behind. The handler's
-                # work dir uses safe_segment(gid) + a unix timestamp suffix,
-                # which lets us reliably distinguish stale dirs (no active
-                # handler + ts older than 1h) from in-progress ones.
-                wd_r = await asyncio.to_thread(
-                    _prune_work_dir_orphans,
-                    self.s.work_root,
-                    {safe_segment(g) for g in self._handlers.keys()},
-                )
-                if wd_r["removed"]:
-                    log.info(
-                        "work_dir orphan cleanup removed %d dir(s), freed %.1f MB",
-                        wd_r["removed"],
-                        wd_r["freed_bytes"] / 1024**2,
-                    )
-            except Exception as e:
-                log.warning("gc loop iteration failed: %s", e)
 
     async def _janitor_loop(self) -> None:
         while True:

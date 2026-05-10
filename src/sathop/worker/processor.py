@@ -46,7 +46,7 @@ _GRACEFUL_KILL_WAIT_SEC = 5.0
 # nothing else. Unknown SATHOP_* values are explicitly NOT inherited; the
 # worker injects the small set bundles legitimately need (SATHOP_INPUT_DIR /
 # OUTPUT_DIR / WORK_DIR / SHARED_DIR / GRANULE_ID / BATCH_ID / META_JSON /
-# VENV_PYTHON / PROGRESS_URL) below.
+# BUNDLE_PYTHON / PROGRESS_URL) below.
 _ENV_WHITELIST: frozenset[str] = frozenset(
     {
         # Cross-platform
@@ -97,19 +97,19 @@ def _build_env(
 ) -> dict[str, str]:
     """Env precedence (later wins): whitelisted os ⇒ bundle manifest ⇒ batch
     override ⇒ internal SATHOP_* (system-owned, not operator-tunable). PATH is
-    prefixed with the bundle venv's bin dir so the entrypoint can just invoke
-    `python ...` cross-platform (cmd.exe doesn't expand $VAR).
+    prefixed with the selected runtime Python's dir so the entrypoint can just
+    invoke `python ...` cross-platform (cmd.exe doesn't expand $VAR).
 
     The whitelist filter prevents worker-process secrets (e.g. SATHOP_TOKEN)
     from being inherited by user bundle code. See _ENV_WHITELIST above."""
-    venv_bin = str(bundle.venv_python.parent)
+    python_bin = str(bundle.python.parent)
     env = {k: v for k, v in os.environ.items() if k in _ENV_WHITELIST}
     env.update(bundle.manifest.execution.get("env", {}))
     if execution_env:
         env.update(execution_env)
     env.update(
         {
-            "PATH": venv_bin + os.pathsep + os.environ.get("PATH", ""),
+            "PATH": python_bin + os.pathsep + os.environ.get("PATH", ""),
             "SATHOP_INPUT_DIR": str(input_dir),
             "SATHOP_OUTPUT_DIR": str(output_dir),
             "SATHOP_WORK_DIR": str(work_dir),
@@ -117,7 +117,8 @@ def _build_env(
             "SATHOP_GRANULE_ID": granule_id,
             "SATHOP_BATCH_ID": batch_id,
             "SATHOP_META_JSON": json.dumps(meta, ensure_ascii=False),
-            "SATHOP_VENV_PYTHON": str(bundle.venv_python),
+            "SATHOP_BUNDLE_PYTHON": str(bundle.python),
+            "SATHOP_VENV_PYTHON": str(bundle.python),
         }
     )
     if progress_url:

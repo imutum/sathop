@@ -65,10 +65,10 @@ def test_prune_caches_evicts_oldest_first(tmp_path: Path) -> None:
     _set_sidecar_mtime(venv_root, "mid@1", now - 500)
     _set_sidecar_mtime(venv_root, "new@1", now - 1)
 
-    r = bundle.prune_caches(venv_root, cache_root, limit_bytes=2 * 1024)
+    r = bundle.prune_caches(venv_root, cache_root, limit_bytes=2200)
 
     assert r["removed"] == 1
-    assert r["freed_bytes"] == 1024
+    assert r["freed_bytes"] >= 1024
     assert not (venv_root / "old@1").exists()
     assert not (cache_root / "old@1").exists()
     assert not (venv_root / bundle._LAST_USED_DIR / "old@1").exists()
@@ -104,21 +104,36 @@ def test_prune_caches_skips_locked_ref(tmp_path: Path) -> None:
 
 
 def test_prune_caches_cleans_stale_sidecar(tmp_path: Path) -> None:
-    """A sidecar with no matching venv dir (worker crashed mid-eviction in a
-    prior run, or operator manually deleted the venv) should be unlinked
-    silently — otherwise the sidecar pile grows forever."""
     venv_root = tmp_path / "venvs"
     cache_root = tmp_path / "bundles"
     cache_root.mkdir()
     sidecar_dir = venv_root / bundle._LAST_USED_DIR
     sidecar_dir.mkdir(parents=True)
     (sidecar_dir / "ghost@1").touch()
-    # No matching venv_root/ghost@1.
 
     r = bundle.prune_caches(venv_root, cache_root, limit_bytes=10 * 1024)
 
     assert r["removed"] == 0
     assert not (sidecar_dir / "ghost@1").exists()
+
+
+def test_prune_caches_evicts_dependency_free_bundle_sources(tmp_path: Path) -> None:
+    venv_root = tmp_path / "venvs"
+    cache_root = tmp_path / "bundles"
+    sidecar_dir = venv_root / bundle._LAST_USED_DIR
+    bundle_dir = cache_root / "stdlib@1"
+    bundle_dir.mkdir(parents=True)
+    (bundle_dir / "manifest.yaml").write_text("name: stdlib\n", encoding="utf-8")
+    (bundle_dir / "payload.bin").write_bytes(b"x" * 2048)
+    sidecar_dir.mkdir(parents=True)
+    (sidecar_dir / "stdlib@1").touch()
+
+    r = bundle.prune_caches(venv_root, cache_root, limit_bytes=1024)
+
+    assert r["removed"] == 1
+    assert r["freed_bytes"] >= 2048
+    assert not bundle_dir.exists()
+    assert not (sidecar_dir / "stdlib@1").exists()
 
 
 def test_prune_caches_disabled_when_limit_zero(tmp_path: Path) -> None:
@@ -217,3 +232,13 @@ def test_prune_orphans_noop_when_root_missing(tmp_path: Path) -> None:
     crash trying to enumerate a non-existent directory."""
     r = worker_shared.prune_orphans(tmp_path / "missing", "http://orch", "tok")
     assert r == {"removed": 0, "freed_bytes": 0}
+
+
+def test_prune_orphans_noop_when_cache_has_no_data_files(tmp_path: Path) -> None:
+    shared_root = tmp_path / "shared"
+    shared_root.mkdir()
+    (shared_root / ".sha256").mkdir()
+    with patch("urllib.request.urlopen") as urlopen:
+        r = worker_shared.prune_orphans(shared_root, "http://orch", "tok")
+    assert r == {"removed": 0, "freed_bytes": 0}
+    urlopen.assert_not_called()

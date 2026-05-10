@@ -2,7 +2,7 @@
 
 Smallest working SatHop bundle. Use it as a smoke test after spinning up an orchestrator + worker, and as a reference when authoring your own.
 
-**What it does.** Reads each text-file input from `$SATHOP_INPUT_DIR`, prepends a one-line header (granule id, batch id, meta tag), and writes `<stem>-tagged.txt` to `$SATHOP_OUTPUT_DIR`. Reports progress checkpoints if `$SATHOP_PROGRESS_URL` is set. stdlib only — no `pip` deps, so the venv build is instantaneous.
+**What it does.** Reads each text-file input from `$SATHOP_INPUT_DIR`, prepends a one-line header (granule id, batch id, meta tag), and writes `<stem>-tagged.txt` to `$SATHOP_OUTPUT_DIR`. Reports progress checkpoints if `$SATHOP_PROGRESS_URL` is set. stdlib only — no `pip` deps, so the worker reuses its current Python environment instead of building a venv.
 
 See `../../docs/bundle-authoring.md` for the full manifest reference.
 

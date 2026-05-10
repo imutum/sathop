@@ -71,6 +71,9 @@ def prune_orphans(shared_root: Path, orchestrator_url: str, token: str) -> dict:
     will re-fetch."""
     if not shared_root.is_dir():
         return {"removed": 0, "freed_bytes": 0}
+    candidates = [p for p in shared_root.iterdir() if p.is_file() and not p.name.startswith(".")]
+    if not candidates:
+        return {"removed": 0, "freed_bytes": 0}
 
     base = orchestrator_url.rstrip("/")
     req = urllib.request.Request(f"{base}/api/shared", headers=bearer_headers(token))
@@ -83,9 +86,7 @@ def prune_orphans(shared_root: Path, orchestrator_url: str, token: str) -> dict:
     sidecar_dir = shared_root / ".sha256"
     removed = 0
     freed = 0
-    for entry in shared_root.iterdir():
-        if entry.name.startswith(".") or entry.is_dir():
-            continue
+    for entry in candidates:
         if entry.name in valid:
             continue
         with _lock_for(entry.name):
