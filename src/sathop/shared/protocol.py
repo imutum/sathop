@@ -95,6 +95,14 @@ class WorkerHeartbeatResponse(BaseModel):
     # clears the underlying flag the same heartbeat it returns True, so a
     # later heartbeat (post-restart) sees False and the worker doesn't loop.
     restart_requested: bool = False
+    # Persistent operator-set pause flag. True ⇒ worker stops accepting new
+    # leases (in-flight work continues). Distinct from the worker's own
+    # backpressure pause (worker.paused on the heartbeat request). Toggled
+    # from the UI; cleared explicitly by the operator.
+    pause_requested: bool = False
+    # One-shot: operator asked the worker to run cache GC right now (instead
+    # of waiting for the periodic loop). Mirrors restart_requested semantics.
+    gc_requested: bool = False
 
 
 class WorkerHeartbeat(BaseModel):

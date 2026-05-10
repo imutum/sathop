@@ -91,7 +91,15 @@ class Worker:
             minio_bucket=s.minio_bucket,
         )
         self.stage: Counter[str] = Counter()
+        # Worker-side disk-watermark pause; set by _backpressure_loop.
         self._pause_lease = False
+        # Operator-set pause delivered via heartbeat reply (pause_requested).
+        # Combined with _pause_lease in pipeline_loop's gate check; reported
+        # together as `paused` on the heartbeat so old UIs see one flag.
+        self._remote_pause = False
+        # Set by heartbeat when the orchestrator delivers a one-shot gc_requested.
+        # _gc_loop awaits the event and runs an out-of-cycle prune_caches pass.
+        self._gc_event = asyncio.Event()
         # Set to True on SIGTERM/SIGINT or operator-requested restart. The
         # pipeline loop stops requesting new leases; in-flight handlers run to
         # completion. _drain_watchdog_loop forces exit after the timeout if
@@ -244,7 +252,7 @@ class Worker:
                         queue_processing=self.stage["processing"],
                         queue_pending_upload=self.stage["pending_upload"],
                         queue_uploading=self.stage["uploading"],
-                        paused=self._pause_lease,
+                        paused=self._pause_lease or self._remote_pause,
                         active_granule_ids=list(self._handlers.keys()),
                     )
                 )
@@ -256,6 +264,19 @@ class Worker:
                     # (or after timeout). Docker `restart: unless-stopped`
                     # then brings us back fresh.
                     self._start_drain("restart_requested via orchestrator")
+                # Persistent operator-set pause flag. Distinct from the
+                # backpressure-driven self._pause_lease so the operator can
+                # resume even while the worker would still backpressure-pause
+                # itself (and vice versa).
+                if self._remote_pause != resp.pause_requested:
+                    log.info(
+                        "remote pause %s",
+                        "engaged" if resp.pause_requested else "released",
+                    )
+                    self._remote_pause = resp.pause_requested
+                if resp.gc_requested:
+                    log.info("orchestrator requested cache GC — waking gc loop")
+                    self._gc_event.set()
                 # Cancel any handler whose lease the orchestrator no longer
                 # credits to us — batch cancel, granule cancel, sweeper reclaim
                 # all surface here. CancelledError propagates through _handle's
@@ -293,7 +314,7 @@ class Worker:
                 self.s.process_concurrency + self.s.download_concurrency,
             )
             free = ceiling - sum(self.stage.values())
-            if free <= 0 or self._pause_lease or self._draining:
+            if free <= 0 or self._pause_lease or self._remote_pause or self._draining:
                 await asyncio.sleep(self.s.lease_poll_interval)
                 continue
             try:
@@ -578,13 +599,26 @@ class Worker:
              notices, and an orphan can shadow a re-uploaded name on the
              next ensure().
 
-        SATHOP_GC_INTERVAL=0 disables the loop entirely. Each job runs
-        under asyncio.to_thread because they're stat()/rmtree-heavy."""
-        if self.s.gc_interval_sec <= 0:
-            log.info("gc loop disabled (SATHOP_GC_INTERVAL=0)")
-            return
+        SATHOP_GC_INTERVAL=0 disables the periodic firing but keeps the
+        event-driven path: an operator-triggered GC (heartbeat reply
+        gc_requested=True) still runs. Each job runs under asyncio.to_thread
+        because they're stat()/rmtree-heavy."""
+        periodic = self.s.gc_interval_sec > 0
+        if not periodic:
+            log.info("gc loop periodic disabled (SATHOP_GC_INTERVAL=0); event-driven GC still active")
         limit_bytes = int(self.s.venv_cache_limit_gb * 1024**3)
+        # Fire once at startup so a worker that crashed mid-cycle (cache over
+        # quota, orphans accumulated) catches up before its first lease.
+        self._gc_event.set()
         while True:
+            if periodic:
+                try:
+                    await asyncio.wait_for(self._gc_event.wait(), timeout=self.s.gc_interval_sec)
+                except TimeoutError:
+                    pass
+            else:
+                await self._gc_event.wait()
+            self._gc_event.clear()
             try:
                 r = await asyncio.to_thread(
                     bundle.prune_caches,
@@ -613,7 +647,6 @@ class Worker:
                     )
             except Exception as e:
                 log.warning("gc loop iteration failed: %s", e)
-            await asyncio.sleep(self.s.gc_interval_sec)
 
     async def _janitor_loop(self) -> None:
         while True:

@@ -177,3 +177,98 @@ async def test_receiver_enable_round_trip_and_forget(client):
     assert r.status_code == 200
     async with orch_db._session_maker() as s:
         assert (await s.get(Receiver, "r1")) is None
+
+
+# ─── operator-set pause via heartbeat reply ────────────────────────────────
+
+
+async def test_worker_pause_endpoint_propagates_via_heartbeat(client):
+    """PUT /pause sets the persistent flag; the next heartbeat reply
+    forwards it, and /api/workers exposes it for the UI."""
+    await _add_worker()
+    r = client.put("/api/workers/w1/pause", json={"paused": True})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "pause_requested": True}
+
+    # /api/workers reflects the flag so the frontend renders the pause Badge
+    [row] = client.get("/api/workers").json()
+    assert row["pause_requested"] is True
+
+    # Worker-side observes pause_requested=True on the next heartbeat reply.
+    r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["pause_requested"] is True
+    # Persistent: pause_requested stays True across heartbeats until cleared.
+    r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
+    assert r.json()["pause_requested"] is True
+
+    # Resume → flag flips, heartbeat reply mirrors it.
+    assert client.put("/api/workers/w1/pause", json={"paused": False}).status_code == 200
+    r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
+    assert r.json()["pause_requested"] is False
+
+
+async def test_worker_pause_404_when_unknown(client):
+    r = client.put("/api/workers/ghost/pause", json={"paused": True})
+    assert r.status_code == 404
+
+
+# ─── force-revoke worker leases ────────────────────────────────────────────
+
+
+async def test_worker_revoke_all_resets_leases_to_pending(client):
+    """Sets up a worker holding two granules (one DOWNLOADING, one PROCESSED)
+    and confirms revoke-all flips both back to PENDING with retry_count +1."""
+    await _add_worker()
+    await _seed_granule("w1", state=GranuleState.DOWNLOADING.value, granule_id="b:dl")
+    await _seed_granule("w1", state=GranuleState.PROCESSED.value, granule_id="b:proc")
+    r = client.post("/api/workers/w1/revoke-all")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "revoked": 2}
+
+    async with orch_db._session_maker() as s:
+        for gid in ("b:dl", "b:proc"):
+            g = await s.get(Granule, gid)
+            assert g is not None
+            assert g.state == GranuleState.PENDING.value
+            assert g.leased_by is None
+            assert g.lease_expires_at is None
+            assert g.retry_count == 1
+
+
+async def test_worker_revoke_all_skips_terminal_granules(client):
+    """A granule that already moved to UPLOADED (worker handed off to receiver)
+    must NOT be reverted — that would re-process work already shipped."""
+    await _add_worker()
+    await _seed_granule("w1", state=GranuleState.UPLOADED.value, granule_id="b:done")
+    await _seed_granule("w1", state=GranuleState.DOWNLOADING.value, granule_id="b:dl")
+    r = client.post("/api/workers/w1/revoke-all")
+    assert r.json()["revoked"] == 1
+    async with orch_db._session_maker() as s:
+        done = await s.get(Granule, "b:done")
+        assert done.state == GranuleState.UPLOADED.value
+
+
+async def test_worker_revoke_all_404_when_unknown(client):
+    assert client.post("/api/workers/ghost/revoke-all").status_code == 404
+
+
+# ─── one-shot remote GC ────────────────────────────────────────────────────
+
+
+async def test_worker_gc_endpoint_one_shot_via_heartbeat(client):
+    await _add_worker()
+    r = client.post("/api/workers/w1/gc")
+    assert r.status_code == 200
+
+    # First heartbeat after the click sees the flag.
+    body = client.post("/api/workers/heartbeat", json={"worker_id": "w1"}).json()
+    assert body["gc_requested"] is True
+    # Second heartbeat: flag was consumed (one-shot), no longer set.
+    body = client.post("/api/workers/heartbeat", json={"worker_id": "w1"}).json()
+    assert body["gc_requested"] is False
+
+
+async def test_worker_gc_404_when_unknown(client):
+    assert client.post("/api/workers/ghost/gc").status_code == 404

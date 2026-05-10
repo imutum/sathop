@@ -75,6 +75,14 @@ class Worker(Base):
     # which then returns restart_requested=True to the worker. NULL ⇒ no pending
     # restart. One-shot — a re-click after the heartbeat consumed it sets a new ts.
     restart_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    # Operator-set persistent pause flag — distinct from `paused` (which the
+    # worker self-reports for disk backpressure). True ⇒ heartbeat reply tells
+    # the worker to stop accepting new leases until the operator clears it.
+    # Nullable so _ensure_columns can ALTER TABLE on existing DBs; readers
+    # coerce NULL → False.
+    pause_requested: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)
+    # Operator-clicked "立即清理缓存" timestamp; one-shot, mirrors restart_requested_at.
+    gc_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
 
 class Receiver(Base):

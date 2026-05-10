@@ -62,8 +62,12 @@ export type WorkerInfo = {
   queue_pending_upload: number;
   queue_uploading: number;
   enabled: boolean;
+  // Worker self-reports True for backpressure or operator-set pause (合并). UI
+  // 只看这一个字段判断当前是否在收新活。
   paused: boolean;
   desired_capacity: number | null;
+  // 仅反映管理员手动暂停的开关位置 — UI 用这个区分"恢复"按钮的显隐 / 文案。
+  pause_requested: boolean;
 };
 
 export type ReceiverInfo = {

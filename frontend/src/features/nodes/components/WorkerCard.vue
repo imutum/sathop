@@ -54,6 +54,33 @@ const restart = useMutation({
   onError: (e: Error) => toast.error(`重启失败：${e.message}`),
 });
 
+const pause = useMutation({
+  mutationFn: (next: boolean) => API.setWorkerPaused(props.worker.worker_id, next),
+  onSuccess: (_r, next) => {
+    qc.invalidateQueries({ queryKey: ["workers"] });
+    toast.success(next ? "已暂停领新任务（在手任务继续）" : "已恢复");
+  },
+  onError: (e: Error) => toast.error(`暂停切换失败：${e.message}`),
+});
+
+const revoke = useMutation({
+  mutationFn: () => API.revokeWorkerLeases(props.worker.worker_id),
+  onSuccess: (r) => {
+    qc.invalidateQueries({ queryKey: ["workers"] });
+    qc.invalidateQueries({ queryKey: ["batches"] });
+    toast.success(`已释放 ${r.revoked} 条 lease，等待其他 worker 抢占`);
+  },
+  onError: (e: Error) => toast.error(`释放失败：${e.message}`),
+});
+
+const gc = useMutation({
+  mutationFn: () => API.workerGc(props.worker.worker_id),
+  onSuccess: () => {
+    toast.success("已发送清理信号，下次心跳生效");
+  },
+  onError: (e: Error) => toast.error(`触发失败：${e.message}`),
+});
+
 function onSetEnabled(next: boolean): void {
   enable.mutate(next);
 }
@@ -80,8 +107,45 @@ async function onRestart(): Promise<void> {
   if (ok) restart.mutate();
 }
 
+function onTogglePause(): void {
+  pause.mutate(!props.worker.pause_requested);
+}
+
+async function onRevokeAll(): Promise<void> {
+  const ok = await requestConfirm({
+    title: `立即释放此节点的所有 lease？`,
+    description:
+      "把这台节点持有的全部在手 lease 重置回 待分配，等其他 worker 抢占。\n" +
+      "已下载/已处理的中间产物会被丢弃；retry_count 会 +1，仍受 max_retries 限制。\n" +
+      "用于 worker 卡住但还在心跳的场景（不卡的话就用禁用 + 等 lease 到期更稳）。",
+    confirmText: "立即释放",
+    tone: "danger",
+  });
+  if (ok) revoke.mutate();
+}
+
+async function onGc(): Promise<void> {
+  const ok = await requestConfirm({
+    title: `让节点立即清理缓存？`,
+    description:
+      "向该 worker 发送清理信号 — 下一次心跳生效，立即跑一次 venv LRU + shared 孤儿清理。\n" +
+      "正在使用的 bundle/venv 不会被清掉（受 in_use 锁保护）。",
+    confirmText: "清理缓存",
+  });
+  if (ok) gc.mutate();
+}
+
 const lifecyclePending = computed(
   () => enable.isPending.value || forget.isPending.value || restart.isPending.value,
+);
+const inflightTotal = computed(
+  () =>
+    props.worker.queue_pending_download +
+    props.worker.queue_downloading +
+    props.worker.queue_pending_processing +
+    props.worker.queue_processing +
+    props.worker.queue_pending_upload +
+    props.worker.queue_uploading,
 );
 
 const status = computed(() =>
@@ -172,10 +236,16 @@ function onKey(e: KeyboardEvent) {
         </div>
         <div class="flex shrink-0 items-center gap-1.5">
           <HintTip
-            v-if="worker.paused"
-            :text="`worker 已自我暂停 — 当前磁盘 ${diskPct.toFixed(0)}%，等待降到恢复阈值再领新任务`"
+            v-if="worker.pause_requested"
+            text="管理员手动暂停 — 在手任务继续，不接新单。点下方「恢复」按钮解除"
           >
-            <Badge tone="warn">已暂停</Badge>
+            <Badge tone="warn">手动暂停</Badge>
+          </HintTip>
+          <HintTip
+            v-else-if="worker.paused"
+            :text="`worker 自我暂停 — 当前磁盘 ${diskPct.toFixed(0)}%，等待降到恢复阈值再领新任务`"
+          >
+            <Badge tone="warn">磁盘暂停</Badge>
           </HintTip>
           <Badge :tone="status.tone" dot>{{ status.label }}</Badge>
         </div>
@@ -327,6 +397,44 @@ function onKey(e: KeyboardEvent) {
                 事件
               </RouterLink>
             </HintTip>
+            <span class="flex items-center gap-1.5">
+              <button
+                type="button"
+                :disabled="pause.isPending.value"
+                @click="onTogglePause"
+                :title="worker.pause_requested
+                  ? '恢复领取新任务'
+                  : '暂停领取新任务（在手的继续跑完）'"
+                :class="[
+                  'rounded-md border px-2 py-0.5 text-mini font-medium transition disabled:opacity-50',
+                  worker.pause_requested
+                    ? 'border-success/30 bg-success/10 text-success hover:bg-success/15'
+                    : 'border-border bg-background text-muted-foreground hover:border-warn/40 hover:text-warn',
+                ]"
+              >
+                {{ pause.isPending.value ? "…" : worker.pause_requested ? "恢复" : "暂停" }}
+              </button>
+              <button
+                type="button"
+                :disabled="revoke.isPending.value || inflightTotal === 0"
+                @click="onRevokeAll"
+                :title="inflightTotal === 0
+                  ? '当前无在手 lease'
+                  : `立即释放在手的 ${inflightTotal} 条 lease（丢弃中间产物）`"
+                class="rounded-md border border-border bg-background px-2 py-0.5 text-mini font-medium text-muted-foreground transition hover:border-danger/40 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {{ revoke.isPending.value ? "…" : "释放" }}
+              </button>
+              <button
+                type="button"
+                :disabled="gc.isPending.value"
+                @click="onGc"
+                title="立即触发 worker 端缓存清理（venv LRU + shared 孤儿）"
+                class="rounded-md border border-border bg-background px-2 py-0.5 text-mini font-medium text-muted-foreground transition hover:border-primary/40 hover:text-primary disabled:opacity-50"
+              >
+                {{ gc.isPending.value ? "…" : "清缓存" }}
+              </button>
+            </span>
             <NodeLifecycleActions
               :enabled="worker.enabled"
               :pending="lifecyclePending"

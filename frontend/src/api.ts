@@ -151,6 +151,17 @@ const nodeApi = {
     deleteJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}`),
   restartWorker: (workerId: string) =>
     postJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}/restart`),
+  setWorkerPaused: (workerId: string, paused: boolean) =>
+    putJson<{ ok: boolean; pause_requested: boolean }>(
+      `/api/workers/${encodeURIComponent(workerId)}/pause`,
+      { paused },
+    ),
+  revokeWorkerLeases: (workerId: string) =>
+    postJson<{ ok: boolean; revoked: number }>(
+      `/api/workers/${encodeURIComponent(workerId)}/revoke-all`,
+    ),
+  workerGc: (workerId: string) =>
+    postJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}/gc`),
   receivers: () => getJson<ReceiverInfo[]>("/api/receivers"),
   setReceiverEnabled: (receiverId: string, enabled: boolean) =>
     putJson<{ ok: boolean; enabled: boolean }>(

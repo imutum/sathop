@@ -237,12 +237,20 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         w.restart_requested_at = None
         await log(s, req.worker_id, "restart signal delivered to worker")
 
+    # One-shot GC signal: same pop-on-deliver pattern as restart.
+    gc_requested = w.gc_requested_at is not None
+    if gc_requested:
+        w.gc_requested_at = None
+        await log(s, req.worker_id, "cache GC signal delivered to worker")
+
     await s.commit()
     publish({"scope": "workers"})
     return WorkerHeartbeatResponse(
         desired_capacity=w.desired_capacity,
         revoked_granule_ids=revoked,
         restart_requested=restart_requested,
+        pause_requested=bool(w.pause_requested),
+        gc_requested=gc_requested,
     )
 
 
@@ -530,6 +538,80 @@ async def set_enabled(
     await s.commit()
     publish({"scope": "workers"})
     return {"ok": True, "enabled": enabled}
+
+
+@router.put("/{worker_id}/pause")
+async def set_paused(
+    worker_id: str,
+    paused: bool = Body(embed=True),
+    s: AsyncSession = Depends(session),
+) -> dict:
+    """Operator-set persistent pause. Distinct from `enabled=false`:
+      - paused: keep the worker registered + drain in-flight; resume any time
+      - disabled: prelude to forgetting the row entirely
+    Heartbeat reply propagates the flag; worker stops new leases until cleared."""
+    w = await s.get(Worker, worker_id)
+    if w is None:
+        raise HTTPException(404, "worker not found")
+    w.pause_requested = paused
+    await log(s, worker_id, f"worker {'paused' if paused else 'resumed'} via UI")
+    await s.commit()
+    publish({"scope": "workers"})
+    return {"ok": True, "pause_requested": paused}
+
+
+@router.post("/{worker_id}/revoke-all")
+async def revoke_all_leases(worker_id: str, s: AsyncSession = Depends(session)) -> dict:
+    """Force-release every granule this worker holds back to PENDING — no
+    waiting for the 30-min lease expiry. The next heartbeat returns these IDs
+    via `revoked_granule_ids` so the worker cancels its asyncio handlers, but
+    other workers can already lease them on the very next /lease call. Use
+    when a worker is wedged but still heartbeating (otherwise the sweeper
+    would already have caught it).
+
+    In-flight progress on these granules is discarded; retry_count bumps so
+    the orchestrator's max_retries cap still applies."""
+    w = await s.get(Worker, worker_id)
+    if w is None:
+        raise HTTPException(404, "worker not found")
+    rows = (
+        (
+            await s.execute(
+                select(Granule).where(Granule.leased_by == worker_id).where(Granule.state.in_(LEASED_STATES))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    now = utcnow()
+    for g in rows:
+        g.state = GranuleState.PENDING.value
+        g.leased_by = None
+        g.lease_expires_at = None
+        g.retry_count = (g.retry_count or 0) + 1
+        g.updated_at = now
+    if rows:
+        await log(s, worker_id, f"force-revoked {len(rows)} lease(s) via UI")
+    await s.commit()
+    if rows:
+        publish({"scope": "batches"})
+    publish({"scope": "workers"})
+    return {"ok": True, "revoked": len(rows)}
+
+
+@router.post("/{worker_id}/gc")
+async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict:
+    """Operator-triggered remote GC. Same one-shot pattern as restart: orch
+    sets a timestamp, next heartbeat reply forwards it, worker runs prune_caches
+    out-of-band of its periodic loop."""
+    w = await s.get(Worker, worker_id)
+    if w is None:
+        raise HTTPException(404, "worker not found")
+    w.gc_requested_at = utcnow()
+    await log(s, worker_id, "cache GC requested via UI")
+    await s.commit()
+    publish({"scope": "workers"})
+    return {"ok": True}
 
 
 @router.delete("/{worker_id}")
