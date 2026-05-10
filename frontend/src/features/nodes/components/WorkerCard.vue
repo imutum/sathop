@@ -219,7 +219,7 @@ function onKey(e: KeyboardEvent) {
           <ProgressBar :value="worker.disk_used_gb" :max="worker.disk_total_gb" :tone="diskTone" />
         </div>
 
-        <div class="grid grid-cols-5 gap-2 rounded-lg border border-border bg-muted/60 p-3 text-center">
+        <div class="grid grid-cols-3 gap-2 rounded-lg border border-border bg-muted/60 p-3 text-center sm:grid-cols-6">
           <HintTip text="已 lease、等下载槽位（download_sem 满）">
             <div>
               <div class="stat-label">待下载</div>
@@ -249,6 +249,14 @@ function onKey(e: KeyboardEvent) {
               <div class="stat-label">处理中</div>
               <div class="mt-0.5 text-base font-semibold tabular-nums text-foreground">
                 {{ worker.queue_processing }}
+              </div>
+            </div>
+          </HintTip>
+          <HintTip text="处理完、等上传槽位（upload_sem 满）— 防 MinIO/WAN 打满网卡">
+            <div>
+              <div class="stat-label">待上传</div>
+              <div class="mt-0.5 text-base font-semibold tabular-nums text-foreground">
+                {{ worker.queue_pending_upload }}
               </div>
             </div>
           </HintTip>

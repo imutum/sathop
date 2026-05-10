@@ -189,6 +189,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     w.queue_downloading = req.queue_downloading
     w.queue_pending_processing = req.queue_pending_processing
     w.queue_processing = req.queue_processing
+    w.queue_pending_upload = req.queue_pending_upload
     w.queue_uploading = req.queue_uploading
     w.paused = req.paused
     # Heartbeat doubles as lease renewal: as long as the worker keeps checking

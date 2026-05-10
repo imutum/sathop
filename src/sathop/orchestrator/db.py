@@ -57,6 +57,9 @@ class Worker(Base):
     queue_downloading: Mapped[int] = mapped_column(Integer, default=0)
     queue_pending_processing: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     queue_processing: Mapped[int] = mapped_column(Integer, default=0)
+    # Upload semaphore wait counter (added v0.4.3). Nullable so _ensure_columns
+    # can ALTER TABLE on existing DBs and old rows read as NULL.
+    queue_pending_upload: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     queue_uploading: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Worker self-reports True while it's gating off leases (disk pressure today).

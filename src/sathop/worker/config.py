@@ -23,6 +23,12 @@ class Settings:
     lease_poll_interval: int
     download_concurrency: int
     process_concurrency: int
+    # Upload concurrency cap. LocalStorage uploads are essentially free
+    # (host-local cp), but MinIO-over-WAN uploads can saturate the worker's
+    # uplink and starve the receiver's pull bandwidth. Defaults to
+    # process_concurrency so an unconfigured worker behaves identically to
+    # before this knob existed.
+    upload_concurrency: int
 
     # Production-mode toggles. Empty = MVP fallback (httpx / local FS static server).
     aria2_rpc: str
@@ -66,6 +72,7 @@ def load() -> Settings:
     orchestrator_url, token = resolve_orch()
     download_conc = max(1, int(os.getenv("SATHOP_DOWNLOAD_CONCURRENCY", "2")))
     process_conc = max(1, int(os.getenv("SATHOP_PROCESS_CONCURRENCY", str(os.cpu_count() or 1))))
+    upload_conc = max(1, int(os.getenv("SATHOP_UPLOAD_CONCURRENCY", str(process_conc))))
     # In-flight ceiling = download_sem + process_sem (the two physical bottlenecks
     # in the pipeline). Lease capacity defaults to the same number — pulling more
     # would just queue work behind the semaphores, fragmenting visibility ("待下载
@@ -89,6 +96,7 @@ def load() -> Settings:
         lease_poll_interval=int(os.getenv("SATHOP_LEASE_POLL", "10")),
         download_concurrency=download_conc,
         process_concurrency=process_conc,
+        upload_concurrency=upload_conc,
         aria2_rpc=os.getenv("SATHOP_ARIA2_RPC", ""),
         aria2_secret=os.getenv("SATHOP_ARIA2_SECRET", ""),
         minio_access_key=os.getenv("SATHOP_MINIO_ACCESS_KEY", ""),

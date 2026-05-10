@@ -59,6 +59,7 @@ export type WorkerInfo = {
   queue_downloading: number;
   queue_pending_processing: number;
   queue_processing: number;
+  queue_pending_upload: number;
   queue_uploading: number;
   enabled: boolean;
   paused: boolean;

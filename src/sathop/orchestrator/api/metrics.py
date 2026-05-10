@@ -134,6 +134,7 @@ async def _collect(s: AsyncSession) -> bytes:
         g_queue.labels(worker_id=w.worker_id, stage="downloading").set(w.queue_downloading)
         g_queue.labels(worker_id=w.worker_id, stage="pending_processing").set(w.queue_pending_processing or 0)
         g_queue.labels(worker_id=w.worker_id, stage="processing").set(w.queue_processing)
+        g_queue.labels(worker_id=w.worker_id, stage="pending_upload").set(w.queue_pending_upload or 0)
         g_queue.labels(worker_id=w.worker_id, stage="uploading").set(w.queue_uploading)
         g_egress.labels(worker_id=w.worker_id).set(w.monthly_egress_gb * GB)
 

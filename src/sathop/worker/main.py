@@ -102,6 +102,12 @@ class Worker:
         # 限并发到核数后单粒应回落到 ~1 min）。capacity 控制 in-flight 总数
         # 仍然 > process 并发，所以下载/上传可以与处理重叠。
         self._process_sem = asyncio.Semaphore(s.process_concurrency)
+        # Upload concurrency cap: protects worker uplink + receiver pull
+        # bandwidth from getting drowned when N granules finish processing
+        # at the same time and try to ship to MinIO/WAN simultaneously.
+        # Default = process_concurrency so a stock worker behaves identically
+        # to pre-knob versions.
+        self._upload_sem = asyncio.Semaphore(s.upload_concurrency)
         # Granule ID → handler task. Keyed lookup lets the heartbeat loop
         # cancel ghost tasks (lease revoked by orchestrator) by gid; the
         # mapping also doubles as the strong-ref keepalive that asyncio
@@ -235,6 +241,7 @@ class Worker:
                         queue_downloading=self.stage["downloading"],
                         queue_pending_processing=self.stage["pending_processing"],
                         queue_processing=self.stage["processing"],
+                        queue_pending_upload=self.stage["pending_upload"],
                         queue_uploading=self.stage["uploading"],
                         paused=self._pause_lease,
                         active_granule_ids=list(self._handlers.keys()),
@@ -462,13 +469,20 @@ class Worker:
     ) -> None:
         gid = item.granule_id
         await self._report_state(gid, GranuleState.PROCESSED)
-        enter_stage("uploading")
-        uploaded: list[UploadedObject] = []
-        key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
-        for out in outputs:
-            key = _render_key(key_tpl, out, item.meta)
-            uploaded.append(self.storage.put(out, key))
-        await self.client.report_upload(gid, self.s.worker_id, uploaded)
+        # Hold pending_upload until the upload semaphore frees up. State stays
+        # at PROCESSED on the orchestrator (no DB transition for "waiting on
+        # upload sem") — the heartbeat counter is the sole signal so the
+        # operator UI can tell "uploading" from "waiting to upload".
+        enter_stage("pending_upload")
+        async with self._upload_sem:
+            exit_stage()
+            enter_stage("uploading")
+            uploaded: list[UploadedObject] = []
+            key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
+            for out in outputs:
+                key = _render_key(key_tpl, out, item.meta)
+                uploaded.append(self.storage.put(out, key))
+            await self.client.report_upload(gid, self.s.worker_id, uploaded)
         exit_stage()
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
 
