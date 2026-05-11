@@ -1,7 +1,7 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree clean. All changes from this round committed.
+- Working tree clean. All changes from prior rounds committed.
 - `src/sathop/orchestrator/pubsub.py` owns event publishing, event logging, and `commit_and_publish` (`str | None` scopes, filters falsy values).
 - `src/sathop/orchestrator/api/admin.py` no longer imports raw `publish` — all DB-write-then-publish flows route through `commit_and_publish`.
 - The only remaining direct `publish()` callers are intentional:
@@ -26,23 +26,23 @@
 - `frontend/src/features/batch/types.ts` owns create-batch pure form transforms: credential payload/validity, env parsing, and dirty-draft checks.
 
 ## Completed this round
-- New-lens audit from angles not covered in prior rounds: deps (`pyproject.toml`), CLI surface (`pyproject [project.scripts]` vs. docs), unused imports/duplicates.
-  - Found: `httpx` and `pyyaml` listed redundantly in both base deps AND each component's extras. Removed 5 dup lines.
-  - Found: `sathop-pull` CLI script undocumented in CLAUDE.md. Added entry.
-  - No sound files to delete, no dead imports, no stale config.
-- Lockfile rebuilt: same 53 packages, 10 duplicate `requires-dist` entries removed.
+- New-lens audit from angles not yet covered: Dockerfile consistency across 3 components, deploy compose files, Settings/config duplication, test naming/organization, package entrypoint resolution.
+  - 3 Dockerfiles follow an identical two-phase pattern (dep layer + source layer) with expected per-component differences (ca-certificates on worker/receiver, HEALTHCHECK on orchestrator). No dedup opportunity.
+  - Settings classes are clean (49/112/49 lines) with no duplicated field definitions.
+  - 50 test files, single conftest.py, no helpers/utils drift.
+  - All 7 console_scripts in pyproject resolve correctly.
+  - No stale __pycache__ tracked, no orphan files.
+- No concrete cleanup target found. The project has reached a stable, clean baseline across backend code, frontend code, configuration, dependencies, tests, and deployment artifacts.
 
 ## Validation
-- `pytest tests/` → 430 passed in 78s.
-- `ruff check` → clean.
-- `uv lock --check` passes.
-- Net diff: −13 lines across `pyproject.toml` + `uv.lock`; `CLAUDE.md` +1 line (local-only, gitignored).
+- Multi-angle audit: Dockerfiles, config classes, test structure, entrypoint resolution, git ls-files for staleness.
+- No tests needed — no source code changed.
 
 ## Key decisions
-- Leaving `pyyaml` and `httpx` in base `[project.dependencies]` instead of removing them from base and keeping them in extras: both are runtime essentials (httpx for every component's agent, pyyaml for bundle manifest parsing), so making each component declare them separately just adds noise.
-- Did NOT create a formal `shared` extra for `httpx`/`pyyaml` — base deps are the natural place for "everyone needs this", and the pattern matches what venv resolution already treats as transitive.
+- The cleanup loop has converged. The project is in a state where further structural cleanup requires a concrete trigger (duplicated logic, failing test, confusing ownership, feature addition that reveals a pattern) rather than proactive searching.
+- Will recommend transitioning out of cleanup-only mode in the next suggested priorities.
 
 ## Next suggested priorities
-1. Feature, bug, release, or test work. The low-hanging dep/documentation cleanup is done.
-2. If a future round wants to keep looking without a concrete trigger: examine whether `Dockerfile` lines that install both `--no-install-project` and then the full sync can be simplified now that base deps are known to cover cross-component needs. (Low value.)
-3. Before any release, run the normal full validation suite.
+1. **Transition to feature or release work.** The cleanup loop has exhausted low-hanging structural improvements without a concrete trigger. Continuing to search for cleanup will increasingly return false positives and create unnecessary churn.
+2. If operator action is needed: bump version for 0.5.0 (several rounds of refactoring and dedup have accumulated since 0.4.7), run the full validation suite, and cut a release.
+3. If the loop continues anyway (by user preference), switch to **test gap analysis** — which scenarios are untested — rather than structural cleanup.
