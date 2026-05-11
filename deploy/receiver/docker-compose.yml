@@ -3,6 +3,9 @@ services:
     image: ${SATHOP_IMAGE:-ghcr.io/imutum/sathop}/receiver:${SATHOP_TAG:-latest}
     restart: unless-stopped
     env_file: .env
+    # Image's baked-in user is UID 10001. Override via SATHOP_UID / SATHOP_GID
+    # in .env when the host's archive directory is owned by a different UID.
+    user: "${SATHOP_UID:-10001}:${SATHOP_GID:-10001}"
     environment:
       SATHOP_STORAGE_DIR: /data/archive
     volumes:

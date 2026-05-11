@@ -29,6 +29,19 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # it — orchestrator just won't serve "/" routes.
 COPY frontend/dist ./frontend/dist
 
+# --- non-root user --------------------------------------------------------
+# UID 10001 sits outside the typical system range (0-999) and host-user
+# range (1000+), avoiding clashes. When bind-mounting `./data:/app/data`
+# the host directory must be writable by UID 10001 — either
+# `chown 10001:10001 ./data` once, or override the container UID via the
+# compose `user:` directive (see deploy/orchestrator/docker-compose.yml).
+RUN groupadd --gid 10001 sathop && \
+    useradd --uid 10001 --gid 10001 --no-create-home --shell /sbin/nologin sathop && \
+    mkdir -p /app/data && \
+    chown -R sathop:sathop /app
+
+USER sathop
+
 # --- runtime --------------------------------------------------------------
 ENV PATH="/app/.venv/bin:$PATH" \
     SATHOP_HOST=0.0.0.0 \

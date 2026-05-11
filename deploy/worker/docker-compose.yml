@@ -32,6 +32,9 @@ services:
     restart: unless-stopped
     env_file: .env
     depends_on: [minio, aria2c]
+    # Image's baked-in user is UID 10001. Override via SATHOP_UID / SATHOP_GID
+    # in .env when the host's `./data` directory is owned by a different UID.
+    user: "${SATHOP_UID:-10001}:${SATHOP_GID:-10001}"
     volumes:
       - ./data:/app/data
       - ./aria2-downloads:/downloads

@@ -7,12 +7,14 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：6（累计修复 46 项 — 7 high + 21 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
-- 高优先级问题数：3（H-001/H-002/H-003/H-004/H-008/H-009/H-010 已修；H-005 部分覆盖 — 3/9 模块已测）
+- 总问题数：5（累计修复 47 项 — 8 high + 21 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
+- 高优先级问题数：2（H-001/H-002/H-003/H-004/H-007/H-008/H-009/H-010 已修；H-005 部分覆盖 — 3/9 模块已测）
 - 中优先级问题数：2（M-001/M-002/M-003/M-004/M-005/M-006/M-007/M-008/M-009/M-010/M-011/M-012/M-013/M-014/M-015/M-016/M-017/M-018/M-021/M-022/M-023/M-024 已修）
 - 低优先级问题数：0（L-001/L-002/L-003/L-004/L-005/L-006/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
 - 交叉问题数：1（C-001/C-004 已修；C-002 关闭）
 - 已修复（按轮次倒序）：
+  - 第 12 轮：
+    - **H-007** 三个 Docker 镜像加非 root 用户 `sathop`（UID/GID 10001，超出系统范围 0-999 和典型 host 范围 1000+）：所有 `uv sync` 仍以 root 跑（cache mount 在 `/root/.cache/uv`），完成后 `chown -R sathop:sathop /app`（receiver 还 `/data`）+ `USER sathop`。三个 compose 加 `user: "${SATHOP_UID:-10001}:${SATHOP_GID:-10001}"` 作 escape hatch — 操作员若 host bind mount 目录 owner 不是 10001，可以 `chown 10001:10001 ./data` 一次，或在 `.env` 设 `SATHOP_UID=$(id -u)` 让容器跑成自己的 UID。三份 `.env.example` 都加注释说明默认值与覆盖方式。健康检查 / 端口绑定 / 入口脚本均无需 root（监听端口 ≥ 1024）；519 测试不变（Docker 不被测试覆盖，纯部署层改动）
   - 第 11 轮：
     - **H-005**（部分）覆盖 3 个最易测的纯函数模块：`shared/config.py`（32 tests，覆盖 `parse_sathop_url` 的 scheme dispatch / token 双 slot / URL 编码 / 缺 token 缺 host / 子路径 / hostname 大小写等所有分支，`resolve_orch` 的 SATHOP_URL 优先 / split form / 缺 env / 空白 url，`cli_resolve_orch` 的 4 个分支 + require_token=False）；`shared/http.py`（10 tests，bearer_headers 形态 + async/sync client base_url/auth/timeout + MockTransport 端到端发送 Bearer header）；`worker/runtime_helpers.py`（26 tests，6 个纯函数 + 常量不变式：`auth_for` 三态 + 警告路径；`processing_failure_message`/`tail_or_none`/`traceback_tail` 截断；`download_progress_detail` total=0/None/数值；`render_key` 内置字段 / meta 覆盖 / KeyError 回退；`PROCESS_OUTPUT_TAIL_CHARS ≥ 4×PROCESSING_FAILURE_TAIL_CHARS` 不变式锁住 M-023 契约）。新增 68 个测试，全部通过；累计 519 测试。剩余 6 个模块（drain.py 信号/CLI 工具/HealthServer/入口点）暴露面更大、需要 subprocess/signal 编排，留待后续轮次
     - **L-007** 已在第 5 轮关闭，归档到 Not Issues（不再占 Open list）
@@ -112,16 +114,6 @@
   4. try/finally 中恢复设置的测试如果在设置恢复前崩溃，状态泄漏到后续测试
 - 长期影响：测试基础设施极度脆弱，Settings 重构的成本是 27 个文件的手动修改。
 - 可能方向：引入 `monkeypatch.setenv` 或测试用 Settings factory，避免直接修改单例。
-- 置信度：高
-
-### H-007: 所有三个 Docker 镜像以 root 用户运行
-
-- 类型：安全
-- 位置：`deploy/orchestrator/Dockerfile`、`deploy/worker/Dockerfile`、`deploy/receiver/Dockerfile`
-- 证据：三个 Dockerfile 均无 `USER` 指令，CMD 以 root 执行。
-- 问题描述：数据管道处理外部凭证和下载 — 以 root 运行意味着任何 bundle 中的恶意代码（虽然不在容器内）、依赖库漏洞、或 worker 的文件系统操作都具有 root 权限。
-- 长期影响：安全合规风险；容器逃逸后的影响面最大化。
-- 可能方向：创建非 root 用户（如 `app` 或 `sathop`），在 COPY 源码后 `USER app`。
 - 置信度：高
 
 ---

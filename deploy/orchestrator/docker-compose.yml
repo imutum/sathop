@@ -3,6 +3,10 @@ services:
     image: ${SATHOP_IMAGE:-ghcr.io/imutum/sathop}/orchestrator:${SATHOP_TAG:-latest}
     restart: unless-stopped
     env_file: .env
+    # Image's baked-in user is UID 10001. Override via SATHOP_UID / SATHOP_GID
+    # in .env when the host's `./data` directory is owned by a different UID
+    # (e.g. SATHOP_UID=$(id -u) to align with the operator's account).
+    user: "${SATHOP_UID:-10001}:${SATHOP_GID:-10001}"
     ports:
       - "8000:8000"
     volumes:

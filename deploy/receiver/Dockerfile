@@ -24,6 +24,16 @@ COPY src src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --extra receiver
 
+# --- non-root user --------------------------------------------------------
+# See deploy/orchestrator/Dockerfile for the rationale. Receiver's archive
+# lives at /data/archive (not /app/data) so we chown both.
+RUN groupadd --gid 10001 sathop && \
+    useradd --uid 10001 --gid 10001 --no-create-home --shell /sbin/nologin sathop && \
+    mkdir -p /data/archive && \
+    chown -R sathop:sathop /app /data
+
+USER sathop
+
 ENV PATH="/app/.venv/bin:$PATH" \
     SATHOP_STORAGE_DIR=/data/archive
 

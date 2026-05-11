@@ -24,6 +24,16 @@ COPY src src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --extra worker
 
+# --- non-root user --------------------------------------------------------
+# See deploy/orchestrator/Dockerfile for the rationale (UID 10001 outside
+# typical ranges, bind-mount permission notes).
+RUN groupadd --gid 10001 sathop && \
+    useradd --uid 10001 --gid 10001 --no-create-home --shell /sbin/nologin sathop && \
+    mkdir -p /app/data && \
+    chown -R sathop:sathop /app
+
+USER sathop
+
 ENV PATH="/app/.venv/bin:$PATH" \
     SATHOP_WORK_ROOT=/app/data/work \
     SATHOP_BUNDLE_CACHE=/app/data/bundles \
