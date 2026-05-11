@@ -32,6 +32,9 @@ const stripped = computed(() => stripBatchPrefix(props.granuleId, props.batchId)
       </RouterLink>
     </div>
     <div v-if="q.isLoading.value" class="text-2xs text-muted-foreground">加载中…</div>
+    <div v-else-if="q.isError.value" class="text-2xs text-danger">
+      加载事件失败：{{ q.error.value?.message ?? "未知错误" }}
+    </div>
     <div v-else-if="rows.length === 0" class="text-2xs text-muted-foreground">暂无事件</div>
     <ul
       v-else

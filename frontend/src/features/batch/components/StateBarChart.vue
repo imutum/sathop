@@ -5,14 +5,17 @@ import { stateLabel } from "@/i18n";
 
 const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
 
+// Each saturated hue shifts one shade lighter in dark mode so the bars
+// don't look harsh on the dark slate background; status tokens (success /
+// danger / muted-foreground) already adapt via their CSS variable.
 const TONE: Record<GranuleState, string> = {
   pending: "bg-muted-foreground",
-  queued: "bg-amber-500",
-  downloading: "bg-sky-500",
-  downloaded: "bg-sky-600",
-  processing: "bg-indigo-500",
-  processed: "bg-indigo-600",
-  uploaded: "bg-violet-500",
+  queued: "bg-amber-500 dark:bg-amber-400",
+  downloading: "bg-sky-500 dark:bg-sky-400",
+  downloaded: "bg-sky-600 dark:bg-sky-500",
+  processing: "bg-indigo-500 dark:bg-indigo-400",
+  processed: "bg-indigo-600 dark:bg-indigo-500",
+  uploaded: "bg-violet-500 dark:bg-violet-400",
   acked: "bg-success",
   deleted: "bg-success",
   failed: "bg-danger",

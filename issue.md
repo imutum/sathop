@@ -7,12 +7,15 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：5（累计修复 47 项 — 8 high + 21 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
+- 总问题数：3（累计修复 49 项 — 8 high + 23 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
 - 高优先级问题数：2（H-001/H-002/H-003/H-004/H-007/H-008/H-009/H-010 已修；H-005 部分覆盖 — 3/9 模块已测）
-- 中优先级问题数：2（M-001/M-002/M-003/M-004/M-005/M-006/M-007/M-008/M-009/M-010/M-011/M-012/M-013/M-014/M-015/M-016/M-017/M-018/M-021/M-022/M-023/M-024 已修）
+- 中优先级问题数：0（M-001/M-002/M-003/M-004/M-005/M-006/M-007/M-008/M-009/M-010/M-011/M-012/M-013/M-014/M-015/M-016/M-017/M-018/M-019/M-020/M-021/M-022/M-023/M-024 已修）
 - 低优先级问题数：0（L-001/L-002/L-003/L-004/L-005/L-006/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
 - 交叉问题数：1（C-001/C-004 已修；C-002 关闭）
 - 已修复（按轮次倒序）：
+  - 第 13 轮：
+    - **M-019** `PipelineHealth.vue` STAGE 表 + `chips` 数组 + `StateBarChart.vue` TONE 表里所有字面 Tailwind 色阶都成对带上 `dark:` 变体，规律一致：`bg-X-500` → `dark:bg-X-400`、`bg-X-600` → `dark:bg-X-500`、`text-X-600`/`text-X-700` → `dark:text-X-400`（dark slate 上字色 600/700 看不清；bar 500 太刺眼）。status tokens（success/danger）走 CSS 变量已自动切换，无需变动。`npm run build` 通过
+    - **M-020** 四个 useQuery 子组件补错误分支：`ProgressTimeline.vue`、`StageTimingStrip.vue`、`GranuleEvents.vue` 用单行内联 `text-2xs text-danger` 与现有 "加载中…" 样式对齐（紧贴上下文，不打断卡片版面）；`BatchTimingCard.vue` 卡片主体大，错误用 `Alert variant="destructive"` 与 Batches/Bundles/Events 页面顶层 useQuery 错误一致。错误文案统一为"加载XX失败：{message}"
   - 第 12 轮：
     - **H-007** 三个 Docker 镜像加非 root 用户 `sathop`（UID/GID 10001，超出系统范围 0-999 和典型 host 范围 1000+）：所有 `uv sync` 仍以 root 跑（cache mount 在 `/root/.cache/uv`），完成后 `chown -R sathop:sathop /app`（receiver 还 `/data`）+ `USER sathop`。三个 compose 加 `user: "${SATHOP_UID:-10001}:${SATHOP_GID:-10001}"` 作 escape hatch — 操作员若 host bind mount 目录 owner 不是 10001，可以 `chown 10001:10001 ./data` 一次，或在 `.env` 设 `SATHOP_UID=$(id -u)` 让容器跑成自己的 UID。三份 `.env.example` 都加注释说明默认值与覆盖方式。健康检查 / 端口绑定 / 入口脚本均无需 root（监听端口 ≥ 1024）；519 测试不变（Docker 不被测试覆盖，纯部署层改动）
   - 第 11 轮：
@@ -114,34 +117,6 @@
   4. try/finally 中恢复设置的测试如果在设置恢复前崩溃，状态泄漏到后续测试
 - 长期影响：测试基础设施极度脆弱，Settings 重构的成本是 27 个文件的手动修改。
 - 可能方向：引入 `monkeypatch.setenv` 或测试用 Settings factory，避免直接修改单例。
-- 置信度：高
-
----
-
-## Medium Priority
-
-### M-019: Frontend 硬编码 Tailwind 颜色在暗色模式下不兼容
-
-- 类型：UI / 主题一致性
-- 位置：`frontend/src/features/batch/components/PipelineHealth.vue:10-22`、`frontend/src/features/batch/components/StateBarChart.vue:8-20`
-- 证据：两个组件使用字面量 Tailwind 颜色类（`bg-amber-500`、`bg-sky-500`、`bg-indigo-500`），而项目其他部分使用 `hsl(var(--xxx))` CSS 自定义属性。暗色模式下这些字面量颜色不调整亮度/饱和度，在深色背景上对比度异常。
-- 问题描述：PipelineHealth 和 StateBarChart 的柱状图/进度条在暗色模式下颜色刺眼（设计为浅色背景优化的饱和度）。
-- 长期影响：暗色模式用户体验不一致。
-- 可能方向：改用 CSS 变量 tokens（如 `bg-primary`、`bg-chart-1`）或在 Tailwind 配置中为这些颜色定义暗色变体。
-- 置信度：高
-
-### M-020: Frontend 4 个子组件缺少错误状态处理
-
-- 类型：UI 健壮性
-- 位置：
-  - `frontend/src/features/batch/components/ProgressTimeline.vue` — useQuery 无 error 处理
-  - `frontend/src/features/batch/components/StageTimingStrip.vue` — 同上
-  - `frontend/src/features/batch/components/GranuleEvents.vue` — 同上
-  - `frontend/src/features/batch/components/BatchTimingCard.vue` — 同上
-- 证据：这些组件的 `useQuery` 只在模板中检查 `isLoading` 和空数据，不检查 `isError`。API 调用失败时组件静默渲染空白。
-- 问题描述：用户看不到任何错误提示 — 数据区域简单地什么都没有。
-- 长期影响：网络故障时用户困惑，不知道是正常空状态还是 API 失败。
-- 可能方向：为每个组件添加 `isError` 检查并渲染 `<Alert variant="destructive">`。
 - 置信度：高
 
 ---

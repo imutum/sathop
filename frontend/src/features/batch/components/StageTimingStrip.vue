@@ -15,7 +15,10 @@ const rows = computed(() => q.data.value ?? []);
 </script>
 
 <template>
-  <div v-if="rows.length > 0" class="flex flex-wrap gap-2">
+  <div v-if="q.isError.value" class="text-2xs text-danger">
+    加载阶段耗时失败：{{ q.error.value?.message ?? "未知错误" }}
+  </div>
+  <div v-else-if="rows.length > 0" class="flex flex-wrap gap-2">
     <span
       v-for="r in rows"
       :key="r.id"

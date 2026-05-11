@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/vue-query";
 import { API, type TimingStage } from "@/api";
 import { TIMING_STAGE_ZH, fmtDuration, fmtMs, fmtPerMinute } from "@/i18n";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Table,
   TableBody,
@@ -43,6 +44,13 @@ const doneCount = computed(() => data.value?.stages.upload.count ?? 0);
       <CardDescription>样本数 = 闭合阶段次数（同一数据粒重试会计入多次）。失败未闭合的阶段不计入。</CardDescription>
     </CardHeader>
     <div v-if="q.isLoading.value" class="px-6 py-4 text-xs text-muted-foreground">加载中…</div>
+    <div v-else-if="q.isError.value" class="px-5 py-4">
+      <Alert variant="destructive">
+        <AlertDescription>
+          加载耗时统计失败：{{ q.error.value?.message ?? "未知错误" }}
+        </AlertDescription>
+      </Alert>
+    </div>
     <template v-if="data">
       <div
         v-if="data.wall_ms > 0"

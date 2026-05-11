@@ -16,6 +16,9 @@ const rows = computed(() => q.data.value ?? []);
 
 <template>
   <div v-if="q.isLoading.value" class="text-xs text-muted-foreground">加载中…</div>
+  <div v-else-if="q.isError.value" class="text-xs text-danger">
+    加载进度失败：{{ q.error.value?.message ?? "未知错误" }}
+  </div>
   <div v-else-if="rows.length === 0" class="text-cell text-muted-foreground">
     暂无进度上报（bundle 可能未接入 $SATHOP_PROGRESS_URL）
   </div>

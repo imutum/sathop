@@ -6,19 +6,22 @@ import { pipelineSegments, pipelineTotals } from "@/features/batch/pipelineSumma
 
 const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
 
-// Stage colors stay local because they are presentation-only, not pipeline semantics.
+// Stage colors stay local because they are presentation-only, not pipeline
+// semantics. Each literal hue carries a `dark:` shift one shade lighter so
+// the chip text and bar stay readable on the dark slate background (the
+// X-600/-700 text shades vanish on dark; X-500 bars look harsh).
 const STAGE: Record<GranuleState, { bar: string; chip: string; dot: string }> = {
-  pending:     { bar: "bg-muted-foreground/40", chip: "text-muted-foreground", dot: "bg-muted-foreground" },
-  queued:      { bar: "bg-amber-500/70",        chip: "text-amber-600",        dot: "bg-amber-500" },
-  downloading: { bar: "bg-sky-500",             chip: "text-sky-600",          dot: "bg-sky-500" },
-  downloaded:  { bar: "bg-sky-600",             chip: "text-sky-700",          dot: "bg-sky-600" },
-  processing:  { bar: "bg-indigo-500",          chip: "text-indigo-600",       dot: "bg-indigo-500" },
-  processed:   { bar: "bg-indigo-600",          chip: "text-indigo-700",       dot: "bg-indigo-600" },
-  uploaded:    { bar: "bg-violet-500",          chip: "text-violet-600",       dot: "bg-violet-500" },
-  acked:       { bar: "bg-success/85",          chip: "text-success",          dot: "bg-success" },
-  deleted:     { bar: "bg-success",             chip: "text-success",          dot: "bg-success" },
-  failed:      { bar: "bg-danger",              chip: "text-danger",           dot: "bg-danger" },
-  blacklisted: { bar: "bg-danger/70",           chip: "text-danger",           dot: "bg-danger" },
+  pending:     { bar: "bg-muted-foreground/40",                  chip: "text-muted-foreground",                 dot: "bg-muted-foreground" },
+  queued:      { bar: "bg-amber-500/70 dark:bg-amber-400/60",    chip: "text-amber-600 dark:text-amber-400",    dot: "bg-amber-500 dark:bg-amber-400" },
+  downloading: { bar: "bg-sky-500 dark:bg-sky-400",              chip: "text-sky-600 dark:text-sky-400",        dot: "bg-sky-500 dark:bg-sky-400" },
+  downloaded:  { bar: "bg-sky-600 dark:bg-sky-500",              chip: "text-sky-700 dark:text-sky-400",        dot: "bg-sky-600 dark:bg-sky-500" },
+  processing:  { bar: "bg-indigo-500 dark:bg-indigo-400",        chip: "text-indigo-600 dark:text-indigo-400",  dot: "bg-indigo-500 dark:bg-indigo-400" },
+  processed:   { bar: "bg-indigo-600 dark:bg-indigo-500",        chip: "text-indigo-700 dark:text-indigo-400",  dot: "bg-indigo-600 dark:bg-indigo-500" },
+  uploaded:    { bar: "bg-violet-500 dark:bg-violet-400",        chip: "text-violet-600 dark:text-violet-400",  dot: "bg-violet-500 dark:bg-violet-400" },
+  acked:       { bar: "bg-success/85",                            chip: "text-success",                          dot: "bg-success" },
+  deleted:     { bar: "bg-success",                               chip: "text-success",                          dot: "bg-success" },
+  failed:      { bar: "bg-danger",                                chip: "text-danger",                           dot: "bg-danger" },
+  blacklisted: { bar: "bg-danger/70",                             chip: "text-danger",                           dot: "bg-danger" },
 };
 
 const totals = computed(() => pipelineTotals(props.counts));
@@ -41,10 +44,10 @@ function pct(n: number): string {
 }
 
 const chips = computed(() => [
-  { key: "pending",  label: "待分配", value: pending.value,  tone: "text-muted-foreground", dot: "bg-muted-foreground", tip: "orchestrator 还没派给任何 worker 的数据粒" },
-  { key: "inflight", label: "进行中", value: inFlight.value, tone: "text-sky-600",          dot: "bg-sky-500",          tip: "已 lease ~ 待清理之间所有处理中状态的合计" },
-  { key: "done",     label: "已完成", value: done.value,     tone: "text-success",          dot: "bg-success",          tip: "终态：worker 上的产物已删除（全链路完成）" },
-  { key: "failed",   label: "异常",   value: failed.value,   tone: "text-danger",           dot: "bg-danger",           tip: "待重试 + 已拉黑（达到重试上限）的数据粒" },
+  { key: "pending",  label: "待分配", value: pending.value,  tone: "text-muted-foreground",            dot: "bg-muted-foreground",        tip: "orchestrator 还没派给任何 worker 的数据粒" },
+  { key: "inflight", label: "进行中", value: inFlight.value, tone: "text-sky-600 dark:text-sky-400",   dot: "bg-sky-500 dark:bg-sky-400", tip: "已 lease ~ 待清理之间所有处理中状态的合计" },
+  { key: "done",     label: "已完成", value: done.value,     tone: "text-success",                     dot: "bg-success",                 tip: "终态：worker 上的产物已删除（全链路完成）" },
+  { key: "failed",   label: "异常",   value: failed.value,   tone: "text-danger",                      dot: "bg-danger",                  tip: "待重试 + 已拉黑（达到重试上限）的数据粒" },
 ]);
 </script>
 
