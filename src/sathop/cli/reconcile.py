@@ -2,7 +2,7 @@
 
 Usage:
     sathop-reconcile --url sathop://TOKEN@host:port
-    sathop-reconcile --orchestrator http://... --token ...   # legacy split form
+    sathop-reconcile --orch-url http://... --token ...   # split form
 """
 
 from __future__ import annotations
@@ -37,13 +37,15 @@ def main() -> int:
     p.add_argument(
         "--url",
         default=os.getenv("SATHOP_URL", ""),
-        help="sathop://TOKEN@host:port — overrides --orchestrator/--token (reads SATHOP_URL env)",
+        help="sathop://TOKEN@host:port — overrides --orch-url/--token (reads SATHOP_URL env)",
     )
-    p.add_argument("--orchestrator", default=os.getenv("SATHOP_ORCH_URL", "http://127.0.0.1:8765"))
-    p.add_argument("--token", default=os.getenv("SATHOP_TOKEN", ""))
+    p.add_argument(
+        "--orch-url", default=os.getenv("SATHOP_ORCH_URL", "http://127.0.0.1:8765"), help="env SATHOP_ORCH_URL"
+    )
+    p.add_argument("--token", default=os.getenv("SATHOP_TOKEN", ""), help="env SATHOP_TOKEN")
     args = p.parse_args()
     try:
-        base, token = cli_resolve_orch(args.url, args.orchestrator, args.token, require_token=False)
+        base, token = cli_resolve_orch(args.url, args.orch_url, args.token, require_token=False)
     except ValueError as e:
         sys.exit(f"error: {e}")
     headers = bearer_headers(token) if token else {}

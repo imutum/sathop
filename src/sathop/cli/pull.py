@@ -82,6 +82,7 @@ async def _run(s: Settings) -> None:
         await r.run()
     finally:
         await r.client.aclose()
+        await r.aclose()
 
 
 def main() -> None:

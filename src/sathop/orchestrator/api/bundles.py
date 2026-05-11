@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import secrets
 import zipfile
 
 import yaml
@@ -136,9 +138,15 @@ async def upload(
     storage_dir.mkdir(parents=True, exist_ok=True)
     blob = storage_dir / f"{sha}.zip"
     if not blob.exists():
-        tmp = blob.with_suffix(".zip.part")
-        tmp.write_bytes(data)
-        tmp.rename(blob)
+        # Use a per-request tmp suffix and os.replace so two concurrent uploads
+        # of the same sha don't collide on Windows (Path.rename raises
+        # FileExistsError if the target appeared between exists() and rename).
+        tmp = blob.with_suffix(f".zip.part.{os.getpid()}-{secrets.token_hex(4)}")
+        try:
+            tmp.write_bytes(data)
+            os.replace(tmp, blob)
+        finally:
+            tmp.unlink(missing_ok=True)
 
     b = Bundle(
         name=name,

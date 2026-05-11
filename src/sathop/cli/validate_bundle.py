@@ -91,6 +91,12 @@ def _check_entrypoint_resolves(manifest: dict, bundle_dir: Path, r: Report) -> N
     else:
         script = parts[0]
 
+    # `python -c "..."`, `python -m pkg`, or stdin (`-`) carry no script path —
+    # nothing to resolve against the bundle, so don't flag a phantom missing file.
+    if script.startswith("-"):
+        r.passed.append(f"entrypoint {cmd!r} runs inline ({script!r}); no script path to verify")
+        return
+
     script = script.removeprefix("./")
     target = bundle_dir / script
     if not target.exists():

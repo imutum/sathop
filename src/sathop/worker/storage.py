@@ -65,6 +65,7 @@ class MinioStorage:
 
     def __init__(self, public_base_url: str, access_key: str, secret_key: str, bucket: str) -> None:
         from minio import Minio
+        from minio.error import S3Error
 
         p = urlparse(public_base_url)
         if not p.hostname:
@@ -80,7 +81,14 @@ class MinioStorage:
             secure=(p.scheme == "https"),
         )
         if not self._client.bucket_exists(bucket):
-            self._client.make_bucket(bucket)
+            try:
+                self._client.make_bucket(bucket)
+            except S3Error as e:
+                # Concurrent worker startup against the same MinIO can race here.
+                # Either error code means another worker already created it; any
+                # other S3Error is a real failure (auth, network, etc.).
+                if e.code not in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
+                    raise
 
     def put(self, src: Path, object_key: str) -> UploadedObject:
         sha = sha256_file(src)

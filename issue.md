@@ -7,12 +7,19 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：29（累计修复 25 项 — 6 high + 10 medium + 7 low + 2 cross）
+- 总问题数：23（累计修复 31 项 — 6 high + 14 medium + 9 low + 2 cross）
 - 高优先级问题数：4（H-001/H-002/H-003/H-004/H-009/H-010 已修）
-- 中优先级问题数：14（M-001/M-002/M-004/M-007/M-008/M-010/M-013/M-015/M-018/M-022 已修）
-- 低优先级问题数：9（L-001/L-002/L-003/L-004/L-008/L-011/L-016 已修）
+- 中优先级问题数：10（M-001/M-002/M-003/M-004/M-007/M-008/M-010/M-012/M-013/M-015/M-017/M-018/M-021/M-022 已修）
+- 低优先级问题数：7（L-001/L-002/L-003/L-004/L-008/L-011/L-012/L-013/L-016 已修）
 - 交叉问题数：2（C-001/C-004 已修）
 - 已修复（按轮次倒序）：
+  - 第 6 轮：
+    - **M-003** SSE generator 在 `q.get()` / `json.dumps` 周围加显式 try/except，`CancelledError` 透传给 starlette，其他异常 log 后写 `: error\n\n` 注释行让连接存活；不可序列化 event 只丢弃单条不掉线
+    - **M-012** orchestrator 上传 blob 路径改用 `os.replace`，临时文件加入 PID + 随机 token 后缀，并发上传同 sha 的 bundle 不再在 Windows 上偶发 `FileExistsError`
+    - **M-017** `MinioStorage.__init__` 捕获 `BucketAlreadyOwnedByYou` / `BucketAlreadyExists`，多 worker 共享 MinIO 时的 bucket-create 竞态不再使第二个 worker 启动失败
+    - **M-021** `cli/pull.py` finally 块补 `await r.aclose()`，与 `receiver/main.py` 对齐，关闭 `Receiver._pull_client` httpx 连接池
+    - **L-012** `sathop-reconcile` 的 `--orchestrator` 重命名为 `--orch-url`，与 `sathop-upload-bundle` / `sathop-pull` 统一
+    - **L-013** `validate_bundle` 识别 `python -c "..."` / `python -m pkg` / `-` 等以 `-` 开头的 entrypoint 参数并跳过文件存在检查，不再误报 "script does not exist"
   - 第 5 轮：
     - **M-004 / L-008** 暴露 `db.get_session_maker()` 公共 helper：替代 `background.py` 与 `db.session()` 中的 `assert _session_maker is not None`，`-O` 模式下仍报 `RuntimeError("init_db() not called")`；同时移除 background.py 跨模块访问私有属性的封装泄漏
     - **M-002** `log_event` 改为标记 `session.info[_LOG_EVENT_PENDING]`，由 `commit_and_publish` / 新增 `publish_scopes(s, *scopes)` 在 commit 后排空；SSE 客户端不再收到尚未持久化的 event nudge。`background.sweep_expired_leases` / `receivers.ack` 失败分支 / `shared.delete` 三处裸 commit 同步迁移
@@ -108,16 +115,6 @@
 
 ## Medium Priority
 
-### M-003: SSE stream generator 缺少异常保护
-
-- 类型：健壮性
-- 位置：`src/sathop/orchestrator/api/stream.py:28-36`
-- 证据：`gen()` 中的 `while True` 循环只捕获 `TimeoutError`。如果 `q.get()` 抛出其他异常（如 `CancelledError`），或 `json.dumps(evt)` 失败（事件包含不可序列化对象），异常直接传播到 starlette，终止 SSE 连接。
-- 问题描述：所有连接的 SSE 客户端同时断开。UI 的实时更新静默停止，直到用户刷新页面（或 TanStack Query 的 60s 安全网触发）。
-- 长期影响：SSE 不可靠，降低 UI 实时性体验。
-- 可能方向：在循环体内加宽泛的 try/except（log + continue），或对事件做 `repr()` 兜底。
-- 置信度：中
-
 ### M-005: Deletable endpoint 存在 N+1 查询
 
 - 类型：性能
@@ -161,22 +158,6 @@
 - 可能方向：固定到具体版本标签（如 `minio/minio:RELEASE.2024-12-18T00-00-00Z`）。
 - 置信度：高
 
-### M-012: bundle blob upload 存在 TOCTOU 竞态
-
-- 类型：并发安全
-- 位置：`src/sathop/orchestrator/api/bundles.py:137-140`
-- 证据：
-  ```python
-  if not blob.exists():
-      tmp = blob.with_suffix(".zip.part")
-      tmp.write_bytes(data)
-      tmp.rename(blob)  # raises FileExistsError on Windows if target created between exists() and rename()
-  ```
-- 问题描述：两个并发上传相同 sha256 的 bundle 请求，可能在 `exists()` 检查和 `rename()` 之间产生竞态。Windows 上 `Path.rename()` 对已存在目标抛出 `FileExistsError`。
-- 长期影响：并发上传相同 bundle 时偶发 500 错误。
-- 可能方向：使用 `tmp.replace(blob)` 并捕获 `FileExistsError` 后静默成功（内容相同），或用 `os.replace`。
-- 置信度：中
-
 ### M-014: 测试中存在依赖时序的 sleep
 
 - 类型：测试可靠性
@@ -203,21 +184,6 @@
 - 长期影响：MinIO 部署下 worker 的心跳超时，orchestrator 误判 worker 离线，lease 被错误回收。
 - 可能方向：将 `storage.put()` 和 `storage.delete()` 改为 async，在 MinioStorage 实现中用 `asyncio.to_thread` 包裹 minio-py 调用；或让调用方统一包裹。
 - 置信度：高
-
-### M-017: MinioStorage bucket 创建存在竞态
-
-- 类型：并发
-- 位置：`src/sathop/worker/storage.py:89-90`
-- 证据：
-  ```python
-  if not self._client.bucket_exists(bucket):
-      self._client.make_bucket(bucket)
-  ```
-  多 worker 共享同一 MinIO 实例时：两个 worker 同时启动，都检查 `bucket_exists=False`，都调用 `make_bucket`，第二个调用抛出 `BucketAlreadyOwnedByYou` 异常 → worker 启动失败。
-- 问题描述：TOCTOU 竞态 — check 和 create 不是原子操作。
-- 长期影响：多 worker 部署时偶发启动失败。
-- 可能方向：捕获 `BucketAlreadyOwnedByYou` / `BucketAlreadyExists` 异常并静默继续。
-- 置信度：中
 
 ### M-019: Frontend 硬编码 Tailwind 颜色在暗色模式下不兼容
 
@@ -271,24 +237,6 @@
 - 可能方向：用 try/except 包裹单列迁移，log 包含完整上下文（表名、列名、类型）后 re-raise；对 "column already exists" 错误（SQLite 无此错误，但可防御性编码）静默跳过。
 - 置信度：中
 
-### M-021: CLI pull.py 未关闭内部 HTTP client — 连接泄漏
-
-- 类型：资源泄漏
-- 位置：`src/sathop/cli/pull.py:75-84`
-- 证据：
-  ```python
-  try:
-      await r.run()
-  finally:
-      await r.client.aclose()       # 仅关闭 OrchestratorClient
-      # 缺少: await r.aclose()      # 关闭 Receiver._pull_client
-  ```
-  对比 `receiver/main.py:15-19` — 正常 receiver 入口同时调用 `r.client.aclose()` 和 `r.aclose()`。
-- 问题描述：`Receiver._pull_client`（httpx.AsyncClient, max_connections=300）的连接池在退出时未关闭。虽然正常路径下 `Receiver.run()` 永不返回（直到 `os._exit(0)`），但如果 `run()` 在 watchdog 触发前异常退出，连接泄漏。
-- 长期影响：连接池无法正常释放（低概率但易修复）。
-- 可能方向：在 finally 块中加 `await r.aclose()`。
-- 置信度：中
-
 ---
 
 ## Low Priority
@@ -337,26 +285,6 @@
 - 问题描述：该方法存在是为了测试便利（Semaphore-based 并发控制），但实际生产代码已切换到 queue-based 并发模型。为测试保留的生产代码存在维护风险。
 - 长期影响：低 — 方法签名变更时测试不会告警（测试调用旧签名）。
 - 可能方向：移除 `_fetch_one`，将测试迁移到直接调用 `_fetch_one_inner`。或保留但加注释说明仅供测试。
-- 置信度：中
-
-### L-012: CLI 工具使用不一致的参数名
-
-- 类型：API 设计
-- 位置：`src/sathop/cli/reconcile.py:41` 和 `upload_bundle.py:66`、`pull.py:34`
-- 证据：reconcile.py 使用 `--orchestrator`；upload_bundle.py 和 pull.py 使用 `--orch-url`。两者功能相同（指定 orchestrator URL），但名称不同。
-- 问题描述：用户在不同 CLI 工具间切换时需要记住不同的参数名。
-- 长期影响：低 — CLI 工具通常由脚本调用，但用户困惑。
-- 可能方向：统一为 `--orch-url`（与其他工具一致），保留 `--orchestrator` 为已弃用的别名。
-- 置信度：高
-
-### L-013: validate_bundle 对 python -c/-m entrypoint 产生误报
-
-- 类型：验证逻辑缺陷
-- 位置：`src/sathop/cli/validate_bundle.py:86-101`
-- 证据：entrypoint `python -c "import sys; ..."` 被解析为 `script = "-c"`，然后检查 `bundle_dir / "-c"` 不存在，报告误报错误。
-- 问题描述：合法的 Python 内联脚本或模块调用被标记为"entrypoint script 在 bundle 中不存在"。
-- 长期影响：低 — 大多数 bundle 使用 `python script.py` 形式。
-- 可能方向：在 entrypoint 解析中识别 `-c`、`-m`、`-` 等特殊参数并跳过文件存在检查。
 - 置信度：中
 
 ### L-014: _kill_and_wait 访问 CPython 私有 _transport 属性
