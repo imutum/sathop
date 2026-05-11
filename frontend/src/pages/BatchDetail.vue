@@ -18,6 +18,7 @@ import Segmented from "@/components/Segmented.vue";
 import BatchEventLog from "@/features/batch/components/BatchEventLog.vue";
 import BatchGranuleTable from "@/features/batch/components/BatchGranuleTable.vue";
 import BatchTimingCard from "@/features/batch/components/BatchTimingCard.vue";
+import { errorTotal, inFlightTotal, totalCount } from "@/features/batch/summary";
 import { Icon } from "@/components/Icon";
 
 // Filter chips 直接派生自 i18n.GRANULE_STATE_ZH，避免命名漂移。下载完/处理完/上传完
@@ -49,10 +50,6 @@ const LOG_LEVEL_OPTIONS = [
 
 function stripBatchPrefix(gid: string, batchId: string) {
   return gid.startsWith(`${batchId}:`) ? gid.slice(batchId.length + 1) : gid;
-}
-
-function sumCounts(counts: Record<string, number | undefined>): number {
-  return Object.values(counts).reduce<number>((sum, n) => sum + (n ?? 0), 0);
 }
 
 const route = useRoute();
@@ -183,15 +180,11 @@ const b = computed(() => batch.data.value);
 const rows = computed(() => granules.data.value ?? []);
 const batchEvents = computed(() => events.data.value ?? []);
 const progressByGranule = computed(() => latestProgress.data.value ?? {});
-const failedCount = computed(
-  () => (b.value?.counts?.failed ?? 0) + (b.value?.counts?.blacklisted ?? 0),
-);
+const failedCount = computed(() => (b.value ? errorTotal(b.value) : 0));
 // Server-authoritative; for batches with >200 granules the per-row sum from
 // the granules query would underreport.
 const exhaustedCount = computed(() => b.value?.objects_exhausted ?? 0);
-const inflightCount = computed(() =>
-  IN_FLIGHT_STATES.reduce((s, k) => s + (b.value?.counts?.[k] ?? 0), 0),
-);
+const inflightCount = computed(() => (b.value ? inFlightTotal(b.value) : 0));
 const eventCountLabel = computed(() =>
   events.data.value ? `${events.data.value.length} 条` : "加载中",
 );
@@ -200,7 +193,7 @@ const stateOptions = computed(() =>
   STATE_FILTERS.map((f) => {
     const count =
       f.value === "all"
-        ? sumCounts(b.value?.counts ?? {})
+        ? totalCount(b.value?.counts ?? {})
         : (b.value?.counts?.[f.value as GranuleState] ?? 0);
     return {
       value: f.value,
@@ -250,7 +243,7 @@ async function confirmCancelAll() {
 async function confirmDelete() {
   if (!b.value) return;
   const name = b.value.name;
-  const total = sumCounts(b.value.counts ?? {});
+  const total = totalCount(b.value.counts);
   const ok = await requestConfirm({
     title: `永久删除批次 "${name}"？`,
     description:

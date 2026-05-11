@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
-import { API, IN_FLIGHT_STATES, type BatchSummary, type GranuleState } from "@/api";
+import { API, type BatchSummary } from "@/api";
 import { fmtAge, fmtDuration } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
@@ -27,10 +27,14 @@ import QueryState from "@/components/QueryState.vue";
 import Segmented from "@/components/Segmented.vue";
 import TextInput from "@/ui/TextInput.vue";
 import CreateBatchModal from "@/features/batch/components/CreateBatchModal.vue";
+import {
+  completedTotal,
+  errorTotal,
+  inFlightTotal,
+  isBatchClosed,
+  totalCount,
+} from "@/features/batch/summary";
 import { Icon } from "@/components/Icon";
-
-const TERMINAL: GranuleState[] = ["acked", "deleted"];
-const ERRORED: GranuleState[] = ["failed", "blacklisted"];
 
 type BatchListRow = {
   b: BatchSummary;
@@ -40,19 +44,6 @@ type BatchListRow = {
   inFlight: number;
   pct: number;
   bundleLink: { name: string; version: string } | null;
-};
-
-const batchTotal = (b: BatchSummary) =>
-  Object.values(b.counts).reduce((a, c) => a + (c ?? 0), 0);
-const completedTotal = (b: BatchSummary) => TERMINAL.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
-const errorTotal = (b: BatchSummary) =>
-  ERRORED.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
-const inFlightTotal = (b: BatchSummary) =>
-  IN_FLIGHT_STATES.reduce((s, k) => s + (b.counts[k] ?? 0), 0);
-const isClosed = (b: BatchSummary) => {
-  const t = batchTotal(b);
-  const d = completedTotal(b);
-  return t > 0 && d === t && errorTotal(b) === 0;
 };
 
 const qc = useQueryClient();
@@ -92,7 +83,7 @@ function matchesSearch(b: BatchSummary) {
 }
 
 function toBatchListRow(b: BatchSummary): BatchListRow {
-  const t = batchTotal(b);
+  const t = totalCount(b.counts);
   const d = completedTotal(b);
   return {
     b,
@@ -108,14 +99,14 @@ function toBatchListRow(b: BatchSummary): BatchListRow {
 const visible = computed(() =>
   all.value
     .filter((b) => {
-      if (scope.value === "active" && isClosed(b)) return false;
+      if (scope.value === "active" && isBatchClosed(b)) return false;
       return matchesSearch(b);
     })
     .map(toBatchListRow),
 );
 
 const allCount = computed(() => all.value.length);
-const activeCount = computed(() => all.value.filter((b) => !isClosed(b)).length);
+const activeCount = computed(() => all.value.filter((b) => !isBatchClosed(b)).length);
 
 const retry = useMutation({
   mutationFn: (id: string) => API.retryFailed(id),
@@ -176,7 +167,7 @@ async function confirmCancel(b: BatchSummary) {
 }
 
 async function confirmDelete(b: BatchSummary) {
-  const t = batchTotal(b);
+  const t = totalCount(b.counts);
   const ok = await requestConfirm({
     title: `永久删除批次 "${b.name}"？`,
     description:
