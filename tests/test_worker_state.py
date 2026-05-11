@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.api.worker_heartbeat import renew_worker_leases
+from sathop.orchestrator.api.worker_leases import renew_worker_leases
 from sathop.orchestrator.background import sweep_expired_leases
 from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Granule, Worker, utcnow

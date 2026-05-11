@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.api.workers import LEASE_DURATION
+from sathop.orchestrator.api.worker_leases import LEASE_DURATION
 from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Granule, Worker, utcnow
 from sathop.orchestrator.main import app

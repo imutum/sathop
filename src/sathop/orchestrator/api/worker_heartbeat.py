@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
-
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import LEASED_STATES, WorkerHeartbeat
 
 from ..db import Granule, Worker
 from ..pubsub import log_event as log
-
-LEASE_DURATION = timedelta(minutes=30)
 
 
 async def record_worker_version(s: AsyncSession, worker: Worker, req: WorkerHeartbeat) -> None:
@@ -42,16 +38,6 @@ def apply_worker_heartbeat(worker: Worker, req: WorkerHeartbeat, now) -> None:
     worker.queue_pending_upload = req.queue_pending_upload
     worker.queue_uploading = req.queue_uploading
     worker.paused = req.paused
-
-
-async def renew_worker_leases(s: AsyncSession, worker_id: str, now) -> None:
-    await s.execute(
-        update(Granule)
-        .where(Granule.leased_by == worker_id)
-        .where(Granule.state.in_(LEASED_STATES))
-        .where(Granule.lease_expires_at < now + LEASE_DURATION / 2)
-        .values(lease_expires_at=now + LEASE_DURATION)
-    )
 
 
 async def revoked_active_granules(s: AsyncSession, req: WorkerHeartbeat) -> list[str]:

@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import distinct, func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
     LEASED_STATES,
-    Credential,
     DeletableGranule,
     GranuleState,
-    LeaseItem,
     LeaseRequest,
     LeaseResponse,
     ProcessFailure,
@@ -26,18 +23,25 @@ from sathop.shared.protocol import (
     WorkerRegisterResponse,
 )
 
-from ..config import require_token, settings
-from ..db import Batch, Granule, GranuleObject, Worker, session, utcnow
+from ..config import require_token
+from ..db import Granule, GranuleObject, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from .worker_heartbeat import (
-    LEASE_DURATION,
     apply_worker_heartbeat,
     consume_gc_signal,
     consume_restart_signal,
     record_worker_version,
-    renew_worker_leases,
     revoked_active_granules,
+)
+from .worker_leases import (
+    LEASE_DURATION,
+    claim_pending_granules,
+    count_worker_inflight,
+    held_granule_sample,
+    lease_limit,
+    renew_worker_leases,
+    revoke_worker_leases,
 )
 from .worker_transitions import STATE_PREDECESSOR, apply_state_report, mark_failed, mark_uploaded
 
@@ -75,92 +79,6 @@ async def _leased_granule_or_409(s: AsyncSession, granule_id: str, worker_id: st
 # lease (its later report_state 409s, downloaded bytes wasted). SQLite
 # already serializes writers at commit time, so the perf cost is negligible.
 _LEASE_LOCK = asyncio.Lock()
-
-
-async def _count_inflight(s: AsyncSession, worker_id: str) -> int:
-    """How many granules is this worker currently holding storage for?
-    Pre-upload: input files staged under work_root. Post-upload: output
-    objects in LocalStorage/MinIO, until the receiver acks + delete-confirmed."""
-    pre = await s.scalar(
-        select(func.count())
-        .select_from(Granule)
-        .where(Granule.leased_by == worker_id)
-        .where(Granule.state.in_(LEASED_STATES))
-    )
-    post = await s.scalar(
-        select(func.count(distinct(GranuleObject.granule_id)))
-        .where(GranuleObject.worker_id == worker_id)
-        .where(GranuleObject.deleted_at.is_(None))
-    )
-    return int(pre or 0) + int(post or 0)
-
-
-async def _lease_limit(s: AsyncSession, worker: Worker, req: LeaseRequest) -> int:
-    """Effective lease size after orchestrator backpressure and runtime override."""
-    limit = req.capacity
-    if settings.max_inflight_per_worker > 0:
-        holding = await _count_inflight(s, req.worker_id)
-        limit = min(limit, max(0, settings.max_inflight_per_worker - holding))
-    if worker.desired_capacity is not None:
-        limit = min(limit, max(0, worker.desired_capacity))
-    return limit
-
-
-def _json_dict_or_empty(raw: str | None) -> dict:
-    if not raw:
-        return {}
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _credential_map(raw: str | None) -> dict[str, Credential]:
-    try:
-        return {k: Credential.model_validate(v) for k, v in _json_dict_or_empty(raw).items()}
-    except ValueError:
-        return {}
-
-
-def _lease_item(granule: Granule, batch: Batch | None) -> LeaseItem:
-    return LeaseItem(
-        granule_id=granule.granule_id,
-        batch_id=granule.batch_id,
-        bundle_ref=batch.bundle_ref if batch else "",
-        inputs=json.loads(granule.inputs_json),
-        meta=json.loads(granule.meta_json or "{}"),
-        execution_env=_json_dict_or_empty(batch.execution_env_json if batch else None),
-        credentials=_credential_map(batch.credentials_json if batch else None),
-    )
-
-
-async def _held_granule_sample(s: AsyncSession, worker_id: str, limit: int = 5) -> list[str]:
-    leased = (
-        (
-            await s.execute(
-                select(Granule.granule_id)
-                .where(Granule.leased_by == worker_id)
-                .where(Granule.state.in_(LEASED_STATES))
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    uploaded = (
-        (
-            await s.execute(
-                select(distinct(GranuleObject.granule_id))
-                .where(GranuleObject.worker_id == worker_id)
-                .where(GranuleObject.deleted_at.is_(None))
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return list({*leased, *uploaded})[:limit]
 
 
 @router.post("/register", response_model=WorkerRegisterResponse)
@@ -229,43 +147,17 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     # Two clamps below req.capacity: queue-based backpressure (0 disables) and
     # per-worker runtime override (belt-and-braces against an old worker that
     # doesn't self-clamp).
-    limit = await _lease_limit(s, worker, req)
+    limit = await lease_limit(s, worker, req)
     if limit <= 0:
         return LeaseResponse(items=[], lease_expires_at=expires)
 
-    items = await _claim_pending_granules(s, req.worker_id, limit, now, expires)
+    items = await claim_pending_granules(s, req.worker_id, limit, now, expires)
     if items:
         await log(s, req.worker_id, f"leased {len(items)} granules")
         await commit_and_publish(s, "batches")
     else:
         await commit_and_publish(s)
     return LeaseResponse(items=items, lease_expires_at=expires)
-
-
-async def _claim_pending_granules(
-    s: AsyncSession,
-    worker_id: str,
-    limit: int,
-    now,
-    expires,
-) -> list[LeaseItem]:
-    stmt = (
-        select(Granule)
-        .where(Granule.state == GranuleState.PENDING.value)
-        .where((Granule.leased_by.is_(None)) | (Granule.lease_expires_at < now))
-        .limit(limit)
-    )
-    rows = (await s.execute(stmt)).scalars().all()
-
-    items: list[LeaseItem] = []
-    for granule in rows:
-        granule.state = GranuleState.QUEUED.value
-        granule.leased_by = worker_id
-        granule.lease_expires_at = expires
-        granule.updated_at = now
-        batch = await s.get(Batch, granule.batch_id)
-        items.append(_lease_item(granule, batch))
-    return items
 
 
 @router.post("/state")
@@ -416,32 +308,13 @@ async def revoke_all_leases(worker_id: str, s: AsyncSession = Depends(session)) 
     In-flight progress on these granules is discarded; retry_count bumps so
     the orchestrator's max_retries cap still applies."""
     await _worker_or_404(s, worker_id)
-    revoked = await _revoke_worker_leases(s, worker_id, utcnow())
+    revoked = await revoke_worker_leases(s, worker_id, utcnow())
     if revoked:
         await log(s, worker_id, f"force-revoked {revoked} lease(s) via UI")
         await commit_and_publish(s, "batches", "workers")
     else:
         await commit_and_publish(s, "workers")
     return {"ok": True, "revoked": revoked}
-
-
-async def _revoke_worker_leases(s: AsyncSession, worker_id: str, now) -> int:
-    rows = (
-        (
-            await s.execute(
-                select(Granule).where(Granule.leased_by == worker_id).where(Granule.state.in_(LEASED_STATES))
-            )
-        )
-        .scalars()
-        .all()
-    )
-    for granule in rows:
-        granule.state = GranuleState.PENDING.value
-        granule.leased_by = None
-        granule.lease_expires_at = None
-        granule.retry_count = (granule.retry_count or 0) + 1
-        granule.updated_at = now
-    return len(rows)
 
 
 @router.post("/{worker_id}/gc")
@@ -464,9 +337,9 @@ async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> d
     w = await _worker_or_404(s, worker_id)
     if w.enabled:
         raise HTTPException(409, "worker is still enabled — disable it first")
-    inflight = await _count_inflight(s, worker_id)
+    inflight = await count_worker_inflight(s, worker_id)
     if inflight > 0:
-        sample = await _held_granule_sample(s, worker_id)
+        sample = await held_granule_sample(s, worker_id)
         more = f" (+{inflight - len(sample)} more)" if inflight > len(sample) else ""
         raise HTTPException(
             409,
