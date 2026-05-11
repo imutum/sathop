@@ -1,7 +1,7 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree contains a focused orchestrator commit/publish helper cleanup.
+- Working tree contains a focused frontend onboarding token-boundary cleanup.
 - `src/sathop/orchestrator/pubsub.py` owns event publishing, event logging, and `commit_and_publish` transaction/scope publication helper.
 - `src/sathop/orchestrator/api/batch_readmodels.py` owns BatchSummary/GranuleRow assembly, state counts, ETA, and exhausted-object read queries.
 - `src/sathop/orchestrator/api/batch_transitions.py` owns cancel/retry granule state rules.
@@ -19,23 +19,23 @@
 - `frontend/src/features/batch/types.ts` owns create-batch pure form transforms: credential payload/validity, env parsing, and dirty-draft checks.
 
 ## Completed this round
-- Re-read `state.md`, confirmed the backend comment/docstring cleanup was committed, and started from a clean working tree.
-- Scanned for concrete duplication/stale boundaries instead of continuing comment-only churn.
-- Found route-level drift where bundles, shared upload, and receiver routes manually did `commit()` plus `publish({scope})` despite existing `commit_and_publish`.
-- Replaced simple `commit()+publish(scope)` sequences in `bundles.py`, `shared.py`, and `receivers.py` with `commit_and_publish`.
-- Preserved special cases: receiver failed-ack branch still commits without publishing, progress publishes a richer event payload, admin GC publishes only when work happened, and shared delete still unlinks the file after DB commit before publishing.
+- Re-read `state.md`, confirmed the orchestrator commit/publish helper cleanup was committed, and started from a clean working tree.
+- Ran a final high-level scan for real duplication and stale boundaries across orchestrator routes, frontend API/token access, state-count helpers, confirm flows, and legacy/compat references.
+- Found one small frontend boundary drift: onboarding modals still read `localStorage` directly for the current token after token access moved into `apiClient.ts`.
+- Updated `OnboardWorkerModal.vue` and `OnboardReceiverModal.vue` to use `getToken()` from `apiClient.ts`.
+- Confirmed remaining direct token storage access is limited to `apiClient.ts` and `Login.vue`, where login rollback/removal owns the boundary.
 
 ## Validation
-- Related pytest subset passed: `tests/test_receiver_agent.py tests/test_receiver_pipeline.py tests/test_receiver_heartbeat_stats.py tests/test_node_lifecycle.py tests/test_restart_signal.py tests/test_shared.py tests/test_bundle_registry.py` (`97 passed`).
+- Frontend build/type-check: `npm --prefix frontend run build` passed.
 - Ruff: `.venv/Scripts/ruff.exe check .` passed.
 - Format: `.venv/Scripts/ruff.exe format . --check` passed.
 
 ## Key decisions
-- `commit_and_publish` should be the default for simple transaction + scope publication paths across orchestrator routes.
-- Do not force custom publication paths into the helper when they carry richer payloads, conditional publish semantics, or filesystem ordering constraints.
-- This is a boundary consistency cleanup, not a new abstraction.
+- `apiClient.ts` is the browser token boundary; components that only need the current token should call `getToken()` instead of reaching into storage.
+- `Login.vue` may still read/remove `localStorage` directly because it owns rollback and clearing behavior during login probing.
+- No further concrete structural cleanup surfaced in the final scan.
 
 ## Next suggested priorities
-1. Run one final high-level scan for concrete duplication or stale boundaries; if nothing clear appears, stop structural refactoring.
-2. Avoid further comment-only churn unless a comment is actively misleading.
+1. Stop structural refactoring unless a new concrete duplication, stale boundary, or bug appears.
+2. If continuing work, shift from cleanup to feature/bug/test priorities rather than more churn.
 3. Future structural work should be driven by concrete duplication or stale boundary, not file size alone.

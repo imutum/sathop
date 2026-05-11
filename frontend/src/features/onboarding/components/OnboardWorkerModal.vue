@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { getToken } from "@/apiClient";
 import { useToast } from "@/composables/useToast";
 import { Icon } from "@/components/Icon";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,7 @@ defineEmits<{ close: [] }>();
 const toast = useToast();
 
 const workerId = ref(`worker-${Math.random().toString(36).slice(2, 8)}`);
-const token = ref(localStorage.getItem("sathop.token") ?? "");
+const token = ref(getToken());
 const orchUrl = ref(window.location.origin);
 const exposeMode = ref<ExposeMode>("selfsigned");
 const domain = ref("");
