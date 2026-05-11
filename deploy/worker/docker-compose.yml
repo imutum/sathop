@@ -1,6 +1,10 @@
 services:
+  # Pinned to known-stable releases — :latest can introduce breaking API
+  # changes (MinIO has shipped several over the years). Override per-deploy
+  # via SATHOP_MINIO_TAG / SATHOP_ARIA2_TAG in .env when you've validated
+  # a newer image.
   minio:
-    image: minio/minio:latest
+    image: minio/minio:${SATHOP_MINIO_TAG:-RELEASE.2024-12-18T13-15-44Z}
     restart: unless-stopped
     command: server /data --console-address :9001
     env_file: .env
@@ -14,7 +18,7 @@ services:
       - ./minio-data:/data
 
   aria2c:
-    image: p3terx/aria2-pro:latest
+    image: p3terx/aria2-pro:${SATHOP_ARIA2_TAG:-2024.10.20}
     restart: unless-stopped
     environment:
       RPC_SECRET: ${SATHOP_ARIA2_SECRET}

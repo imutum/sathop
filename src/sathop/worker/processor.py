@@ -38,6 +38,13 @@ class ProcessResult:
 
 _GRACEFUL_KILL_WAIT_SEC = 5.0
 
+# Per-stream cap on captured bundle output. Orchestrator persists 16 KB; 64 KB
+# gives a comfortable headroom for debugging while bounding worker RAM so a
+# runaway bundle (infinite print loop, binary blob to stdout) can't OOM the
+# host. We keep reading after the cap is reached — silently discarding — so
+# the child never blocks on a full pipe buffer.
+_OUTPUT_CAP_BYTES = 64 * 1024
+
 # Bundle subprocesses are user-supplied code with full filesystem access; we
 # don't sandbox them. But we DO refuse to leak the worker's own secrets — most
 # critically SATHOP_TOKEN, which would let a malicious bundle call the
@@ -122,6 +129,38 @@ def _build_env(
     return env
 
 
+async def _drain_to_cap(stream: asyncio.StreamReader | None, cap: int) -> tuple[bytes, bool]:
+    """Read until EOF, keeping at most ``cap`` bytes. Continues reading past
+    the cap (discarding) so the child process never blocks on a full pipe."""
+    if stream is None:
+        return b"", False
+    buf = bytearray()
+    truncated = False
+    while True:
+        chunk = await stream.read(64 * 1024)
+        if not chunk:
+            return bytes(buf), truncated
+        room = cap - len(buf)
+        if room > 0:
+            buf.extend(chunk[:room])
+            if len(chunk) > room:
+                truncated = True
+        else:
+            truncated = True
+
+
+async def _communicate_bounded(
+    proc: asyncio.subprocess.Process, cap: int
+) -> tuple[bytes, bytes, bool, bool]:
+    """Like ``proc.communicate()`` but stdout/stderr each capped at ``cap``."""
+    out_task = asyncio.create_task(_drain_to_cap(proc.stdout, cap))
+    err_task = asyncio.create_task(_drain_to_cap(proc.stderr, cap))
+    await proc.wait()
+    out_b, out_trunc = await out_task
+    err_b, err_trunc = await err_task
+    return out_b, err_b, out_trunc, err_trunc
+
+
 async def _kill_and_wait(proc: asyncio.subprocess.Process) -> None:
     """Best-effort: signal terminate, give the process a few seconds to flush
     open files, then SIGKILL. ``await proc.wait()`` is essential — without it
@@ -199,7 +238,9 @@ async def run_bundle(
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            stdout_b, stderr_b, out_trunc, err_trunc = await asyncio.wait_for(
+                _communicate_bounded(proc, _OUTPUT_CAP_BYTES), timeout=timeout
+            )
         except (TimeoutError, asyncio.CancelledError):
             # Cancel comes from the worker's heartbeat-driven revoke loop;
             # timeout from manifest.execution.timeout_sec. Either way the
@@ -209,6 +250,10 @@ async def run_bundle(
 
         stdout = stdout_b.decode(errors="replace") if stdout_b else ""
         stderr = stderr_b.decode(errors="replace") if stderr_b else ""
+        if out_trunc:
+            stdout += f"\n[... stdout truncated at {_OUTPUT_CAP_BYTES} bytes]"
+        if err_trunc:
+            stderr += f"\n[... stderr truncated at {_OUTPUT_CAP_BYTES} bytes]"
 
         if proc.returncode != 0:
             return ProcessResult(False, [], stdout, stderr, proc.returncode or -1)

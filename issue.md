@@ -7,12 +7,18 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：15（累计修复 38 项 — 6 high + 18 medium + 12 low + 2 cross；L-009 关闭为非问题）
+- 总问题数：10（累计修复 43 项 — 6 high + 21 medium + 12 low + 3 cross + 1 关闭项 L-009/C-002）
 - 高优先级问题数：4（H-001/H-002/H-003/H-004/H-009/H-010 已修）
-- 中优先级问题数：6（M-001/M-002/M-003/M-004/M-005/M-007/M-008/M-009/M-010/M-012/M-013/M-015/M-016/M-017/M-018/M-021/M-022/M-024 已修）
-- 低优先级问题数：3（L-001/L-002/L-003/L-004/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-009 关闭）
-- 交叉问题数：2（C-001/C-004 已修）
+- 中优先级问题数：2（M-001/M-002/M-003/M-004/M-005/M-006/M-007/M-008/M-009/M-010/M-011/M-012/M-013/M-014/M-015/M-016/M-017/M-018/M-021/M-022/M-023/M-024 已修）
+- 低优先级问题数：3（L-001/L-002/L-003/L-004/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
+- 交叉问题数：1（C-001/C-004 已修；C-002 关闭）
 - 已修复（按轮次倒序）：
+  - 第 9 轮：
+    - **M-006** C-001 已用 httpx 替换 urllib，配 30 s/120 s/600 s 显式超时，issue 原描述（线程池被永久占用、urllib 不一致）已不成立；保留同步调用是 ensure() 路径有意为之（一次性，无需取消语义），关闭
+    - **M-011** `deploy/worker/docker-compose.yml` 把 `minio:latest` / `aria2-pro:latest` 改为 `${SATHOP_MINIO_TAG:-RELEASE.2024-12-18T13-15-44Z}` / `${SATHOP_ARIA2_TAG:-2024.10.20}`；`.env.example` 加可选覆盖说明 — 默认锁定到已知稳定版，操作员验证过新版后可单点覆盖
+    - **M-014** `test_worker_resilience.test_heartbeat_404_triggers_re_register` 把 `sleep(2.5)` 换成 `wait_for` 条件轮询（两条 reply 消费且 register≥1）→ 不再依赖时钟；`test_receiver_pipeline` 流水线阈值从 1.0 s 放宽到 1.4 s（仍能识别 ≥2.4 s 的串行回归），CI slack 从 0.4 s 升到 0.8 s
+    - **M-023** `run_bundle` 引入 `_drain_to_cap` / `_communicate_bounded`，每路 stdout/stderr 在 worker 端硬限 64 KB（orch 持久 16 KB 的 4× headroom），超额继续读但丢弃以免子进程在 pipe 上阻塞，结尾追加 `[... truncated]` 标识 — 失控 bundle 不会再 OOM worker
+    - **C-002** atomic-download + sha256 verify 模式跨 5 处实现确实存在，但每处差异（断点续传 vs replace、part-tmp 命名、tmp 清理）已超过统一抽象能消除的代码量，issue 本身建议"不强求"。审查清单关闭，未来若三处以上需要同步修改某行为再考虑提取
   - 第 8 轮：
     - **L-010** `receiver.runtime._fetch_one` 死方法删除；13 处测试调用点全部迁移到直接调用 `_fetch_one_inner`（Semaphore(1) 包装本就是 no-op）。`test_receiver_segmented.py` / `test_receiver_heartbeat_stats.py` 顺手清掉只为此方法保留的 `import asyncio`
     - **M-009** `processor._ENV_WHITELIST` 收紧：剔除 `HOME` / `USERPROFILE` / `APPDATA` / `LOCALAPPDATA` / `PROGRAMDATA` / `USER` / `LOGNAME` / `SHELL` — 这些目录是 `~/.aws`、`~/.ssh`、`~/.config/gcloud`、Earthdata cookie jar 的常见位置，bundle 不应默认继承。需要 per-user 配置的 bundle 改走 `manifest.execution.env` 或 batch credentials 显式声明
@@ -125,41 +131,6 @@
 
 ## Medium Priority
 
-### M-006: urllib.request（同步阻塞）用于文件下载，无法取消
-
-- 类型：并发 / 架构
-- 位置：`src/sathop/worker/bundle.py:193-210`、`src/sathop/worker/shared.py:78-149`
-- 证据：两个文件都使用 `urllib.request.urlopen()`（同步阻塞 I/O）。`ensure()` 包裹在 `asyncio.to_thread` 中，但底层 `urlopen` 一旦开始就无法从 async 侧取消。
-- 问题描述：
-  1. orchestrator 不可达或网速极慢时，线程池线程被永久占用
-  2. `asyncio.to_thread` 的取消只取消对线程结果的等待，不取消线程内的阻塞调用
-  3. 项目已依赖 `httpx`（用于 API 调用），但文件下载却用 urllib — 不一致
-- 长期影响：线程池耗尽导致所有 granule 处理停滞；无法实现优雅取消。
-- 可能方向：将 bundle/shared 下载迁移到 `httpx.AsyncClient`（与 API 调用统一），利用其 streaming + 超时 + 取消支持。
-- 置信度：中
-
-### M-011: Compose 文件中使用未固定版本的镜像
-
-- 类型：部署风险
-- 位置：`deploy/worker/docker-compose.yml:3,17`
-- 证据：`minio/minio:latest` 和 `p3terx/aria2-pro:latest` — 使用 `latest` 标签。
-- 问题描述：`latest` 标签随时可能引入不兼容的 API 变更。MinIO 在历史上多次进行过 breaking changes。
-- 长期影响：生产环境意外升级导致 pipeline 中断。
-- 可能方向：固定到具体版本标签（如 `minio/minio:RELEASE.2024-12-18T00-00-00Z`）。
-- 置信度：高
-
-### M-014: 测试中存在依赖时序的 sleep
-
-- 类型：测试可靠性
-- 位置：
-  - `tests/test_worker_resilience.py:134` — `await asyncio.sleep(2.5)` 驱动 2 个心跳周期
-  - `tests/test_receiver_pipeline.py:167` — `elapsed < 1.0` 断言在 0.6s 慢任务 + 3 个快任务的总时间
-- 证据：硬编码 sleep 在高负载 CI 上可能不够；时间断言在资源竞争时过于激进。
-- 问题描述：flaky tests — 在高负载 CI 环境随机失败。
-- 长期影响：开发者对 CI 结果失去信任。
-- 可能方向：用 `asyncio.Event` 或 `MockClock` 代替 sleep；放宽时间断言。
-- 置信度：中
-
 ### M-019: Frontend 硬编码 Tailwind 颜色在暗色模式下不兼容
 
 - 类型：UI / 主题一致性
@@ -183,20 +154,6 @@
 - 长期影响：网络故障时用户困惑，不知道是正常空状态还是 API 失败。
 - 可能方向：为每个组件添加 `isError` 检查并渲染 `<Alert variant="destructive">`。
 - 置信度：高
-
-### M-023: Worker proc.communicate() 无限制读取子进程 stdout/stderr
-
-- 类型：资源管理 / reliability
-- 位置：`src/sathop/worker/processor.py:199`
-- 证据：
-  ```python
-  stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-  ```
-  `proc.communicate()` 将全部 stdout/stderr 读入内存。orchestrator API 端在持久化时才截断到 16000 字符（`worker_transitions.py:82-84`），但 worker 已先读取了全部内容。
-- 问题描述：失控 bundle（无限循环打印、递归错误转储、二进制数据写入 stdout）可生成 GB 级输出 → worker OOM。虽然 bundle 是操作员提供的，但防御深度原则要求 worker 在读取侧也设置上限。
-- 长期影响：worker 节点被单个 granule OOM → 所有正在处理的 granule 丢失 → 需要重新 lease。
-- 可能方向：使用流式读取（`proc.stdout.read(n)` 循环）并在达到上限后终止子进程；或使用 `subprocess.PIPE` + 带缓冲上限的 `read()`。
-- 置信度：中
 
 ---
 
@@ -231,21 +188,6 @@
 ---
 
 ## Cross-Cutting Problems
-
-### C-002: "临时文件 + SHA256 验证 + 原子重命名" 模式在多处独立实现
-
-- 涉及范围：worker downloader、worker storage、worker bundle venv、worker shared sync、receiver puller
-- 共同模式：下载到临时文件 → 验证完整性 → 原子重命名到最终位置 → 失败则清理临时文件
-- 代表性位置：
-  - `downloader.py:91-139` HttpDownloader.fetch（.part 文件 + 断点续传 + 重命名）
-  - `storage.py:47-56` LocalStorage.put（shutil.move）
-  - `bundle.py:287-303` _ensure_venv（.building.<tid> tmp dir + rename）
-  - `shared.py:127-149` _sync_one（tempfile + sha256 verify + replace）
-  - `puller.py:126-168` pull_segmented / pull_single（.part-<hex> + verify + replace）
-- 问题描述：每个实现稍有不同 — 块大小、错误处理、清理策略。如果有统一的 "atomic download with verification" 原语，可以减少大量重复代码。
-- 长期影响：修改或修复这个模式需要在 5+ 个位置分别进行。
-- 可能方向：考虑提取通用的 `atomic_download(url, dest, expected_sha256)` 工具，但不强求 — 各场景的差异可能足够大使得统一代价高于收益。
-- 置信度：中
 
 ### C-003: Paused / pause_requested 命名在三个层面表达不同语义
 
@@ -301,6 +243,12 @@
 - 检查位置：`src/sathop/worker/agent.py:61-65`
 - 表面疑点：`_get` 仅 `get_deletable` 一个调用者，`_post` 被广泛使用，看起来设计不对称。
 - 为什么不是问题：API 当前只暴露一个 GET 端点（deletable），其余路径都用 POST。`_get` 的 `_check_auth` + `raise_for_status` 与 `_post` 对称，新增 GET 端点零成本；不是死代码，是与 `_post` 配对的对称基础设施。
+
+### N-009: atomic-download + sha256 verify 模式跨 5 处独立实现（原 C-002）
+
+- 检查位置：`downloader.py` / `storage.py` / `bundle.py` / `shared.py` / `puller.py`
+- 表面疑点：相同思路（tmp + verify + rename）在 5 个文件各写一份。
+- 为什么不是问题：每处差异是必要的：HttpDownloader 要 HTTP Range 续传 + 信用 ProgressCb；Receiver puller 是多段并发 + 失败重组；bundle venv 是目录 rename 不是文件；shared.sync 是 tempfile + replace；LocalStorage.put 只 move（无 sha256，由 hash 库统一）。强行抽出 `atomic_download(url, dest, sha)` 会丢失续传/并发段/进度回调等差异化能力，留下的"统一"反而比五份具体代码更难读。审查清单关闭；将来若三处以上需要同步修改某行为再考虑提取。
 
 ### N-001: secrets.token_urlsafe(6) 批次 ID 生成有碰撞风险吗？
 

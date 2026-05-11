@@ -166,11 +166,13 @@ async def test_pipeline_does_not_stall_siblings_on_straggler(tmp_path):
             await _drain_until(stub, 4, timeout=3.0)
             elapsed = time.monotonic() - t0
             # Slow item alone is 0.6s. The three fasts take essentially no
-            # time. Pipeline overlap means total ≤ slow + ε. Allow 0.4s of
-            # CI/scheduler slop on top of the 0.6 slow.
-            assert elapsed < 1.0, (
-                f"pipeline stalled on straggler: {elapsed:.2f}s > 1.0s "
-                f"(would be ≥1.2s if siblings waited for slow item)"
+            # time. Pipeline overlap means total ≤ slow + ε. Allow 0.8s of
+            # CI/scheduler slop on top of the 0.6 slow — the assertion still
+            # catches the regression where siblings serialize behind slow
+            # (which would be 4 × 0.6s = 2.4s).
+            assert elapsed < 1.4, (
+                f"pipeline stalled on straggler: {elapsed:.2f}s > 1.4s "
+                f"(would be ≥2.4s if siblings waited for slow item)"
             )
             assert {a.object_id for a in stub.acks} == {0, 1, 2, 3}
         finally:

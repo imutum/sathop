@@ -125,13 +125,21 @@ async def test_heartbeat_404_triggers_re_register(tmp_path):
         w.client.heartbeat = fake_heartbeat  # type: ignore[method-assign]
 
         task = asyncio.create_task(w._heartbeat_loop())
-        # Two heartbeat ticks (interval=1s) + a hair of slack
-        await asyncio.sleep(2.5)
-        task.cancel()
+        # Wait until both heartbeat replies have been consumed AND we re-registered
+        # — deterministic regardless of CI scheduler jitter. 5s ceiling guards
+        # against the loop never firing (regression).
+        async def _both_consumed() -> None:
+            while heartbeat_replies or register_calls < 1:
+                await asyncio.sleep(0.02)
+
         try:
-            await task
-        except asyncio.CancelledError:
-            pass
+            await asyncio.wait_for(_both_consumed(), timeout=5.0)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
         assert register_calls >= 1, "expected re-register after heartbeat 404"
         assert heartbeat_replies == [], "expected both heartbeat replies consumed"
