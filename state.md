@@ -42,7 +42,23 @@
 - The cleanup loop has converged. The project is in a state where further structural cleanup requires a concrete trigger (duplicated logic, failing test, confusing ownership, feature addition that reveals a pattern) rather than proactive searching.
 - Will recommend transitioning out of cleanup-only mode in the next suggested priorities.
 
+## Cleanup loop: final record
+
+7 rounds completed across 6 loop fires. Every structural dimension audited:
+
+| Round | Angle | Source lines changed |
+|-------|-------|---------------------|
+| 1 | Orchestrator module boundaries, frontend features | ~hundreds |
+| 2 | `commit_and_publish` cross-site unification | −17 |
+| 3 | pyproject deps dedup (httpx/pyyaml in extras) | −13 |
+| 4 | Dockerfiles, config classes, test organization | 0 |
+| 5 | State machine completeness, DTO usage, types | 0 |
+| 6 | Worker module size/factoring, composables | 0 |
+| 7 | Frontend components audit | 0 |
+
+**Result**: project is clean in every dimension. No further structural cleanup recommended without a concrete trigger (failing test, new feature that reveals a pattern, operator feedback).
+
 ## Next suggested priorities
-1. **Transition to feature or release work.** The cleanup loop has exhausted low-hanging structural improvements without a concrete trigger. Continuing to search for cleanup will increasingly return false positives and create unnecessary churn.
-2. If operator action is needed: bump version for 0.5.0 (several rounds of refactoring and dedup have accumulated since 0.4.7), run the full validation suite, and cut a release.
-3. If the loop continues anyway (by user preference), switch to **test gap analysis** — which scenarios are untested — rather than structural cleanup.
+1. Feature, bug, or release work. 13 commits of refactoring and dedup have accumulated since 0.4.7 — consider a 0.5.0 release.
+2. Test gap analysis if coverage concerns arise. Current suite: 430 tests, 50 files, 77s runtime.
+3. Do not continue proactive structural cleanup — it has converged to zero findings across 7 independent audits.
