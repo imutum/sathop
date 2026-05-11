@@ -16,8 +16,8 @@ from sathop import __version__
 
 from ..config import require_token, settings
 from ..db import Batch, Bundle, session, utcnow
+from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ..pubsub import publish
 from .admin_readmodels import (
     NON_TERMINAL,
     STUCK_AGE_HOURS,
@@ -145,9 +145,7 @@ async def gc_bundles(
 
     if deleted_meta:
         await log(s, "bundles", f"GC deleted {len(deleted_meta)} bundle(s) ({freed} bytes)")
-    await s.commit()
-    if deleted_meta:
-        publish({"scope": "bundles"})
+    await commit_and_publish(s, "bundles" if deleted_meta else None)
     return {
         "dry_run": False,
         "age_days": age_days,
