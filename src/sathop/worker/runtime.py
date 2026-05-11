@@ -394,7 +394,7 @@ class Worker:
             key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
             for out in outputs:
                 key = render_key(key_tpl, out, item.meta)
-                uploaded.append(self.storage.put(out, key))
+                uploaded.append(await self.storage.put(out, key))
             await self.client.report_upload(gid, self.s.worker_id, uploaded, upload_started_at)
         stage.exit()
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
@@ -471,7 +471,7 @@ class Worker:
                 to_delete = await self.client.get_deletable(self.s.worker_id)
                 for dg in to_delete:
                     for key in dg.object_keys:
-                        self.storage.delete(key)
+                        await self.storage.delete(key)
                     await self.client.confirm_deleted(dg)
                     if dg.object_keys:
                         log.info("[%s] deleted %d object(s) after ack", dg.granule_id, len(dg.object_keys))

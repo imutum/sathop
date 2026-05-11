@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
@@ -261,6 +262,7 @@ def _ensure_columns(sync_conn) -> None:
     from sqlalchemy import inspect as sa_inspect
     from sqlalchemy import text
 
+    log = logging.getLogger("sathop.orchestrator.db")
     insp = sa_inspect(sync_conn)
     for table_name, table in Base.metadata.tables.items():
         if table_name not in insp.get_table_names():
@@ -270,7 +272,16 @@ def _ensure_columns(sync_conn) -> None:
             if col.name in existing:
                 continue
             col_type = col.type.compile(sync_conn.dialect)
-            sync_conn.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type}'))
+            try:
+                sync_conn.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type}'))
+            except Exception as e:
+                # Surface table/column/type so the operator can pinpoint which
+                # additive migration failed instead of a bare DB error spinning
+                # the container in a crash loop.
+                log.exception("migration failed: ALTER TABLE %s ADD COLUMN %s %s", table_name, col.name, col_type)
+                raise RuntimeError(
+                    f"failed to add column {col.name!r} ({col_type}) to table {table_name!r}: {e}"
+                ) from e
 
 
 async def shutdown_db() -> None:

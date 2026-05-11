@@ -7,12 +7,18 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：23（累计修复 31 项 — 6 high + 14 medium + 9 low + 2 cross）
+- 总问题数：18（累计修复 36 项 — 6 high + 17 medium + 11 low + 2 cross）
 - 高优先级问题数：4（H-001/H-002/H-003/H-004/H-009/H-010 已修）
-- 中优先级问题数：10（M-001/M-002/M-003/M-004/M-007/M-008/M-010/M-012/M-013/M-015/M-017/M-018/M-021/M-022 已修）
-- 低优先级问题数：7（L-001/L-002/L-003/L-004/L-008/L-011/L-012/L-013/L-016 已修）
+- 中优先级问题数：7（M-001/M-002/M-003/M-004/M-005/M-007/M-008/M-010/M-012/M-013/M-015/M-016/M-017/M-018/M-021/M-022/M-024 已修）
+- 低优先级问题数：5（L-001/L-002/L-003/L-004/L-008/L-011/L-012/L-013/L-014/L-015/L-016 已修）
 - 交叉问题数：2（C-001/C-004 已修）
 - 已修复（按轮次倒序）：
+  - 第 7 轮：
+    - **M-005** `workers.deletable` 用 `GROUP BY granule_id HAVING count(*) = count(acked_at)` 子查询过滤，单次 SQL 取代 N+1，worker 持有 100 个 granule 时从 101 次查询降为 1 次
+    - **M-016** `Storage` Protocol + `LocalStorage` / `MinioStorage` 全部改为 async；`MinioStorage.put/delete` 用 `asyncio.to_thread` 包 minio-py 调用，MinIO over-WAN 上传不再阻塞 event loop。runtime 的两个调用点加 `await`，`test_storage.py` 切到 async 测试
+    - **M-024** `db._ensure_columns` 每条 `ALTER TABLE` 加 try/except，失败时 log 完整 `(table, column, type)` 上下文后包装为 `RuntimeError` 重抛 — 迁移失败时操作员能直接定位脏列，而非看一行裸 SQL 错误进入崩溃循环
+    - **L-014** `_kill_and_wait` 在 `transport.close()` 周围补 try/except — 非 CPython 运行时 / 未来 API 变更不再 bubble up
+    - **L-015** `Aria2Downloader.fetch` 轮询从固定 2 秒改为 0.25 → 0.5 → 1 → 2 秒指数 ramp，小文件下载延迟从 ≥2s 降到 ≤0.25s 首检
   - 第 6 轮：
     - **M-003** SSE generator 在 `q.get()` / `json.dumps` 周围加显式 try/except，`CancelledError` 透传给 starlette，其他异常 log 后写 `: error\n\n` 注释行让连接存活；不可序列化 event 只丢弃单条不掉线
     - **M-012** orchestrator 上传 blob 路径改用 `os.replace`，临时文件加入 PID + 随机 token 后缀，并发上传同 sha 的 bundle 不再在 Windows 上偶发 `FileExistsError`
@@ -115,16 +121,6 @@
 
 ## Medium Priority
 
-### M-005: Deletable endpoint 存在 N+1 查询
-
-- 类型：性能
-- 位置：`src/sathop/orchestrator/api/workers.py:226-232`
-- 证据：对每个有 acked object 的 granule，发起一次独立的 `SELECT * FROM granule_objects WHERE granule_id = ?` 查询。
-- 问题描述：worker 持有 100 个 granule 时产生 101 次查询。可用单个 `GROUP BY` + `HAVING` 查询替代。
-- 长期影响：在大量 granule 场景下请求延迟线性增长。
-- 可能方向：用单次 SQL 查询替代 N+1 模式（`COUNT(*) = COUNT(acked_at)` 的 HAVING 条件）。
-- 置信度：中
-
 ### M-006: urllib.request（同步阻塞）用于文件下载，无法取消
 
 - 类型：并发 / 架构
@@ -170,21 +166,6 @@
 - 可能方向：用 `asyncio.Event` 或 `MockClock` 代替 sleep；放宽时间断言。
 - 置信度：中
 
-### M-016: MinioStorage.put() 和 delete() 在 event loop 上执行同步阻塞 I/O
-
-- 类型：并发 / 性能
-- 位置：`src/sathop/worker/storage.py:95`、`src/sathop/worker/storage.py:101-103`、`src/sathop/worker/runtime.py:385,461-462`
-- 证据：
-  ```python
-  # storage.py:95 — MinioStorage.put()
-  self._client.fput_object(self._bucket, object_key, str(src))  # 同步 S3 API 调用
-  ```
-  `runtime.py:385` 调用 `self.storage.put(out, key)` — 直接在 asyncio event loop 上执行，未包裹 `asyncio.to_thread`。对于 MinIO-over-WAN 部署，S3 上传可能持续数秒到数分钟，期间整个 event loop 被阻塞：心跳停止、lease 停止、其他 granule handler 停止。
-- 问题描述：`MinioStorage.put()` 和 `MinioStorage.delete()` 都是同步方法，调用方未将其放入线程。`LocalStorage.put()` 是本地文件移动（几乎瞬时），所以 `LocalStorage` 不受影响。
-- 长期影响：MinIO 部署下 worker 的心跳超时，orchestrator 误判 worker 离线，lease 被错误回收。
-- 可能方向：将 `storage.put()` 和 `storage.delete()` 改为 async，在 MinioStorage 实现中用 `asyncio.to_thread` 包裹 minio-py 调用；或让调用方统一包裹。
-- 置信度：高
-
 ### M-019: Frontend 硬编码 Tailwind 颜色在暗色模式下不兼容
 
 - 类型：UI / 主题一致性
@@ -221,20 +202,6 @@
 - 问题描述：失控 bundle（无限循环打印、递归错误转储、二进制数据写入 stdout）可生成 GB 级输出 → worker OOM。虽然 bundle 是操作员提供的，但防御深度原则要求 worker 在读取侧也设置上限。
 - 长期影响：worker 节点被单个 granule OOM → 所有正在处理的 granule 丢失 → 需要重新 lease。
 - 可能方向：使用流式读取（`proc.stdout.read(n)` 循环）并在达到上限后终止子进程；或使用 `subprocess.PIPE` + 带缓冲上限的 `read()`。
-- 置信度：中
-
-### M-024: _ensure_columns 迁移无错误处理 — 崩溃循环风险
-
-- 类型：可靠性 / error-handling
-- 位置：`src/sathop/orchestrator/db.py:270-273`
-- 证据：
-  ```python
-  sync_conn.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type}'))
-  ```
-  无 try/except。如果 ALTER TABLE 失败（DB 锁定、磁盘满、列类型编译异常），异常直接传播到 `init_db()` → orchestrator 启动失败。容器重启后重试同一迁移 → 崩溃循环。
-- 问题描述：错误信息不包含表名/列名上下文，排查困难。无重试或跳过逻辑（如列已存在但不匹配类型）。
-- 长期影响：生产环境部署新版本时 orchestrator 无法启动。
-- 可能方向：用 try/except 包裹单列迁移，log 包含完整上下文（表名、列名、类型）后 re-raise；对 "column already exists" 错误（SQLite 无此错误，但可防御性编码）静默跳过。
 - 置信度：中
 
 ---
@@ -286,41 +253,6 @@
 - 长期影响：低 — 方法签名变更时测试不会告警（测试调用旧签名）。
 - 可能方向：移除 `_fetch_one`，将测试迁移到直接调用 `_fetch_one_inner`。或保留但加注释说明仅供测试。
 - 置信度：中
-
-### L-014: _kill_and_wait 访问 CPython 私有 _transport 属性
-
-- 类型：可移植性
-- 位置：`src/sathop/worker/processor.py:150-153`
-- 证据：
-  ```python
-  transport = getattr(stream, "_transport", None) if stream else None
-  if transport is not None:
-      transport.close()
-  ```
-  `_transport` 是 CPython `asyncio` 内部实现细节。在 PyPy 或未来 CPython 版本中可能不存在或行为不同。由 `getattr(..., None)` 保护，不会崩溃，但 Windows ProactorEventLoop 的 ResourceWarning 会重新出现。
-- 问题描述：代码通过显式关闭 transport 来抑制 Windows 上的 ResourceWarning。非 CPython 实现中静默失效。
-- 长期影响：低 — CPython 占绝对主导地位，且有 `getattr` 兜底。
-- 可能方向：以 `try/except` 包裹 `transport.close()`；或在警告过滤器层面抑制 ResourceWarning。
-- 置信度：中
-
-### L-015: Aria2Downloader 轮询循环强制最低 2 秒延迟
-
-- 类型：性能
-- 位置：`src/sathop/worker/downloader.py:196`
-- 证据：
-  ```python
-  while True:
-      await asyncio.to_thread(dl.update)
-      ...
-      if dl.is_complete:
-          return dl.completed_length
-      ...
-      await asyncio.sleep(2)    # ← 最低 2s 延迟
-  ```
-- 问题描述：小文件（<1MB）下载可能在 0.5s 内完成，但至少等待 2s 才检测到。大量小文件 granule 的聚合延迟显著。
-- 长期影响：低 — aria2c 通常用于大文件；小文件用 HttpDownloader。但无文档说明此折衷。
-- 可能方向：对已知小文件或首次 update 后使用更短的睡眠时间；或使用指数递减（0.25 → 0.5 → 1 → 2s）。
-- 置信度：高
 
 ---
 

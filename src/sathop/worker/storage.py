@@ -4,11 +4,18 @@ Two implementations:
   - LocalStorage: writes to a local directory, also runs an HTTP static server (MVP).
   - MinioStorage: real S3-API via minio-py; presigned URLs for receiver pull.
 
+The Protocol methods are async because MinIO calls can block for seconds over
+WAN — running them on the asyncio loop would stall heartbeats and leases.
+LocalStorage's implementation is effectively sync (local move) but keeps the
+async signature so callers don't need to branch on backend.
+
 Selection is env-driven: `SATHOP_MINIO_ACCESS_KEY` + `SATHOP_MINIO_SECRET_KEY` set → MinIO; else local.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import shutil
 from dataclasses import dataclass
 from datetime import timedelta
@@ -20,12 +27,14 @@ from sathop.shared.hashing import sha256_file
 from sathop.shared.protocol import UploadedObject
 from sathop.shared.safe_path import safe_join
 
+log = logging.getLogger("sathop.worker.storage")
+
 
 class Storage(Protocol):
     needs_static_server: bool
 
-    def put(self, src: Path, object_key: str) -> UploadedObject: ...
-    def delete(self, object_key: str) -> None: ...
+    async def put(self, src: Path, object_key: str) -> UploadedObject: ...
+    async def delete(self, object_key: str) -> None: ...
 
 
 @dataclass
@@ -37,7 +46,7 @@ class LocalStorage:
     def __post_init__(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def put(self, src: Path, object_key: str) -> UploadedObject:
+    async def put(self, src: Path, object_key: str) -> UploadedObject:
         dst = safe_join(self.root, object_key)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), dst)
@@ -48,7 +57,7 @@ class LocalStorage:
             size=dst.stat().st_size,
         )
 
-    def delete(self, object_key: str) -> None:
+    async def delete(self, object_key: str) -> None:
         p = safe_join(self.root, object_key)
         p.unlink(missing_ok=True)
         for parent in p.parents:
@@ -90,19 +99,24 @@ class MinioStorage:
                 if e.code not in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
                     raise
 
-    def put(self, src: Path, object_key: str) -> UploadedObject:
+    async def put(self, src: Path, object_key: str) -> UploadedObject:
         sha = sha256_file(src)
         size = src.stat().st_size
-        self._client.fput_object(self._bucket, object_key, str(src))
+        # minio-py is sync; off-load to a thread so the asyncio loop keeps
+        # serving heartbeats and other granule handlers during multi-second
+        # WAN uploads.
+        await asyncio.to_thread(self._client.fput_object, self._bucket, object_key, str(src))
         src.unlink(missing_ok=True)
-        url = self._client.presigned_get_object(self._bucket, object_key, expires=timedelta(hours=24))
+        url = await asyncio.to_thread(
+            self._client.presigned_get_object, self._bucket, object_key, expires=timedelta(hours=24)
+        )
         return UploadedObject(object_key=object_key, presigned_url=url, sha256=sha, size=size)
 
-    def delete(self, object_key: str) -> None:
+    async def delete(self, object_key: str) -> None:
         try:
-            self._client.remove_object(self._bucket, object_key)
-        except Exception:
-            pass
+            await asyncio.to_thread(self._client.remove_object, self._bucket, object_key)
+        except Exception as e:
+            log.warning("minio remove_object(%s) failed: %s", object_key, e)
 
 
 def load(

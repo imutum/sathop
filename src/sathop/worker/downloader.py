@@ -193,6 +193,9 @@ class Aria2Downloader:
 
         dl = await asyncio.to_thread(self._api.add_uris, [url], options=options)
         try:
+            # Ramp 0.25→0.5→1→2s so small files don't pay the full 2s poll
+            # latency while large files still settle into the cheap cadence.
+            poll = 0.25
             while True:
                 await asyncio.to_thread(dl.update)
                 if progress_cb:
@@ -203,7 +206,8 @@ class Aria2Downloader:
                 if dl.status in ("error", "removed"):
                     msg = dl.error_message or dl.status
                     raise RuntimeError(f"aria2 download failed: {msg}")
-                await asyncio.sleep(2)
+                await asyncio.sleep(poll)
+                poll = min(poll * 2, 2.0)
         finally:
             try:
                 await asyncio.to_thread(dl.purge)

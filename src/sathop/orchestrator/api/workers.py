@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
@@ -210,27 +210,32 @@ async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> di
 
 @router.get("/deletable/{worker_id}")
 async def deletable(worker_id: str, s: AsyncSession = Depends(session)) -> list[DeletableGranule]:
-    """Worker polls for granules whose all objects are acked — safe to delete source."""
-    stmt = (
-        select(GranuleObject)
-        .where(GranuleObject.worker_id == worker_id)
-        .where(GranuleObject.acked_at.is_not(None))
+    """Worker polls for granules whose all objects are acked — safe to delete source.
+
+    Single pass: keep only granules where every non-deleted row has acked_at —
+    `count(*) = count(acked_at)` on the HAVING clause filters those out. Avoids
+    the N+1 of re-querying each granule's siblings."""
+    fully_acked_granules = (
+        select(GranuleObject.granule_id)
         .where(GranuleObject.deleted_at.is_(None))
+        .group_by(GranuleObject.granule_id)
+        .having(func.count() == func.count(GranuleObject.acked_at))
+        .scalar_subquery()
     )
-    rows = (await s.execute(stmt)).scalars().all()
+    rows = (
+        await s.execute(
+            select(GranuleObject)
+            .where(GranuleObject.worker_id == worker_id)
+            .where(GranuleObject.acked_at.is_not(None))
+            .where(GranuleObject.deleted_at.is_(None))
+            .where(GranuleObject.granule_id.in_(fully_acked_granules))
+        )
+    ).scalars().all()
 
     by_granule: dict[str, list[str]] = {}
     for o in rows:
         by_granule.setdefault(o.granule_id, []).append(o.object_key)
-
-    out: list[DeletableGranule] = []
-    for gid, keys in by_granule.items():
-        total = (
-            (await s.execute(select(GranuleObject).where(GranuleObject.granule_id == gid))).scalars().all()
-        )
-        if all(o.acked_at is not None for o in total):
-            out.append(DeletableGranule(granule_id=gid, object_keys=keys))
-    return out
+    return [DeletableGranule(granule_id=gid, object_keys=keys) for gid, keys in by_granule.items()]
 
 
 @router.put("/{worker_id}/capacity")

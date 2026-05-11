@@ -147,9 +147,16 @@ async def _kill_and_wait(proc: asyncio.subprocess.Process) -> None:
                 else:
                     await proc.wait()
     for stream in (proc.stdout, proc.stderr):
+        # CPython-specific: ``_transport`` is private asyncio detail; closing
+        # it explicitly suppresses Windows ProactorEventLoop ResourceWarning
+        # at GC time. Both the attribute lookup and close() are best-effort —
+        # non-CPython runtimes simply skip this cleanup.
         transport = getattr(stream, "_transport", None) if stream else None
         if transport is not None:
-            transport.close()
+            try:
+                transport.close()
+            except Exception:
+                pass
 
 
 async def run_bundle(
