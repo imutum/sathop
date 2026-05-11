@@ -45,9 +45,9 @@ def subscriber_count() -> int:
     return len(_subscribers)
 
 
-async def commit_and_publish(s: AsyncSession, *scopes: str) -> None:
+async def commit_and_publish(s: AsyncSession, *scopes: str | None) -> None:
     await s.commit()
-    for scope in dict.fromkeys(scopes):
+    for scope in dict.fromkeys(filter(None, scopes)):
         publish({"scope": scope})
 
 

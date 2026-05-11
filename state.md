@@ -1,9 +1,8 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree contains a state-only cleanup-loop closure record.
-- The project is currently clean enough: no new concrete duplication, stale boundary, or naming drift surfaced in the final cross-check.
-- `src/sathop/orchestrator/pubsub.py` owns event publishing, event logging, and `commit_and_publish` transaction/scope publication helper.
+- Working tree has source changes this round: `commit_and_publish` filters falsy scopes; 7 call sites collapsed.
+- `src/sathop/orchestrator/pubsub.py` owns event publishing, event logging, and `commit_and_publish` — now accepts `str | None` scopes and filters falsy values, so callers can pass a ternary instead of branching.
 - `src/sathop/orchestrator/api/batch_readmodels.py` owns BatchSummary/GranuleRow assembly, state counts, ETA, and exhausted-object read queries.
 - `src/sathop/orchestrator/api/batch_transitions.py` owns cancel/retry granule state rules.
 - `src/sathop/orchestrator/api/worker_heartbeat.py` owns worker heartbeat version logging, queue/disk field application, revoke calculation, and one-shot signal consumption.
@@ -20,23 +19,23 @@
 - `frontend/src/features/batch/types.ts` owns create-batch pure form transforms: credential payload/validity, env parsing, and dirty-draft checks.
 
 ## Completed this round
-- Re-read `state.md`, confirmed the onboarding token-boundary cleanup was committed, and started from a clean working tree.
-- Performed a state-only final cross-check for duplication/boundary drift across token access, commit/publish paths, state-count helpers, feature imports, and legacy/compat references.
-- Confirmed direct token storage access is limited to `apiClient.ts` and login rollback/removal in `Login.vue`.
-- Confirmed remaining manual commit/publish paths are intentional special cases: background tasks, admin GC conditional publish, progress rich payload, receiver failed-ack no-publish branch, and shared delete's DB-then-filesystem ordering.
-- Confirmed state-count helpers are intentionally split by semantics: batch summary math, dashboard pipeline rollups, and per-state chart presentation.
+- Re-read `state.md` and Git status; the prior round closed cleanup without finding any concrete trigger.
+- Took a fresh pass with new lens (cross-site patterns of the same shape), found a real one: 7 call sites of `commit_and_publish` wrapped in `if/else` to pick between a single scope and no-scope (or between one and two scopes) — pure boilerplate that could be collapsed.
+- Relaxed `commit_and_publish` to accept `str | None` and filter falsy entries via `filter(None, scopes)`. Behavior unchanged for existing callers.
+- Collapsed all 7 if/else sites (5 in `batches.py`, 2 in `workers.py`) to a single `await commit_and_publish(...)` with a ternary scope; kept the conditional `log()` calls untouched so audit-log volume stays correct.
 
 ## Validation
-- Git status was clean at the start of the round.
-- Cross-check grep found no new concrete cleanup target.
-- No build/test rerun this round because no source code changed.
+- Net diff: +9 / −26 across `pubsub.py`, `api/batches.py`, `api/workers.py`.
+- `pytest tests/` → 430 passed in 79s.
+- `ruff check` + `ruff format --check` on the three changed files → clean.
+- Grep confirms zero remaining `commit_and_publish(s)` call sites (scope-less form is no longer needed at any caller).
 
 ## Key decisions
-- Stop structural refactoring now; continuing to search for cleanup would likely create churn rather than reduce maintenance cost.
-- Treat the current module boundaries as the baseline unless a future feature, bug, or test failure exposes a concrete duplication or stale abstraction.
-- Comment-only changes should stop unless a comment is actively misleading.
+- Allow `None` in scopes instead of dropping the no-op commit. Keeps the explicit commit-on-every-path invariant intact, avoids subtle differences between code paths that mutated state and ones that only queried, and unifies the call shape.
+- Did not touch `commit_and_publish(s, "scope")` sites that already have only one branch — those are already minimal.
+- Did not introduce a docstring on the helper: the name + one-line signature is self-documenting, and the prior style avoids docstrings on small internal helpers.
 
 ## Next suggested priorities
-1. Move on to feature, bug, release, or test work; do not continue cleanup-only rounds by default.
-2. If future cleanup is requested, require a concrete trigger: duplicated logic, stale boundary, failing test, or confusing ownership.
+1. Feature, bug, release, or test work by default — no further cleanup-only rounds without a concrete trigger.
+2. If a future round wants to revisit boilerplate, look for: repeated try/except patterns around `client.report_*` in worker handlers, identical pre-flight checks across admin routes, and frontend pages that re-implement the same loading/error scaffolding.
 3. Before any release, run the normal full validation suite rather than more structural reshuffling.

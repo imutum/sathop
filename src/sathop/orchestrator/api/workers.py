@@ -154,9 +154,7 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     items = await claim_pending_granules(s, req.worker_id, limit, now, expires)
     if items:
         await log(s, req.worker_id, f"leased {len(items)} granules")
-        await commit_and_publish(s, "batches")
-    else:
-        await commit_and_publish(s)
+    await commit_and_publish(s, "batches" if items else None)
     return LeaseResponse(items=items, lease_expires_at=expires)
 
 
@@ -311,9 +309,7 @@ async def revoke_all_leases(worker_id: str, s: AsyncSession = Depends(session)) 
     revoked = await revoke_worker_leases(s, worker_id, utcnow())
     if revoked:
         await log(s, worker_id, f"force-revoked {revoked} lease(s) via UI")
-        await commit_and_publish(s, "batches", "workers")
-    else:
-        await commit_and_publish(s, "workers")
+    await commit_and_publish(s, "workers", "batches" if revoked else None)
     return {"ok": True, "revoked": revoked}
 
 

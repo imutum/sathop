@@ -226,10 +226,7 @@ async def add_granules(batch_id: str, req: GranuleBulkAdd, s: AsyncSession = Dep
             continue
         s.add(_new_granule(batch_id, g))
         added += 1
-    if added:
-        await commit_and_publish(s, "batches")
-    else:
-        await commit_and_publish(s)
+    await commit_and_publish(s, "batches" if added else None)
     return {"added": added, "skipped": skipped}
 
 
@@ -273,9 +270,7 @@ async def reset_exhausted_objects(batch_id: str, s: AsyncSession = Depends(sessi
     reset = getattr(result, "rowcount", 0) or 0
     if reset:
         await log(s, "orchestrator", f"reset {reset} exhausted-pull objects in batch {batch_id}")
-        await commit_and_publish(s, "batches")
-    else:
-        await commit_and_publish(s)
+    await commit_and_publish(s, "batches" if reset else None)
     return {"ok": True, "reset": reset}
 
 
@@ -290,10 +285,7 @@ async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dic
     rows = (await s.execute(stmt)).scalars().all()
     for granule in rows:
         retry_granule_state(granule, now)
-    if rows:
-        await commit_and_publish(s, "batches")
-    else:
-        await commit_and_publish(s)
+    await commit_and_publish(s, "batches" if rows else None)
     return {"ok": True, "reset": len(rows)}
 
 
@@ -337,9 +329,7 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
         cancel_granule_state(g, now)
     if rows:
         await log(s, "admin", f"cancelled batch {batch_id}: {len(rows)} granules blacklisted", level="warn")
-        await commit_and_publish(s, "batches")
-    else:
-        await commit_and_publish(s)
+    await commit_and_publish(s, "batches" if rows else None)
     return {"ok": True, "cancelled": len(rows)}
 
 
@@ -399,8 +389,5 @@ async def delete_batch(
         f"deleted batch {batch_id} (force={force}, {counts})",
         level="warn",
     )
-    if counts["events"]:
-        await commit_and_publish(s, "batches", "events")
-    else:
-        await commit_and_publish(s, "batches")
+    await commit_and_publish(s, "batches", "events" if counts["events"] else None)
     return {"ok": True, **counts}
