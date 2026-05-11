@@ -10,13 +10,11 @@ Per-name threading lock prevents two granules from racing on the same name.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import tempfile
-import urllib.request
 from pathlib import Path
 
-from sathop.shared.http import bearer_headers
+from sathop.shared.http import make_sync_orch_client
 from sathop.shared.locks import NamedLockRegistry
 from sathop.shared.safe_path import safe_join
 
@@ -66,12 +64,11 @@ def prune_orphans(shared_root: Path, orchestrator_url: str, token: str) -> dict:
     if not candidates:
         return {"removed": 0, "freed_bytes": 0}
 
-    base = orchestrator_url.rstrip("/")
-    req = urllib.request.Request(f"{base}/api/shared", headers=bearer_headers(token))
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"shared list failed: HTTP {resp.status}")
-        rows = json.loads(resp.read().decode("utf-8"))
+    with make_sync_orch_client(orchestrator_url, token, timeout=30) as c:
+        r = c.get("/api/shared")
+        if r.status_code != 200:
+            raise RuntimeError(f"shared list failed: HTTP {r.status_code}")
+        rows = r.json()
     valid: set[str] = {row["name"] for row in rows}
 
     sidecar_dir = shared_root / ".sha256"
@@ -97,44 +94,32 @@ def prune_orphans(shared_root: Path, orchestrator_url: str, token: str) -> dict:
 
 
 def _sync_one(name: str, shared_root: Path, orchestrator_url: str, token: str) -> None:
-    base = orchestrator_url.rstrip("/")
-    meta_req = urllib.request.Request(
-        f"{base}/api/shared/{name}",
-        headers=bearer_headers(token),
-    )
-    with urllib.request.urlopen(meta_req, timeout=30) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"shared meta {name!r} failed: HTTP {resp.status}")
-        meta = json.loads(resp.read().decode("utf-8"))
-    remote_sha = meta["sha256"]
+    with make_sync_orch_client(orchestrator_url, token, timeout=30) as c:
+        r = c.get(f"/api/shared/{name}")
+        if r.status_code != 200:
+            raise RuntimeError(f"shared meta {name!r} failed: HTTP {r.status_code}")
+        remote_sha = r.json()["sha256"]
 
-    if _local_sha(shared_root, name) == remote_sha:
-        return
+        if _local_sha(shared_root, name) == remote_sha:
+            return
 
-    dl_req = urllib.request.Request(
-        f"{base}/api/shared/{name}/download",
-        headers=bearer_headers(token),
-    )
-    tmp = tempfile.NamedTemporaryFile(dir=shared_root, prefix=f".{name}.", suffix=".part", delete=False)
-    tmp_path = Path(tmp.name)
-    h = hashlib.sha256()
-    try:
-        with urllib.request.urlopen(dl_req, timeout=600) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"shared download {name!r} failed: HTTP {resp.status}")
-            with tmp:
-                while True:
-                    chunk = resp.read(1 << 20)
-                    if not chunk:
-                        break
-                    tmp.write(chunk)
-                    h.update(chunk)
-        digest = h.hexdigest()
-        if digest != remote_sha:
-            raise RuntimeError(f"shared {name!r} sha256 mismatch: orch={remote_sha} got={digest}")
-        dest = safe_join(shared_root, name)
-        tmp_path.replace(dest)
-        _sidecar_path(shared_root, name).write_text(digest, encoding="utf-8")
-    except Exception:
-        tmp_path.unlink(missing_ok=True)
-        raise
+        tmp = tempfile.NamedTemporaryFile(dir=shared_root, prefix=f".{name}.", suffix=".part", delete=False)
+        tmp_path = Path(tmp.name)
+        h = hashlib.sha256()
+        try:
+            with c.stream("GET", f"/api/shared/{name}/download", timeout=600) as dl:
+                if dl.status_code != 200:
+                    raise RuntimeError(f"shared download {name!r} failed: HTTP {dl.status_code}")
+                with tmp:
+                    for chunk in dl.iter_bytes(1 << 20):
+                        tmp.write(chunk)
+                        h.update(chunk)
+            digest = h.hexdigest()
+            if digest != remote_sha:
+                raise RuntimeError(f"shared {name!r} sha256 mismatch: orch={remote_sha} got={digest}")
+            dest = safe_join(shared_root, name)
+            tmp_path.replace(dest)
+            _sidecar_path(shared_root, name).write_text(digest, encoding="utf-8")
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise

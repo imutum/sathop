@@ -4,11 +4,11 @@ verification, sidecar caching, per-name locking."""
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import threading
 import time
 
+import httpx
 import pytest
 
 from sathop.worker import shared as worker_shared
@@ -18,34 +18,46 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-class _Resp:
-    def __init__(self, data: bytes, status: int = 200) -> None:
-        self._buf = io.BytesIO(data)
-        self.status = status
-
-    def read(self, n: int = -1) -> bytes:
-        return self._buf.read(n)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
+def _meta_body(name: str, data: bytes) -> dict:
+    return {"name": name, "sha256": _sha(data), "size": len(data)}
 
 
-def _meta(name: str, data: bytes) -> bytes:
-    return json.dumps({"name": name, "sha256": _sha(data), "size": len(data)}).encode()
+def _route(urls: dict[str, tuple[int, bytes] | bytes | dict]):
+    """MockTransport handler keyed on the trailing path; values may be raw
+    bytes (200), JSON-able dicts (200), or (status, bytes) tuples."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        key = req.url.path
+        v = urls[key]
+        if isinstance(v, tuple):
+            status, body = v
+            return httpx.Response(status, content=body)
+        if isinstance(v, dict):
+            return httpx.Response(200, json=v)
+        return httpx.Response(200, content=v)
+
+    return handler
 
 
-def _route(urls: dict[str, bytes | tuple[bytes, int]]):
-    """urlopen stub dispatching on req.full_url."""
+def _patch_client(monkeypatch, handler, capture: list | None = None):
+    """Replace `make_sync_orch_client` so all `_sync_one` / `prune_orphans`
+    HTTP calls hit our MockTransport. When `capture` is given, every request
+    is appended as (path, Authorization-header) for assertion."""
 
-    def fake(req, timeout=30):
-        v = urls[req.full_url]
-        data, status = v if isinstance(v, tuple) else (v, 200)
-        return _Resp(data, status)
+    def fake(orch_url: str, token: str, timeout: float = 30.0) -> httpx.Client:
+        def wrapped(req: httpx.Request) -> httpx.Response:
+            if capture is not None:
+                capture.append((req.url.path, req.headers.get("Authorization")))
+            return handler(req)
 
-    return fake
+        return httpx.Client(
+            base_url=orch_url,
+            timeout=timeout,
+            headers={"Authorization": f"Bearer {token}"},
+            transport=httpx.MockTransport(wrapped),
+        )
+
+    monkeypatch.setattr(worker_shared, "make_sync_orch_client", fake)
 
 
 # ─── happy path ────────────────────────────────────────────────────────────
@@ -53,13 +65,12 @@ def _route(urls: dict[str, bytes | tuple[bytes, int]]):
 
 def test_sync_downloads_when_missing(tmp_path, monkeypatch):
     data = b"mask-bytes-v1"
-    monkeypatch.setattr(
-        worker_shared.urllib.request,
-        "urlopen",
+    _patch_client(
+        monkeypatch,
         _route(
             {
-                "http://orch/api/shared/mask.tif": _meta("mask.tif", data),
-                "http://orch/api/shared/mask.tif/download": data,
+                "/api/shared/mask.tif": _meta_body("mask.tif", data),
+                "/api/shared/mask.tif/download": data,
             }
         ),
     )
@@ -79,16 +90,15 @@ def test_sync_skips_download_when_sha_matches(tmp_path, monkeypatch):
     sidecar_dir.mkdir()
     (sidecar_dir / "mask.tif").write_text(sha)
 
-    calls: list[str] = []
-
-    def fake(req, timeout=30):
-        calls.append(req.full_url)
-        return _Resp(_meta("mask.tif", data))
-
-    monkeypatch.setattr(worker_shared.urllib.request, "urlopen", fake)
+    calls: list[tuple[str, str | None]] = []
+    _patch_client(
+        monkeypatch,
+        _route({"/api/shared/mask.tif": _meta_body("mask.tif", data)}),
+        capture=calls,
+    )
     worker_shared.sync(["mask.tif"], tmp_path, "http://orch", "tok")
 
-    assert calls == ["http://orch/api/shared/mask.tif"]
+    assert [path for path, _ in calls] == ["/api/shared/mask.tif"]
 
 
 def test_sync_redownloads_when_sha_drifts(tmp_path, monkeypatch):
@@ -99,13 +109,12 @@ def test_sync_redownloads_when_sha_drifts(tmp_path, monkeypatch):
     (tmp_path / ".sha256").mkdir()
     (tmp_path / ".sha256" / "mask.tif").write_text(_sha(v1))
 
-    monkeypatch.setattr(
-        worker_shared.urllib.request,
-        "urlopen",
+    _patch_client(
+        monkeypatch,
         _route(
             {
-                "http://orch/api/shared/mask.tif": _meta("mask.tif", v2),
-                "http://orch/api/shared/mask.tif/download": v2,
+                "/api/shared/mask.tif": _meta_body("mask.tif", v2),
+                "/api/shared/mask.tif/download": v2,
             }
         ),
     )
@@ -120,13 +129,12 @@ def test_sync_without_sidecar_triggers_refetch(tmp_path, monkeypatch):
     data = b"payload"
     (tmp_path / "mask.tif").write_bytes(data)  # no sidecar
 
-    monkeypatch.setattr(
-        worker_shared.urllib.request,
-        "urlopen",
+    _patch_client(
+        monkeypatch,
         _route(
             {
-                "http://orch/api/shared/mask.tif": _meta("mask.tif", data),
-                "http://orch/api/shared/mask.tif/download": data,
+                "/api/shared/mask.tif": _meta_body("mask.tif", data),
+                "/api/shared/mask.tif/download": data,
             }
         ),
     )
@@ -140,16 +148,13 @@ def test_sync_without_sidecar_triggers_refetch(tmp_path, monkeypatch):
 
 def test_sync_raises_on_sha_mismatch_and_leaves_no_partial(tmp_path, monkeypatch):
     data = b"real-bytes"
-    bogus_meta = json.dumps(
-        {"name": "mask.tif", "sha256": _sha(b"something-else"), "size": len(data)}
-    ).encode()
-    monkeypatch.setattr(
-        worker_shared.urllib.request,
-        "urlopen",
+    bogus = {"name": "mask.tif", "sha256": _sha(b"something-else"), "size": len(data)}
+    _patch_client(
+        monkeypatch,
         _route(
             {
-                "http://orch/api/shared/mask.tif": bogus_meta,
-                "http://orch/api/shared/mask.tif/download": data,
+                "/api/shared/mask.tif": bogus,
+                "/api/shared/mask.tif/download": data,
             }
         ),
     )
@@ -161,11 +166,7 @@ def test_sync_raises_on_sha_mismatch_and_leaves_no_partial(tmp_path, monkeypatch
 
 
 def test_sync_raises_on_meta_404(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        worker_shared.urllib.request,
-        "urlopen",
-        _route({"http://orch/api/shared/gone.tif": (b"", 404)}),
-    )
+    _patch_client(monkeypatch, _route({"/api/shared/gone.tif": (404, b"")}))
     with pytest.raises(RuntimeError, match="HTTP 404"):
         worker_shared.sync(["gone.tif"], tmp_path, "http://orch", "tok")
 
@@ -174,11 +175,11 @@ def test_sync_empty_list_noop(tmp_path, monkeypatch):
     """No names → no HTTP calls, no dirs created."""
     called = [False]
 
-    def fake(req, timeout=30):
+    def handler(req: httpx.Request) -> httpx.Response:
         called[0] = True
-        return _Resp(b"{}")
+        return httpx.Response(200, json={})
 
-    monkeypatch.setattr(worker_shared.urllib.request, "urlopen", fake)
+    _patch_client(monkeypatch, handler)
     worker_shared.sync([], tmp_path / "nope", "http://orch", "tok")
     assert called[0] is False
     assert not (tmp_path / "nope").exists()
@@ -187,14 +188,16 @@ def test_sync_empty_list_noop(tmp_path, monkeypatch):
 def test_sync_sends_bearer_token(tmp_path, monkeypatch):
     data = b"x"
     seen: list[tuple[str, str | None]] = []
-
-    def fake(req, timeout=30):
-        seen.append((req.full_url, req.headers.get("Authorization")))
-        if req.full_url.endswith("/download"):
-            return _Resp(data)
-        return _Resp(_meta("a", data))
-
-    monkeypatch.setattr(worker_shared.urllib.request, "urlopen", fake)
+    _patch_client(
+        monkeypatch,
+        _route(
+            {
+                "/api/shared/a": _meta_body("a", data),
+                "/api/shared/a/download": data,
+            }
+        ),
+        capture=seen,
+    )
     worker_shared.sync(["a"], tmp_path, "http://orch", "secret-tok")
 
     assert all(auth == "Bearer secret-tok" for _, auth in seen)
@@ -217,26 +220,25 @@ def test_concurrent_sync_of_same_name_serialized(tmp_path, monkeypatch):
     peak = [0]
     barrier = threading.Event()
 
-    def fake(req, timeout=30):
+    def handler(req: httpx.Request) -> httpx.Response:
         in_flight[0] += 1
         peak[0] = max(peak[0], in_flight[0])
-        # First entrant sleeps so the second overlaps if locking is broken.
         if not barrier.is_set():
             barrier.set()
             time.sleep(0.05)
         try:
-            if req.full_url.endswith("/download"):
-                return _Resp(data)
-            return _Resp(_meta("a.bin", data))
+            if req.url.path.endswith("/download"):
+                return httpx.Response(200, content=data)
+            return httpx.Response(200, json=_meta_body("a.bin", data))
         finally:
             in_flight[0] -= 1
 
-    monkeypatch.setattr(worker_shared.urllib.request, "urlopen", fake)
+    _patch_client(monkeypatch, handler)
 
-    def worker():
+    def runner():
         worker_shared.sync(["a.bin"], tmp_path, "http://orch", "tok")
 
-    threads = [threading.Thread(target=worker) for _ in range(2)]
+    threads = [threading.Thread(target=runner) for _ in range(2)]
     for t in threads:
         t.start()
     for t in threads:
@@ -254,32 +256,32 @@ def test_concurrent_sync_of_different_names_proceed_in_parallel(tmp_path, monkey
     in_flight = [0]
     peak = [0]
 
-    def fake(req, timeout=30):
+    def handler(req: httpx.Request) -> httpx.Response:
         in_flight[0] += 1
         peak[0] = max(peak[0], in_flight[0])
         time.sleep(0.03)
         try:
-            url = req.full_url
-            if url.endswith("/a.bin"):
-                return _Resp(_meta("a.bin", data_a))
-            if url.endswith("/b.bin"):
-                return _Resp(_meta("b.bin", data_b))
-            if url.endswith("/a.bin/download"):
-                return _Resp(data_a)
-            if url.endswith("/b.bin/download"):
-                return _Resp(data_b)
-            raise AssertionError(url)
+            path = req.url.path
+            if path == "/api/shared/a.bin":
+                return httpx.Response(200, json=_meta_body("a.bin", data_a))
+            if path == "/api/shared/b.bin":
+                return httpx.Response(200, json=_meta_body("b.bin", data_b))
+            if path == "/api/shared/a.bin/download":
+                return httpx.Response(200, content=data_a)
+            if path == "/api/shared/b.bin/download":
+                return httpx.Response(200, content=data_b)
+            raise AssertionError(path)
         finally:
             in_flight[0] -= 1
 
-    monkeypatch.setattr(worker_shared.urllib.request, "urlopen", fake)
+    _patch_client(monkeypatch, handler)
 
-    def worker(name):
+    def runner(name):
         worker_shared.sync([name], tmp_path, "http://orch", "tok")
 
     threads = [
-        threading.Thread(target=worker, args=("a.bin",)),
-        threading.Thread(target=worker, args=("b.bin",)),
+        threading.Thread(target=runner, args=("a.bin",)),
+        threading.Thread(target=runner, args=("b.bin",)),
     ]
     for t in threads:
         t.start()

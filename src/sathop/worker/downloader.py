@@ -14,6 +14,7 @@ with `(downloaded_so_far, total_or_None)`; throttling is the caller's job.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Protocol
@@ -24,6 +25,8 @@ import httpx
 from sathop.shared.hashing import sha256_file
 from sathop.shared.protocol import Credential
 
+log = logging.getLogger("sathop.worker.downloader")
+
 _CHUNK = 256 * 1024
 
 ProgressCb = Callable[[int, int | None], Awaitable[None]]
@@ -31,6 +34,18 @@ ProgressCb = Callable[[int, int | None], Awaitable[None]]
 
 class ChecksumMismatch(RuntimeError):
     """A downloaded input's sha256 didn't match `InputSpec.checksum`."""
+
+
+def _warn_incomplete_credential(auth: Credential) -> None:
+    """Operators sometimes mis-key a Credential (scheme=basic but no
+    password, scheme=bearer but no token). Without this warning the
+    download proceeds unauthenticated and the server's 401/403 is hard
+    to trace back to the bad credential entry."""
+    log.warning(
+        "credential %r has scheme=%s but required field(s) missing — request will be unauthenticated",
+        auth.name,
+        auth.scheme,
+    )
 
 
 async def verify_sha256(path: Path, expected: str) -> None:
@@ -76,6 +91,7 @@ def _httpx_auth_and_headers(
         return httpx.BasicAuth(auth.username, auth.password), {}
     if auth.scheme == "bearer" and auth.token:
         return None, {"Authorization": f"Bearer {auth.token}"}
+    _warn_incomplete_credential(auth)
     return None, {}
 
 
@@ -172,6 +188,8 @@ class Aria2Downloader:
                 options["http-passwd"] = auth.password
             elif auth.scheme == "bearer" and auth.token:
                 options["header"] = [f"Authorization: Bearer {auth.token}"]
+            else:
+                _warn_incomplete_credential(auth)
 
         dl = await asyncio.to_thread(self._api.add_uris, [url], options=options)
         try:

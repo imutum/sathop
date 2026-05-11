@@ -9,6 +9,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+import httpx
 import pytest
 
 from sathop.shared.protocol import parse_bundle_ref
@@ -78,33 +79,30 @@ def test_lock_for_returns_same_lock_per_ref():
     assert l1 is not l3
 
 
-# ─── orchestrator fetch (urllib mocked) ──────────────────────────────────
+# ─── orchestrator fetch (httpx MockTransport) ──────────────────────────────
 
 
-class _FakeResp:
-    def __init__(self, data: bytes, status: int = 200) -> None:
-        self._data = data
-        self.status = status
+def _patch_fetch_client(monkeypatch, body: bytes, status: int = 200, capture: dict | None = None):
+    def fake(orch_url: str, token: str, timeout: float = 120.0) -> httpx.Client:
+        def handler(req: httpx.Request) -> httpx.Response:
+            if capture is not None:
+                capture["url"] = str(req.url)
+                capture["auth"] = req.headers.get("Authorization")
+            return httpx.Response(status, content=body)
 
-    def read(self) -> bytes:
-        return self._data
+        return httpx.Client(
+            base_url=orch_url,
+            timeout=timeout,
+            headers={"Authorization": f"Bearer {token}"},
+            transport=httpx.MockTransport(handler),
+        )
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
+    monkeypatch.setattr(bundle, "make_sync_orch_client", fake)
 
 
 def test_fetch_from_orch_happy_path(tmp_path, monkeypatch):
-    captured = {}
-
-    def fake_urlopen(req, timeout=120):
-        captured["url"] = req.full_url
-        captured["auth"] = req.headers.get("Authorization")
-        return _FakeResp(_make_zip(), 200)
-
-    monkeypatch.setattr(bundle.urllib.request, "urlopen", fake_urlopen)
+    captured: dict = {}
+    _patch_fetch_client(monkeypatch, _make_zip(), capture=captured)
 
     dest = tmp_path / "bundle"
     bundle._fetch_from_orch("http://orch:8000", "tok", "z", "0.1", dest)
@@ -118,12 +116,8 @@ def test_fetch_from_orch_flattens_github_style_wrapper(tmp_path, monkeypatch):
     """Zips built from a parent dir (github zip-download style) have one wrapper
     dir at top. Fetcher must strip it so manifest.yaml ends up at `dest/`."""
     payload = _make_zip(manifest_at="wrap/manifest.yaml", extras={"wrap/process.py": "print('x')\n"})
+    _patch_fetch_client(monkeypatch, payload)
 
-    monkeypatch.setattr(
-        bundle.urllib.request,
-        "urlopen",
-        lambda req, timeout=120: _FakeResp(payload, 200),
-    )
     dest = tmp_path / "b"
     bundle._fetch_from_orch("http://orch:8000", "tok", "z", "0.1", dest)
 
@@ -132,11 +126,7 @@ def test_fetch_from_orch_flattens_github_style_wrapper(tmp_path, monkeypatch):
 
 
 def test_fetch_from_orch_http_error_raises_and_cleans(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        bundle.urllib.request,
-        "urlopen",
-        lambda req, timeout=120: _FakeResp(b"", 404),
-    )
+    _patch_fetch_client(monkeypatch, b"", status=404)
     dest = tmp_path / "bundle"
     with pytest.raises(RuntimeError, match="HTTP 404"):
         bundle._fetch_from_orch("http://orch:8000", "tok", "z", "0.1", dest)
@@ -146,12 +136,8 @@ def test_fetch_from_orch_missing_manifest_in_zip_raises(tmp_path, monkeypatch):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("randomfile.txt", "no manifest here\n")
+    _patch_fetch_client(monkeypatch, buf.getvalue())
 
-    monkeypatch.setattr(
-        bundle.urllib.request,
-        "urlopen",
-        lambda req, timeout=120: _FakeResp(buf.getvalue(), 200),
-    )
     dest = tmp_path / "bundle"
     with pytest.raises(FileNotFoundError):
         bundle._fetch_from_orch("http://orch:8000", "tok", "z", "0.1", dest)
@@ -160,12 +146,8 @@ def test_fetch_from_orch_missing_manifest_in_zip_raises(tmp_path, monkeypatch):
 
 def test_fetch_from_orch_rejects_archive_path_traversal(tmp_path, monkeypatch):
     payload = _make_zip(extras={"../evil.txt": "x"})
+    _patch_fetch_client(monkeypatch, payload)
 
-    monkeypatch.setattr(
-        bundle.urllib.request,
-        "urlopen",
-        lambda req, timeout=120: _FakeResp(payload, 200),
-    )
     dest = tmp_path / "bundle"
     with pytest.raises(ValueError, match="escapes target directory"):
         bundle._fetch_from_orch("http://orch:8000", "tok", "z", "0.1", dest)

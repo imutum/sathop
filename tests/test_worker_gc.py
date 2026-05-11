@@ -5,12 +5,10 @@ sidecar cleanup, and orphan removal against a mocked orchestrator listing."""
 
 from __future__ import annotations
 
-import json
 import os
 import threading
 import time
 from pathlib import Path
-from unittest.mock import patch
 
 from sathop.worker import bundle
 from sathop.worker import shared as worker_shared
@@ -168,24 +166,29 @@ def test_touch_last_used_refreshes_mtime(tmp_path: Path) -> None:
 # ─── shared.prune_orphans ─────────────────────────────────────────────────
 
 
-class _FakeResp:
-    """Minimal context-managed urlopen-stand-in returning canned JSON."""
+def _patch_shared_client(monkeypatch, registry: list[dict], call_counter: list | None = None) -> None:
+    """Stub `make_sync_orch_client` so prune_orphans hits an in-memory orch
+    serving the given registry list. Optional `call_counter` records every
+    request that reaches the transport."""
+    import httpx
 
-    def __init__(self, payload: list[dict]) -> None:
-        self._payload = json.dumps(payload).encode("utf-8")
-        self.status = 200
+    def fake(orch_url: str, token: str, timeout: float = 30.0) -> httpx.Client:
+        def handler(req: httpx.Request) -> httpx.Response:
+            if call_counter is not None:
+                call_counter.append(req.url.path)
+            return httpx.Response(200, json=registry)
 
-    def __enter__(self):
-        return self
+        return httpx.Client(
+            base_url=orch_url,
+            timeout=timeout,
+            headers={"Authorization": f"Bearer {token}"},
+            transport=httpx.MockTransport(handler),
+        )
 
-    def __exit__(self, *exc):
-        return False
-
-    def read(self) -> bytes:
-        return self._payload
+    monkeypatch.setattr(worker_shared, "make_sync_orch_client", fake)
 
 
-def test_prune_orphans_removes_files_not_in_orch_list(tmp_path: Path) -> None:
+def test_prune_orphans_removes_files_not_in_orch_list(tmp_path: Path, monkeypatch) -> None:
     shared_root = tmp_path / "shared"
     shared_root.mkdir()
     (shared_root / ".sha256").mkdir()
@@ -194,9 +197,8 @@ def test_prune_orphans_removes_files_not_in_orch_list(tmp_path: Path) -> None:
         (shared_root / name).write_bytes(b"x" * 100)
         (shared_root / ".sha256" / name).write_text("0" * 64, encoding="utf-8")
 
-    fake = _FakeResp([{"name": "keep.tif"}])
-    with patch("urllib.request.urlopen", return_value=fake):
-        r = worker_shared.prune_orphans(shared_root, "http://orch", "tok")
+    _patch_shared_client(monkeypatch, [{"name": "keep.tif"}])
+    r = worker_shared.prune_orphans(shared_root, "http://orch", "tok")
 
     assert r["removed"] == 2
     assert r["freed_bytes"] == 200
@@ -208,7 +210,7 @@ def test_prune_orphans_removes_files_not_in_orch_list(tmp_path: Path) -> None:
     assert not (shared_root / ".sha256" / "orphan_a.tif").exists()
 
 
-def test_prune_orphans_ignores_dotfiles_and_dirs(tmp_path: Path) -> None:
+def test_prune_orphans_ignores_dotfiles_and_dirs(tmp_path: Path, monkeypatch) -> None:
     shared_root = tmp_path / "shared"
     shared_root.mkdir()
     (shared_root / ".sha256").mkdir()
@@ -216,9 +218,8 @@ def test_prune_orphans_ignores_dotfiles_and_dirs(tmp_path: Path) -> None:
     (shared_root / "subdir").mkdir()  # someone left a dir; never our concern
     (shared_root / "real.tif").write_bytes(b"x" * 50)
 
-    fake = _FakeResp([])  # orch returns nothing
-    with patch("urllib.request.urlopen", return_value=fake):
-        r = worker_shared.prune_orphans(shared_root, "http://orch", "tok")
+    _patch_shared_client(monkeypatch, [])  # orch returns nothing
+    r = worker_shared.prune_orphans(shared_root, "http://orch", "tok")
 
     # Only real.tif should be removed; dotfile + subdir untouched.
     assert r["removed"] == 1
@@ -234,11 +235,12 @@ def test_prune_orphans_noop_when_root_missing(tmp_path: Path) -> None:
     assert r == {"removed": 0, "freed_bytes": 0}
 
 
-def test_prune_orphans_noop_when_cache_has_no_data_files(tmp_path: Path) -> None:
+def test_prune_orphans_noop_when_cache_has_no_data_files(tmp_path: Path, monkeypatch) -> None:
     shared_root = tmp_path / "shared"
     shared_root.mkdir()
     (shared_root / ".sha256").mkdir()
-    with patch("urllib.request.urlopen") as urlopen:
-        r = worker_shared.prune_orphans(shared_root, "http://orch", "tok")
+    calls: list[str] = []
+    _patch_shared_client(monkeypatch, [], call_counter=calls)
+    r = worker_shared.prune_orphans(shared_root, "http://orch", "tok")
     assert r == {"removed": 0, "freed_bytes": 0}
-    urlopen.assert_not_called()
+    assert calls == []

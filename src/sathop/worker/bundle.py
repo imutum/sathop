@@ -16,7 +16,6 @@ import shutil
 import subprocess
 import sys
 import threading
-import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,7 +24,7 @@ from typing import Literal
 import yaml
 
 from sathop.shared.bundle_archive import detect_wrapper_dir
-from sathop.shared.http import bearer_headers
+from sathop.shared.http import make_sync_orch_client
 from sathop.shared.locks import NamedLockRegistry
 from sathop.shared.protocol import BUNDLE_REF_PREFIX, parse_bundle_ref
 
@@ -172,12 +171,11 @@ def prune_caches(venv_root: Path, cache_root: Path, limit_bytes: int) -> dict:
 
 
 def _fetch_from_orch(orchestrator_url: str, token: str, name: str, version: str, dest: Path) -> None:
-    url = f"{orchestrator_url.rstrip('/')}/api/bundles/{name}/{version}/download"
-    req = urllib.request.Request(url, headers=bearer_headers(token))
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"bundle {name}@{version} fetch failed: HTTP {resp.status}")
-        payload = resp.read()
+    with make_sync_orch_client(orchestrator_url, token, timeout=120) as c:
+        r = c.get(f"/api/bundles/{name}/{version}/download")
+        if r.status_code != 200:
+            raise RuntimeError(f"bundle {name}@{version} fetch failed: HTTP {r.status_code}")
+        payload = r.content
 
     dest.mkdir(parents=True, exist_ok=True)
     try:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import timedelta
 
 from sqlalchemy import distinct, func, select, update
@@ -12,6 +13,8 @@ from sathop.shared.protocol import LEASED_STATES, Credential, GranuleState, Leas
 
 from ..config import settings
 from ..db import Batch, Granule, GranuleObject, Worker
+
+log = logging.getLogger("sathop.orchestrator.worker_leases")
 
 LEASE_DURATION = timedelta(minutes=30)
 
@@ -41,32 +44,48 @@ async def lease_limit(s: AsyncSession, worker: Worker, req: LeaseRequest) -> int
     return limit
 
 
-def json_dict_or_empty(raw: str | None) -> dict:
+def json_dict_or_empty(raw: str | None, *, field: str, context: str) -> dict:
+    """Parse a DB-stored JSON dict, falling back to {} on any shape error.
+    `field`/`context` go into the warning so operators can trace a silently
+    empty payload back to its row."""
     if not raw:
         return {}
     try:
         value = json.loads(raw)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        log.warning("%s: corrupted %s JSON (%s) — treating as empty", context, field, e)
         return {}
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        log.warning("%s: %s JSON is not an object — treating as empty", context, field)
+        return {}
+    return value
 
 
-def credential_map(raw: str | None) -> dict[str, Credential]:
+def credential_map(raw: str | None, *, context: str) -> dict[str, Credential]:
+    """Build {name: Credential} from a DB-stored JSON object. Validation
+    failure is logged with `context` and yields {}; the worker downloads
+    will surface as 401/403 with no auth (downloader emits its own warning
+    on partial credentials)."""
+    source = json_dict_or_empty(raw, field="credentials", context=context)
     try:
-        return {k: Credential.model_validate(v) for k, v in json_dict_or_empty(raw).items()}
-    except ValueError:
+        return {k: Credential.model_validate(v) for k, v in source.items()}
+    except ValueError as e:
+        log.warning("%s: credential validation failed (%s) — using empty map", context, e)
         return {}
 
 
 def lease_item(granule: Granule, batch: Batch | None) -> LeaseItem:
+    ctx = f"granule {granule.granule_id}"
     return LeaseItem(
         granule_id=granule.granule_id,
         batch_id=granule.batch_id,
         bundle_ref=batch.bundle_ref if batch else "",
         inputs=json.loads(granule.inputs_json),
         meta=json.loads(granule.meta_json or "{}"),
-        execution_env=json_dict_or_empty(batch.execution_env_json if batch else None),
-        credentials=credential_map(batch.credentials_json if batch else None),
+        execution_env=json_dict_or_empty(
+            batch.execution_env_json if batch else None, field="execution_env", context=ctx
+        ),
+        credentials=credential_map(batch.credentials_json if batch else None, context=ctx),
     )
 
 

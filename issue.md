@@ -7,12 +7,16 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：39（累计修复 15 项 — 6 high + 3 medium + 5 low + 1 cross）
+- 总问题数：36（累计修复 18 项 — 6 high + 5 medium + 5 low + 2 cross）
 - 高优先级问题数：4（H-001/H-002/H-003/H-004/H-009/H-010 已修）
-- 中优先级问题数：21（M-007/M-008/M-018 已修）
+- 中优先级问题数：19（M-001/M-007/M-008/M-018/M-022 已修）
 - 低优先级问题数：11（L-001/L-002/L-003/L-011/L-016 已修）
-- 交叉问题数：3（C-004 已修）
+- 交叉问题数：2（C-001/C-004 已修）
 - 已修复（按轮次倒序）：
+  - 第 4 轮：
+    - **C-001** urllib → httpx 统一：`shared.http.make_sync_orch_client` 替代 `urllib.request`，`worker/bundle.py::_fetch_from_orch` + `worker/shared.py::_sync_one/prune_orphans` 全部迁移。错误处理/超时/auth 与 async 路径一致。测试切到 `httpx.MockTransport`
+    - **M-022** downloader 凭证 scheme 匹配但字段缺失时 `log.warning`（httpx + aria2 两份 auth translator 都加），不再静默无认证下载
+    - **M-001** `worker_leases.json_dict_or_empty` / `credential_map` 改为带 context 的 `log.warning`，从静默 `{}` 升级为可追溯的告警（含 granule_id），不影响 lease 流程
   - 第 3 轮：
     - **H-004** add_granules 加 schema 验证；抽出 `_validate_granules_for_bundle` helper，create / add_granules 共用，duplicate / 错误以 422 拒绝
     - **H-009 / H-010 / C-004** 路径穿越统一防护：新建 `sathop.shared.safe_path`（`is_safe_name` 输入边界 + `safe_join` I/O 边界），Pydantic 校验 `InputSpec.filename`，`parse_shared_files` 拒绝含分隔符 / `..` 的名称；worker `runtime.py` 输入下载、`shared.py` 共享写入、`storage.py` LocalStorage put/delete 全用 `safe_join`；附 21 个回归测试
@@ -96,30 +100,6 @@
 ---
 
 ## Medium Priority
-
-### M-001: json_dict_or_empty 和 credential_map 静默吞掉数据损坏
-
-- 类型：错误处理
-- 位置：`src/sathop/orchestrator/api/worker_leases.py:44-58`
-- 证据：
-  ```python
-  def json_dict_or_empty(raw):
-      try:
-          value = json.loads(raw)
-      except json.JSONDecodeError:
-          return {}
-      return value if isinstance(value, dict) else {}
-  
-  def credential_map(raw):
-      try:
-          return {k: Credential.model_validate(v) for k, v in json_dict_or_empty(raw).items()}
-      except ValueError:
-          return {}
-  ```
-- 问题描述：两层静默失败 — JSON 损坏返回 `{}`，credential 验证失败也返回 `{}`。如果 DB 中 `credentials_json` 损坏，worker 将拿到空凭证，下载失败的原因难以排查。
-- 长期影响：数据损坏无法被及时发现，问题定位困难。
-- 可能方向：至少加 log.warning；考虑在 lease 时对损坏数据让该 granule 进入 failed 状态而非继续尝试。
-- 置信度：高
 
 ### M-002: log_event 在 commit 前 publish — SSE 客户端可能看到不存在的 event
 
@@ -316,23 +296,6 @@
 - 可能方向：为每个组件添加 `isError` 检查并渲染 `<Alert variant="destructive">`。
 - 置信度：高
 
-### M-022: _httpx_auth_and_headers 对不完整凭证静默返回无认证
-
-- 类型：错误处理 / correctness
-- 位置：`src/sathop/worker/downloader.py:78-87`
-- 证据：
-  ```python
-  if auth.scheme == "basic" and auth.username and auth.password:
-      return httpx.BasicAuth(auth.username, auth.password), {}
-  if auth.scheme == "bearer" and auth.token:
-      return None, {"Authorization": f"Bearer {auth.token}"}
-  return None, {}    # ← 静默丢弃：scheme 匹配但字段缺失
-  ```
-- 问题描述：如果 Credential 配置不一致（如 scheme=basic 但 password=None，或 scheme=bearer 但 token=None），函数返回 `(None, {})`。下载以无认证方式继续 → 服务器返回 401/403 → 错误信息不提示"凭证未应用"。
-- 长期影响：凭证配置错误极难排查；操作员可能花费大量时间怀疑服务器端问题。
-- 可能方向：对 scheme 匹配但字段缺失的情况至少 log.warning；或在工作流程早期（batch 创建时 / lease 构建时）验证凭证完整性。
-- 置信度：高
-
 ### M-023: Worker proc.communicate() 无限制读取子进程 stdout/stderr
 
 - 类型：资源管理 / reliability
@@ -515,20 +478,6 @@
 ---
 
 ## Cross-Cutting Problems
-
-### C-001: 混合使用三种 HTTP 客户端库
-
-- 涉及范围：全项目
-- 共同模式：httpx（async，worker/receiver API 调用）、urllib.request（sync，worker bundle/shared 文件下载）、fetch（browser，前端）
-- 代表性位置：`worker/agent.py`（httpx）、`worker/bundle.py`（urllib）、`worker/shared.py`（urllib）、`frontend/src/apiClient.ts`（fetch）
-- 问题描述：
-  1. urllib 使用是同步阻塞的，靠 `asyncio.to_thread` 包裹 — 无法取消
-  2. urllib 不支持 HTTP/2、连接池、流式进度回调（需自己实现）
-  3. 项目已依赖 httpx，不需要额外依赖
-  4. urllib 的异常类型与 httpx 不同，错误处理路径需要适配
-- 长期影响：维护三套 HTTP 错误处理心智模型；文件下载无法利用 async 生态的取消/超时优势。
-- 可能方向：统一到 httpx（async 路径）用于所有 HTTP 操作；`ensure()` 改为 async。
-- 置信度：高
 
 ### C-002: "临时文件 + SHA256 验证 + 原子重命名" 模式在多处独立实现
 
