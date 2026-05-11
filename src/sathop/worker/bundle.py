@@ -24,7 +24,10 @@ from typing import Literal
 
 import yaml
 
+from sathop.shared.bundle_archive import detect_wrapper_dir
 from sathop.shared.http import bearer_headers
+from sathop.shared.locks import NamedLockRegistry
+from sathop.shared.protocol import BUNDLE_REF_PREFIX, parse_bundle_ref
 
 from . import shared as shared_sync
 from ._paths import dir_size_bytes
@@ -33,17 +36,7 @@ log = logging.getLogger("sathop.worker.bundle")
 
 _LAST_USED_DIR = ".last_used"
 
-_ref_locks: dict[str, threading.Lock] = {}
-_ref_locks_guard = threading.Lock()
-
-
-def _lock_for(ref: str) -> threading.Lock:
-    with _ref_locks_guard:
-        lock = _ref_locks.get(ref)
-        if lock is None:
-            lock = threading.Lock()
-            _ref_locks[ref] = lock
-        return lock
+_ref_locks = NamedLockRegistry()
 
 
 @dataclass(frozen=True)
@@ -93,18 +86,6 @@ class PythonDepsSource:
         return list(self.values)
 
 
-def _parse_ref(ref: str) -> tuple[str, str]:
-    if not ref.startswith("orch:"):
-        raise ValueError(f"bundle ref must be 'orch:<name>@<version>', got {ref!r}")
-    body = ref[len("orch:") :]
-    if "@" not in body:
-        raise ValueError(f"bundle ref missing '@<version>': {ref!r}")
-    name, version = body.rsplit("@", 1)
-    if not name or not version:
-        raise ValueError(f"bundle ref name/version both required: {ref!r}")
-    return name, version
-
-
 def ensure(
     ref: str,
     cache_root: Path,
@@ -113,8 +94,8 @@ def ensure(
     orchestrator_url: str,
     token: str,
 ) -> BundleHandle:
-    name, version = _parse_ref(ref)
-    with _lock_for(ref):
+    name, version = parse_bundle_ref(ref)
+    with _ref_locks.get(ref):
         bundle_dir = cache_root / f"{name}@{version}"
         if not bundle_dir.exists():
             _fetch_from_orch(orchestrator_url, token, name, version, bundle_dir)
@@ -173,7 +154,7 @@ def prune_caches(venv_root: Path, cache_root: Path, limit_bytes: int) -> dict:
     for _mtime, ref_dirname, venv_dir, bundle_dir, size in items:
         if total - freed <= limit_bytes:
             break
-        lock = _lock_for(f"orch:{ref_dirname}")
+        lock = _ref_locks.get(f"{BUNDLE_REF_PREFIX}{ref_dirname}")
         if not lock.acquire(blocking=False):
             log.debug("skipping %s — in use by ensure()", ref_dirname)
             continue
@@ -220,15 +201,15 @@ def _extract_bundle_zip(zf: zipfile.ZipFile, dest: Path) -> None:
 
 
 def _flatten_wrapper_dir(dest: Path) -> None:
-    """If the extracted archive has a single top-level directory wrapping
-    everything, promote its contents so manifest.yaml sits directly in `dest`.
-    Accommodates zips built from a parent directory (e.g. github-style)."""
+    """Promote a single wrapping directory's contents to `dest` so
+    manifest.yaml sits at the top — accommodates github-style archives."""
     if (dest / "manifest.yaml").is_file():
         return
-    entries = [p for p in dest.iterdir() if not p.name.startswith(".")]
-    if len(entries) != 1 or not entries[0].is_dir():
+    rel_paths = [str(p.relative_to(dest)).replace("\\", "/") for p in dest.rglob("*") if p.is_file()]
+    wrapper_name = detect_wrapper_dir(rel_paths)
+    if wrapper_name is None:
         return
-    wrapper = entries[0]
+    wrapper = dest / wrapper_name
     for child in wrapper.iterdir():
         target = dest / child.name
         if target.exists():

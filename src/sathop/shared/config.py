@@ -38,7 +38,16 @@ def resolve_orch() -> tuple[str, str]:
     url = os.getenv("SATHOP_URL", "").strip()
     if url:
         return parse_sathop_url(url)
-    return os.environ["SATHOP_ORCH_URL"].rstrip("/"), os.environ["SATHOP_TOKEN"]
+    orch_url = os.getenv("SATHOP_ORCH_URL", "").strip()
+    if not orch_url:
+        raise RuntimeError(
+            "missing orchestrator URL: set SATHOP_URL (sathop://TOKEN@host:port) "
+            "or SATHOP_ORCH_URL + SATHOP_TOKEN"
+        )
+    token = os.getenv("SATHOP_TOKEN", "")
+    if not token:
+        raise RuntimeError("missing SATHOP_TOKEN (or use SATHOP_URL=sathop://TOKEN@host:port)")
+    return orch_url.rstrip("/"), token
 
 
 def cli_resolve_orch(url: str, orch_url: str, token: str, *, require_token: bool = True) -> tuple[str, str]:

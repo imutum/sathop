@@ -118,7 +118,6 @@ def _build_env(
             "SATHOP_BATCH_ID": batch_id,
             "SATHOP_META_JSON": json.dumps(meta, ensure_ascii=False),
             "SATHOP_BUNDLE_PYTHON": str(bundle.python),
-            "SATHOP_VENV_PYTHON": str(bundle.python),
         }
     )
     if progress_url:

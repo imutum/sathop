@@ -213,7 +213,7 @@ def test_config_load_respects_overrides(monkeypatch, tmp_path):
 def test_config_load_raises_on_missing_required(monkeypatch):
     for k in ("SATHOP_RECEIVER_ID", "SATHOP_URL", "SATHOP_ORCH_URL", "SATHOP_TOKEN", "SATHOP_STORAGE_DIR"):
         monkeypatch.delenv(k, raising=False)
-    with pytest.raises(KeyError):
+    with pytest.raises(RuntimeError, match="missing orchestrator URL"):
         load()
 
 

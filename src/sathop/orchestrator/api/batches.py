@@ -17,6 +17,7 @@ from sathop.shared.protocol import (
     GranuleCreate,
     GranuleRow,
     GranuleState,
+    parse_bundle_ref,
 )
 
 from ..bundle_schema import InputsSchema, parse_shared_files, validate_granule
@@ -46,20 +47,6 @@ from .batch_readmodels import (
     granule_row,
 )
 from .batch_transitions import CANCELLABLE_STATES, cancel_granule_state, retry_granule_state
-
-
-def _parse_orch_ref(ref: str) -> tuple[str, str]:
-    """Strict `orch:<name>@<version>` parser. Raises HTTPException on mismatch."""
-    if not ref.startswith("orch:"):
-        raise HTTPException(422, "bundle_ref must be in the form 'orch:<name>@<version>'")
-    body = ref[len("orch:") :]
-    if "@" not in body:
-        raise HTTPException(422, "bundle_ref missing '@<version>'")
-    name, version = body.rsplit("@", 1)
-    if not name or not version:
-        raise HTTPException(422, "bundle_ref name/version must both be non-empty")
-    return name, version
-
 
 router = APIRouter(prefix="/batches", tags=["batches"], dependencies=[Depends(require_token)])
 
@@ -117,7 +104,10 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
             raise HTTPException(409, "batch_id already exists")
         batch_id = req.batch_id
 
-    name, version = _parse_orch_ref(req.bundle_ref)
+    try:
+        name, version = parse_bundle_ref(req.bundle_ref)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
     bundle = await s.get(Bundle, (name, version))
     if bundle is None:
         raise HTTPException(422, f"bundle {name}@{version} not registered — upload it to /api/bundles first")

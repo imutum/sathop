@@ -90,7 +90,7 @@ def test_prune_caches_skips_locked_ref(tmp_path: Path) -> None:
     _set_sidecar_mtime(venv_root, "locked@1", now - 1000)  # would be evicted first
     _set_sidecar_mtime(venv_root, "second@1", now - 500)
 
-    held = bundle._lock_for("orch:locked@1")
+    held = bundle._ref_locks.get("orch:locked@1")
     held.acquire()
     try:
         r = bundle.prune_caches(venv_root, cache_root, limit_bytes=1024)

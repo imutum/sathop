@@ -9,7 +9,6 @@ Selection is env-driven: `SATHOP_MINIO_ACCESS_KEY` + `SATHOP_MINIO_SECRET_KEY` s
 
 from __future__ import annotations
 
-import hashlib
 import shutil
 from dataclasses import dataclass
 from datetime import timedelta
@@ -17,15 +16,8 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlparse
 
+from sathop.shared.hashing import sha256_file
 from sathop.shared.protocol import UploadedObject
-
-
-def _sha256_of(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(block)
-    return h.hexdigest()
 
 
 class Storage(Protocol):
@@ -51,7 +43,7 @@ class LocalStorage:
         return UploadedObject(
             object_key=object_key,
             presigned_url=f"{self.public_base_url}/{object_key}",
-            sha256=_sha256_of(dst),
+            sha256=sha256_file(dst),
             size=dst.stat().st_size,
         )
 
@@ -90,7 +82,7 @@ class MinioStorage:
             self._client.make_bucket(bucket)
 
     def put(self, src: Path, object_key: str) -> UploadedObject:
-        sha = _sha256_of(src)
+        sha = sha256_file(src)
         size = src.stat().st_size
         self._client.fput_object(self._bucket, object_key, str(src))
         src.unlink(missing_ok=True)

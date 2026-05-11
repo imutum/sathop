@@ -18,7 +18,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import BundleDetail, BundleSummary
+from sathop.shared.bundle_archive import detect_wrapper_dir
+from sathop.shared.protocol import BundleDetail, BundleSummary, format_bundle_ref
 
 from ..bundle_schema import InputsSchema, parse_shared_files
 from ..config import require_token, settings
@@ -160,7 +161,7 @@ async def list_bundles(s: AsyncSession = Depends(session)) -> list[BundleSummary
     # One extra query → grouped counts by bundle_ref. Avoids N+1.
     counts_stmt = select(Batch.bundle_ref, func.count(Batch.batch_id)).group_by(Batch.bundle_ref)
     counts = {ref: n for ref, n in (await s.execute(counts_stmt)).all()}
-    return [_summary(b, in_use_count=counts.get(f"orch:{b.name}@{b.version}", 0)) for b in rows]
+    return [_summary(b, in_use_count=counts.get(format_bundle_ref(b.name, b.version), 0)) for b in rows]
 
 
 @router.get("/{name}/{version}", response_model=BundleDetail)
@@ -169,7 +170,7 @@ async def detail(name: str, version: str, s: AsyncSession = Depends(session)) ->
     if b is None:
         raise HTTPException(404, f"bundle {name}@{version} not found")
     in_use = await s.scalar(
-        select(func.count(Batch.batch_id)).where(Batch.bundle_ref == f"orch:{name}@{version}")
+        select(func.count(Batch.batch_id)).where(Batch.bundle_ref == format_bundle_ref(name, version))
     )
     return _detail(b, in_use_count=int(in_use or 0))
 
@@ -195,21 +196,10 @@ class BundleFileContent(BaseModel):
 
 
 def _strip_wrapper(names: list[str]) -> str:
-    """Mirror worker's `_flatten_wrapper_dir`: if every file in the archive
-    sits under a single top-level directory that contains manifest.yaml,
-    return that prefix (with trailing slash). Otherwise "". Keeps UI paths
-    aligned with what the worker actually unpacks."""
-    non_dir = [n for n in names if not n.endswith("/")]
-    if not non_dir:
-        return ""
-    first_segs = {n.split("/", 1)[0] for n in non_dir if "/" in n}
-    has_root_file = any("/" not in n for n in non_dir)
-    if has_root_file or len(first_segs) != 1:
-        return ""
-    prefix = first_segs.pop() + "/"
-    if any(n == prefix + "manifest.yaml" for n in non_dir):
-        return prefix
-    return ""
+    """Wrapper-dir prefix (with trailing slash) for the file-listing API, so
+    UI paths match what the worker unpacks. Empty string for flat archives."""
+    wrapper = detect_wrapper_dir(names)
+    return f"{wrapper}/" if wrapper else ""
 
 
 def _open_zip(b: Bundle) -> zipfile.ZipFile:
@@ -305,7 +295,7 @@ async def delete(name: str, version: str, s: AsyncSession = Depends(session)) ->
     if b is None:
         raise HTTPException(404, f"bundle {name}@{version} not found")
 
-    ref = f"orch:{name}@{version}"
+    ref = format_bundle_ref(name, version)
     total = await s.scalar(select(func.count(Batch.batch_id)).where(Batch.bundle_ref == ref))
     if total:
         sample = (

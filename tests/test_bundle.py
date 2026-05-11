@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from sathop.shared.protocol import parse_bundle_ref
 from sathop.worker import bundle
 
 
@@ -40,39 +41,39 @@ def _make_zip(manifest_at: str = "manifest.yaml", extras: dict[str, str] | None 
 
 
 def test_parse_ref_valid():
-    assert bundle._parse_ref("orch:mod09a1-resample@0.1.0") == ("mod09a1-resample", "0.1.0")
+    assert parse_bundle_ref("orch:mod09a1-resample@0.1.0") == ("mod09a1-resample", "0.1.0")
     # multiple @ in name? last @ splits
-    assert bundle._parse_ref("orch:name-with-at@1.0") == ("name-with-at", "1.0")
+    assert parse_bundle_ref("orch:name-with-at@1.0") == ("name-with-at", "1.0")
 
 
 def test_parse_ref_wrong_scheme_raises():
-    with pytest.raises(ValueError, match="must be 'orch:"):
-        bundle._parse_ref("local:/tmp/x")
+    with pytest.raises(ValueError, match="must start with 'orch:'"):
+        parse_bundle_ref("local:/tmp/x")
     with pytest.raises(ValueError):
-        bundle._parse_ref("zip:https://example.com/b.zip")
+        parse_bundle_ref("zip:https://example.com/b.zip")
     with pytest.raises(ValueError):
-        bundle._parse_ref("git:https://github.com/u/r#main")
+        parse_bundle_ref("git:https://github.com/u/r#main")
 
 
 def test_parse_ref_missing_version_raises():
     with pytest.raises(ValueError, match="missing '@"):
-        bundle._parse_ref("orch:no-version")
+        parse_bundle_ref("orch:no-version")
 
 
 def test_parse_ref_empty_parts_raises():
     with pytest.raises(ValueError):
-        bundle._parse_ref("orch:@1.0")
+        parse_bundle_ref("orch:@1.0")
     with pytest.raises(ValueError):
-        bundle._parse_ref("orch:name@")
+        parse_bundle_ref("orch:name@")
 
 
 # ─── per-ref lock identity ────────────────────────────────────────────────
 
 
 def test_lock_for_returns_same_lock_per_ref():
-    l1 = bundle._lock_for("orch:a@1.0")
-    l2 = bundle._lock_for("orch:a@1.0")
-    l3 = bundle._lock_for("orch:b@1.0")
+    l1 = bundle._ref_locks.get("orch:a@1.0")
+    l2 = bundle._ref_locks.get("orch:a@1.0")
+    l3 = bundle._ref_locks.get("orch:b@1.0")
     assert l1 is l2
     assert l1 is not l3
 

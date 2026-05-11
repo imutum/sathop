@@ -12,6 +12,8 @@ from pathlib import Path
 
 import httpx
 
+from sathop.shared.hashing import sha256_file
+
 log = logging.getLogger("sathop.receiver")
 
 CHUNK = 256 * 1024
@@ -46,14 +48,6 @@ class PullStats:
 
 def tmp_for(dest: Path) -> Path:
     return dest.with_suffix(dest.suffix + f".part-{secrets.token_hex(4)}")
-
-
-def sha256_path(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(CHUNK), b""):
-            h.update(block)
-    return h.hexdigest()
 
 
 def byte_ranges(size: int, n: int) -> list[tuple[int, int]]:
@@ -139,7 +133,7 @@ async def pull_segmented(
     try:
         with tmp.open("r+b", buffering=0) as f:
             await asyncio.gather(*(fetch_segment(client, url, start, end, f) for start, end in ranges))
-        sha = await asyncio.to_thread(sha256_path, tmp)
+        sha = await asyncio.to_thread(sha256_file, tmp)
         size = tmp.stat().st_size
         tmp.replace(dest)
     except BaseException:

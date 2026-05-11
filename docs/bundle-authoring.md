@@ -79,7 +79,6 @@ When the worker invokes `entrypoint`, it sets these env vars:
 | `SATHOP_BATCH_ID` | the batch this granule belongs to |
 | `SATHOP_META_JSON` | JSON-encoded per-granule meta dict (e.g. `{"year": "2024"}`) |
 | `SATHOP_BUNDLE_PYTHON` | absolute path to the Python interpreter selected for this bundle |
-| `SATHOP_VENV_PYTHON` | compatibility alias for `SATHOP_BUNDLE_PYTHON` |
 | `SATHOP_PROGRESS_URL` | optional; POST checkpoints here (see Progress) |
 
 Plus a curated whitelist of OS vars (`PATH`, `HOME`/`USERPROFILE`, `TMP*`, `LANG`, etc.). **Worker secrets like `SATHOP_TOKEN` are NOT inherited** — the bundle cannot impersonate the worker against the orchestrator.

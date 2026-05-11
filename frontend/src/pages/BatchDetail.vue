@@ -19,6 +19,7 @@ import BatchEventLog from "@/features/batch/components/BatchEventLog.vue";
 import BatchGranuleTable from "@/features/batch/components/BatchGranuleTable.vue";
 import BatchTimingCard from "@/features/batch/components/BatchTimingCard.vue";
 import { errorTotal, inFlightTotal, totalCount } from "@/features/batch/summary";
+import { stripBatchPrefix } from "@/lib/utils";
 import { Icon } from "@/components/Icon";
 
 // Filter chips 直接派生自 i18n.GRANULE_STATE_ZH，避免命名漂移。下载完/处理完/上传完
@@ -47,10 +48,6 @@ const LOG_LEVEL_OPTIONS = [
   { value: "warn", label: "警告" },
   { value: "error", label: "错误" },
 ];
-
-function stripBatchPrefix(gid: string, batchId: string) {
-  return gid.startsWith(`${batchId}:`) ? gid.slice(batchId.length + 1) : gid;
-}
 
 const route = useRoute();
 const router = useRouter();

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
 import { fmtAge, levelLabel } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
+import { stripBatchPrefix } from "@/lib/utils";
 
 const props = defineProps<{ granuleId: string; batchId: string }>();
 
@@ -14,11 +15,7 @@ const q = useQuery({
 
 const rows = computed(() => q.data.value ?? []);
 
-const stripped = computed(() =>
-  props.granuleId.startsWith(`${props.batchId}:`)
-    ? props.granuleId.slice(props.batchId.length + 1)
-    : props.granuleId,
-);
+const stripped = computed(() => stripBatchPrefix(props.granuleId, props.batchId));
 </script>
 
 <template>

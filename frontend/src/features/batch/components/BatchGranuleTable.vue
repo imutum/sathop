@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import EmptyState from "@/components/EmptyState.vue";
+import { stripBatchPrefix } from "@/lib/utils";
 import ErrorCell from "@/features/batch/components/ErrorCell.vue";
 import GranuleEvents from "@/features/batch/components/GranuleEvents.vue";
 import LatestProgressLine from "@/features/batch/components/LatestProgressLine.vue";
@@ -37,9 +38,6 @@ const emit = defineEmits<{
   retry: [id: string];
 }>();
 
-function stripBatchPrefix(gid: string) {
-  return gid.startsWith(`${props.batchId}:`) ? gid.slice(props.batchId.length + 1) : gid;
-}
 </script>
 
 <template>
@@ -65,7 +63,7 @@ function stripBatchPrefix(gid: string) {
             >
               {{ expanded === g.granule_id ? "▾" : "▸" }}
             </button>
-            <span class="break-all font-mono text-cell">{{ stripBatchPrefix(g.granule_id) }}</span>
+            <span class="break-all font-mono text-cell">{{ stripBatchPrefix(g.granule_id, props.batchId) }}</span>
             <LatestProgressLine
               v-if="latestProgress[g.granule_id]"
               :row="latestProgress[g.granule_id]"
@@ -168,7 +166,7 @@ function stripBatchPrefix(gid: string) {
               >
                 {{ expanded === g.granule_id ? "▾" : "▸" }}
               </button>
-              {{ stripBatchPrefix(g.granule_id) }}
+              {{ stripBatchPrefix(g.granule_id, props.batchId) }}
               <LatestProgressLine
                 v-if="latestProgress[g.granule_id]"
                 :row="latestProgress[g.granule_id]"

@@ -14,7 +14,6 @@ with `(downloaded_so_far, total_or_None)`; throttling is the caller's job.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Protocol
@@ -22,6 +21,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from sathop.shared.hashing import sha256_file
 from sathop.shared.protocol import Credential
 
 _CHUNK = 256 * 1024
@@ -33,19 +33,11 @@ class ChecksumMismatch(RuntimeError):
     """A downloaded input's sha256 didn't match `InputSpec.checksum`."""
 
 
-def _sha256_of(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
 async def verify_sha256(path: Path, expected: str) -> None:
     """Hash `path` off the event loop; raise ChecksumMismatch on disagreement.
     Comparison is case-insensitive — operators sometimes copy upper-case digests
     out of vendor metadata."""
-    actual = await asyncio.to_thread(_sha256_of, path)
+    actual = await asyncio.to_thread(sha256_file, path)
     if actual.lower() != expected.lower():
         raise ChecksumMismatch(
             f"sha256 mismatch on {path.name}: expected {expected.lower()[:16]}…, got {actual[:16]}…"

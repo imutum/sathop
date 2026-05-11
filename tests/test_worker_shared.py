@@ -204,8 +204,8 @@ def test_sync_sends_bearer_token(tmp_path, monkeypatch):
 
 
 def test_lock_for_returns_same_lock_per_name():
-    assert worker_shared._lock_for("x") is worker_shared._lock_for("x")
-    assert worker_shared._lock_for("x") is not worker_shared._lock_for("y")
+    assert worker_shared._name_locks.get("x") is worker_shared._name_locks.get("x")
+    assert worker_shared._name_locks.get("x") is not worker_shared._name_locks.get("y")
 
 
 def test_concurrent_sync_of_same_name_serialized(tmp_path, monkeypatch):

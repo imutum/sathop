@@ -3,15 +3,12 @@ import type { EventRow } from "@/api";
 import { fmtAge, levelLabel } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
 import EmptyState from "@/components/EmptyState.vue";
+import { stripBatchPrefix } from "@/lib/utils";
 
 const props = defineProps<{
   events: EventRow[];
   batchId: string;
 }>();
-
-function stripBatchPrefix(gid: string) {
-  return gid.startsWith(`${props.batchId}:`) ? gid.slice(props.batchId.length + 1) : gid;
-}
 </script>
 
 <template>
@@ -31,7 +28,7 @@ function stripBatchPrefix(gid: string) {
           class="w-40 shrink-0 truncate text-muted-foreground"
           :title="e.granule_id"
         >
-          {{ stripBatchPrefix(e.granule_id) }}
+          {{ stripBatchPrefix(e.granule_id, props.batchId) }}
         </span>
         <span v-else class="w-40 shrink-0 text-muted-foreground">—</span>
         <span class="flex-1 break-all">{{ e.message }}</span>

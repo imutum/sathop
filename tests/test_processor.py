@@ -138,14 +138,12 @@ async def test_runtime_python_env_vars_reach_entrypoint(tmp_path, work_root):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
-        "(o / 'python.txt').write_text(\n"
-        "    os.environ['SATHOP_BUNDLE_PYTHON'] + '\\n' + os.environ['SATHOP_VENV_PYTHON']\n"
-        ")\n"
+        "(o / 'python.txt').write_text(os.environ['SATHOP_BUNDLE_PYTHON'])\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
     r = await run_bundle(h, "g", "b", [], {}, work_root)
     assert r.ok
-    assert r.outputs[0].read_text(encoding="utf-8") == f"{sys.executable}\n{sys.executable}"
+    assert r.outputs[0].read_text(encoding="utf-8") == sys.executable
 
 
 async def test_custom_env_in_manifest_merged(tmp_path, work_root):

@@ -13,25 +13,15 @@ import hashlib
 import json
 import logging
 import tempfile
-import threading
 import urllib.request
 from pathlib import Path
 
 from sathop.shared.http import bearer_headers
+from sathop.shared.locks import NamedLockRegistry
 
 log = logging.getLogger("sathop.worker.shared")
 
-_name_locks: dict[str, threading.Lock] = {}
-_name_locks_guard = threading.Lock()
-
-
-def _lock_for(name: str) -> threading.Lock:
-    with _name_locks_guard:
-        lock = _name_locks.get(name)
-        if lock is None:
-            lock = threading.Lock()
-            _name_locks[name] = lock
-        return lock
+_name_locks = NamedLockRegistry()
 
 
 def _sidecar_path(root: Path, name: str) -> Path:
@@ -55,7 +45,7 @@ def sync(names: list[str], shared_root: Path, orchestrator_url: str, token: str)
     shared_root.mkdir(parents=True, exist_ok=True)
     (shared_root / ".sha256").mkdir(parents=True, exist_ok=True)
     for name in names:
-        with _lock_for(name):
+        with _name_locks.get(name):
             _sync_one(name, shared_root, orchestrator_url, token)
 
 
@@ -89,7 +79,7 @@ def prune_orphans(shared_root: Path, orchestrator_url: str, token: str) -> dict:
     for entry in candidates:
         if entry.name in valid:
             continue
-        with _lock_for(entry.name):
+        with _name_locks.get(entry.name):
             try:
                 size = entry.stat().st_size
             except OSError:

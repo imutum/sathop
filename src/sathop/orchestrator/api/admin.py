@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop import __version__
+from sathop.shared.protocol import format_bundle_ref
 
 from ..config import require_token, settings
 from ..db import Batch, Bundle, session, utcnow
@@ -100,7 +101,9 @@ async def gc_bundles(
     in_use = {ref: n for ref, n in (await s.execute(counts_stmt)).all()}
 
     candidates: list[Bundle] = [
-        b for b in bundles if in_use.get(f"orch:{b.name}@{b.version}", 0) == 0 and b.uploaded_at < threshold
+        b
+        for b in bundles
+        if in_use.get(format_bundle_ref(b.name, b.version), 0) == 0 and b.uploaded_at < threshold
     ]
 
     if dry_run:
