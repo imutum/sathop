@@ -6,7 +6,7 @@ import json
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
@@ -36,6 +36,16 @@ from ..db import (
 )
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from .batch_readmodels import (
+    batch_eta_seconds_bulk,
+    batch_exhausted_objects,
+    batch_exhausted_objects_bulk,
+    batch_state_counts,
+    batch_state_counts_bulk,
+    batch_summary,
+    exhausted_objects_by_granule,
+    granule_row,
+)
 
 
 def _parse_orch_ref(ref: str) -> tuple[str, str]:
@@ -76,26 +86,6 @@ async def _granule_in_batch_or_404(s: AsyncSession, batch_id: str, granule_id: s
     return granule
 
 
-def _batch_summary(
-    batch: Batch,
-    *,
-    counts: dict[str, int],
-    objects_exhausted: int = 0,
-    eta_seconds: int | None = None,
-) -> BatchSummary:
-    return BatchSummary(
-        batch_id=batch.batch_id,
-        name=batch.name,
-        bundle_ref=batch.bundle_ref,
-        target_receiver_id=batch.target_receiver_id,
-        status=batch.status,
-        created_at=batch.created_at,
-        counts=counts,
-        objects_exhausted=objects_exhausted,
-        eta_seconds=eta_seconds,
-    )
-
-
 def _new_granule(batch_id: str, granule: GranuleCreate) -> Granule:
     return Granule(
         granule_id=_compose_gid(batch_id, granule.granule_id),
@@ -104,124 +94,6 @@ def _new_granule(batch_id: str, granule: GranuleCreate) -> Granule:
         inputs_json=json.dumps([i.model_dump() for i in granule.inputs]),
         meta_json=json.dumps(granule.meta, ensure_ascii=False),
     )
-
-
-def _granule_row(granule: Granule, *, objects_exhausted: int = 0) -> GranuleRow:
-    return GranuleRow(
-        granule_id=granule.granule_id,
-        batch_id=granule.batch_id,
-        state=granule.state,
-        retry_count=granule.retry_count,
-        leased_by=granule.leased_by,
-        error=granule.error,
-        stdout_tail=granule.stdout_tail,
-        stderr_tail=granule.stderr_tail,
-        updated_at=granule.updated_at,
-        objects_exhausted=objects_exhausted,
-    )
-
-
-async def _counts(s: AsyncSession, batch_id: str) -> dict[str, int]:
-    return (await _counts_bulk(s, [batch_id]))[batch_id]
-
-
-async def _counts_bulk(s: AsyncSession, batch_ids: list[str]) -> dict[str, dict[str, int]]:
-    if not batch_ids:
-        return {}
-    stmt = (
-        select(Granule.batch_id, Granule.state, func.count(Granule.granule_id))
-        .where(Granule.batch_id.in_(batch_ids))
-        .group_by(Granule.batch_id, Granule.state)
-    )
-    out: dict[str, dict[str, int]] = {bid: {} for bid in batch_ids}
-    for batch_id, state, n in (await s.execute(stmt)).all():
-        out[batch_id][state] = n
-    return out
-
-
-async def _exhausted_objects(s: AsyncSession, batch_id: str) -> int:
-    """Number of still-pending objects in the batch that hit the pull-failure
-    cap — i.e., delivery has effectively given up. Mirrors the predicate in
-    the receiver pull endpoint and the per-batch reset action."""
-    return int(
-        await s.scalar(
-            select(func.count(GranuleObject.id))
-            .join(Granule, GranuleObject.granule_id == Granule.granule_id)
-            .where(Granule.batch_id == batch_id)
-            .where(GranuleObject.acked_at.is_(None))
-            .where(GranuleObject.deleted_at.is_(None))
-            .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
-        )
-        or 0
-    )
-
-
-async def _eta_seconds_bulk(
-    s: AsyncSession,
-    counts_map: dict[str, dict[str, int]],
-) -> dict[str, int | None]:
-    """ETA = remaining_in_flight * (wall_seconds / closed_upload_stages).
-    None when sample <3 uploads, wall <=0, or no in-flight granules."""
-    if not counts_map:
-        return {}
-    batch_ids = list(counts_map)
-    rows = (
-        await s.execute(
-            select(
-                GranuleStageTiming.batch_id,
-                func.min(GranuleStageTiming.started_at),
-                func.max(GranuleStageTiming.finished_at),
-                func.sum(case((GranuleStageTiming.stage == "upload", 1), else_=0)),
-            )
-            .where(GranuleStageTiming.batch_id.in_(batch_ids))
-            .group_by(GranuleStageTiming.batch_id)
-        )
-    ).all()
-
-    out: dict[str, int | None] = dict.fromkeys(batch_ids, None)
-    for batch_id, first, last, done in rows:
-        done_n = int(done or 0)
-        if done_n < 3 or first is None or last is None:
-            continue
-        wall_sec = (last - first).total_seconds()
-        if wall_sec <= 0:
-            continue
-        remaining = sum(counts_map[batch_id].get(st, 0) for st in IN_FLIGHT_STATES)
-        if remaining <= 0:
-            continue
-        out[batch_id] = int(remaining * wall_sec / done_n)
-    return out
-
-
-async def _exhausted_objects_bulk(s: AsyncSession, batch_ids: list[str]) -> dict[str, int]:
-    """One grouped query for the batch list — keeps list_batches at O(1) DB
-    round-trips instead of O(N)."""
-    if not batch_ids:
-        return {}
-    stmt = (
-        select(Granule.batch_id, func.count(GranuleObject.id))
-        .join(Granule, GranuleObject.granule_id == Granule.granule_id)
-        .where(Granule.batch_id.in_(batch_ids))
-        .where(GranuleObject.acked_at.is_(None))
-        .where(GranuleObject.deleted_at.is_(None))
-        .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
-        .group_by(Granule.batch_id)
-    )
-    return dict((await s.execute(stmt)).all())
-
-
-async def _exhausted_objects_by_granule(s: AsyncSession, granule_ids: list[str]) -> dict[str, int]:
-    if not granule_ids:
-        return {}
-    stmt = (
-        select(GranuleObject.granule_id, func.count(GranuleObject.id))
-        .where(GranuleObject.granule_id.in_(granule_ids))
-        .where(GranuleObject.acked_at.is_(None))
-        .where(GranuleObject.deleted_at.is_(None))
-        .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
-        .group_by(GranuleObject.granule_id)
-    )
-    return dict((await s.execute(stmt)).all())
 
 
 async def _batch_granule_ids(s: AsyncSession, batch_id: str) -> list[str]:
@@ -303,18 +175,18 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
         await log(s, "orchestrator", w, level="warn")
     await commit_and_publish(s, "batches")
 
-    return _batch_summary(b, counts=await _counts(s, b.batch_id))
+    return batch_summary(b, counts=await batch_state_counts(s, b.batch_id))
 
 
 @router.get("", response_model=list[BatchSummary])
 async def list_batches(s: AsyncSession = Depends(session)) -> list[BatchSummary]:
     rows = (await s.execute(select(Batch).order_by(Batch.created_at.desc()))).scalars().all()
     ids = [b.batch_id for b in rows]
-    counts_map = await _counts_bulk(s, ids)
-    exh_map = await _exhausted_objects_bulk(s, ids)
-    eta_map = await _eta_seconds_bulk(s, counts_map)
+    counts_map = await batch_state_counts_bulk(s, ids)
+    exh_map = await batch_exhausted_objects_bulk(s, ids)
+    eta_map = await batch_eta_seconds_bulk(s, counts_map)
     return [
-        _batch_summary(
+        batch_summary(
             b,
             counts=counts_map[b.batch_id],
             objects_exhausted=exh_map.get(b.batch_id, 0),
@@ -327,12 +199,12 @@ async def list_batches(s: AsyncSession = Depends(session)) -> list[BatchSummary]
 @router.get("/{batch_id}", response_model=BatchSummary)
 async def detail(batch_id: str, s: AsyncSession = Depends(session)) -> BatchSummary:
     b = await _get_batch_or_404(s, batch_id)
-    counts = await _counts(s, batch_id)
-    eta_map = await _eta_seconds_bulk(s, {batch_id: counts})
-    return _batch_summary(
+    counts = await batch_state_counts(s, batch_id)
+    eta_map = await batch_eta_seconds_bulk(s, {batch_id: counts})
+    return batch_summary(
         b,
         counts=counts,
-        objects_exhausted=await _exhausted_objects(s, batch_id),
+        objects_exhausted=await batch_exhausted_objects(s, batch_id),
         eta_seconds=eta_map.get(batch_id),
     )
 
@@ -378,8 +250,8 @@ async def list_granules(
     rows = (await s.execute(stmt)).scalars().all()
 
     gids = [g.granule_id for g in rows]
-    exh_map = await _exhausted_objects_by_granule(s, gids)
-    return [_granule_row(g, objects_exhausted=exh_map.get(g.granule_id, 0)) for g in rows]
+    exh_map = await exhausted_objects_by_granule(s, gids)
+    return [granule_row(g, objects_exhausted=exh_map.get(g.granule_id, 0)) for g in rows]
 
 
 @router.post("/{batch_id}/reset-exhausted-objects")
