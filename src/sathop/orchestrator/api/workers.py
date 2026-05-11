@@ -27,7 +27,7 @@ from sathop.shared.protocol import (
 )
 
 from ..config import require_token, settings
-from ..db import Batch, Granule, GranuleObject, GranuleStageTiming, Worker, session, utcnow
+from ..db import Batch, Granule, GranuleObject, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from .worker_heartbeat import (
@@ -39,6 +39,7 @@ from .worker_heartbeat import (
     renew_worker_leases,
     revoked_active_granules,
 )
+from .worker_transitions import STATE_PREDECESSOR, apply_state_report, mark_failed, mark_uploaded
 
 router = APIRouter(prefix="/workers", tags=["workers"], dependencies=[Depends(require_token)])
 
@@ -267,61 +268,15 @@ async def _claim_pending_granules(
     return items
 
 
-# Forward-only transitions reported by a leased worker. lease() writes QUEUED
-# and upload() writes UPLOADED, so neither appears here.
-_STATE_PREDECESSOR = {
-    GranuleState.DOWNLOADING.value: GranuleState.QUEUED.value,
-    GranuleState.DOWNLOADED.value: GranuleState.DOWNLOADING.value,
-    GranuleState.PROCESSING.value: GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSED.value: GranuleState.PROCESSING.value,
-}
-
-# Map "transition that closes the stage" → stage name. Each phase is recorded
-# separately so the operator can tell sem-queue waits from real work:
-#   QUEUED   → DOWNLOADING   download_wait  (pending_download sem queue)
-#   DOWNLOADING → DOWNLOADED download       (actual byte transfer)
-#   DOWNLOADED  → PROCESSING process_wait   (process_sem queue + bundle.ensure)
-#   PROCESSING  → PROCESSED  process        (bundle subprocess wall time)
-#   PROCESSED   → UPLOADED   upload         (split into upload_wait + upload by
-#                                            the upload handler if the worker
-#                                            sent upload_started_at)
-_STAGE_BY_CLOSER = {
-    GranuleState.DOWNLOADING.value: "download_wait",
-    GranuleState.DOWNLOADED.value: "download",
-    GranuleState.PROCESSING.value: "process_wait",
-    GranuleState.PROCESSED.value: "process",
-}
-
-
-def _record_stage(s: AsyncSession, g: Granule, stage: str, started_at, finished_at) -> None:
-    duration_ms = max(0, int((finished_at - started_at).total_seconds() * 1000))
-    s.add(
-        GranuleStageTiming(
-            granule_id=g.granule_id,
-            batch_id=g.batch_id,
-            stage=stage,
-            started_at=started_at,
-            finished_at=finished_at,
-            duration_ms=duration_ms,
-        )
-    )
-
-
 @router.post("/state")
 async def report_state(req: StateUpdate, s: AsyncSession = Depends(session)) -> dict:
-    expected = _STATE_PREDECESSOR.get(req.state.value)
+    expected = STATE_PREDECESSOR.get(req.state.value)
     if expected is None:
         raise HTTPException(422, f"state {req.state.value!r} is not worker-reportable")
     g = await _leased_granule_or_409(s, req.granule_id, req.worker_id)
     if g.state != expected:
         raise HTTPException(409, f"cannot transition {g.state!r} → {req.state.value!r}")
-    prev_at = g.updated_at
-    now = utcnow()
-    g.state = req.state.value
-    g.updated_at = now
-    stage = _STAGE_BY_CLOSER.get(req.state.value)
-    if stage is not None:
-        _record_stage(s, g, stage, prev_at, now)
+    apply_state_report(s, g, req, utcnow())
     await commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
 
@@ -336,39 +291,10 @@ async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
     if g.state != GranuleState.PROCESSED.value:
         raise HTTPException(409, f"upload requires state=processed; granule is in state {g.state!r}")
 
-    _mark_uploaded(s, g, req)
+    mark_uploaded(s, g, req, utcnow())
     await log(s, req.worker_id, f"uploaded {len(req.objects)} objects", granule_id=g.granule_id)
     await commit_and_publish(s, "batches")
     return {"ok": True}
-
-
-def _mark_uploaded(s: AsyncSession, granule: Granule, req: UploadReport) -> None:
-    for obj in req.objects:
-        s.add(
-            GranuleObject(
-                granule_id=granule.granule_id,
-                worker_id=req.worker_id,
-                object_key=obj.object_key,
-                presigned_url=obj.presigned_url,
-                sha256=obj.sha256,
-                size=obj.size,
-            )
-        )
-    prev_at = granule.updated_at
-    now = utcnow()
-    granule.state = GranuleState.UPLOADED.value
-    granule.leased_by = None
-    granule.lease_expires_at = None
-    granule.error = None
-    granule.stdout_tail = None
-    granule.stderr_tail = None
-    granule.updated_at = now
-    started = req.upload_started_at
-    if started is not None and prev_at <= started <= now:
-        _record_stage(s, granule, "upload_wait", prev_at, started)
-        _record_stage(s, granule, "upload", started, now)
-    else:
-        _record_stage(s, granule, "upload", prev_at, now)
 
 
 @router.post("/failure")
@@ -380,7 +306,7 @@ async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> di
     if g.state not in LEASED_STATES:
         raise HTTPException(409, f"failure not accepted in state {g.state!r} (lease was revoked)")
 
-    _mark_failed(g, req)
+    mark_failed(g, req, utcnow())
     await log(
         s,
         req.worker_id,
@@ -390,23 +316,6 @@ async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> di
     )
     await commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
-
-
-def _mark_failed(granule: Granule, req: ProcessFailure) -> None:
-    granule.retry_count += 1
-    granule.error = req.error[:2000]
-    if req.stdout_tail is not None:
-        granule.stdout_tail = req.stdout_tail[:16000]
-    if req.stderr_tail is not None:
-        granule.stderr_tail = req.stderr_tail[:16000]
-    granule.leased_by = None
-    granule.lease_expires_at = None
-    granule.state = (
-        GranuleState.BLACKLISTED.value
-        if granule.retry_count >= settings.max_retries
-        else GranuleState.PENDING.value
-    )
-    granule.updated_at = utcnow()
 
 
 @router.get("/deletable/{worker_id}")
