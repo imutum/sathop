@@ -1,7 +1,8 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree contains a focused frontend onboarding token-boundary cleanup.
+- Working tree contains a state-only cleanup-loop closure record.
+- The project is currently clean enough: no new concrete duplication, stale boundary, or naming drift surfaced in the final cross-check.
 - `src/sathop/orchestrator/pubsub.py` owns event publishing, event logging, and `commit_and_publish` transaction/scope publication helper.
 - `src/sathop/orchestrator/api/batch_readmodels.py` owns BatchSummary/GranuleRow assembly, state counts, ETA, and exhausted-object read queries.
 - `src/sathop/orchestrator/api/batch_transitions.py` owns cancel/retry granule state rules.
@@ -19,23 +20,23 @@
 - `frontend/src/features/batch/types.ts` owns create-batch pure form transforms: credential payload/validity, env parsing, and dirty-draft checks.
 
 ## Completed this round
-- Re-read `state.md`, confirmed the orchestrator commit/publish helper cleanup was committed, and started from a clean working tree.
-- Ran a final high-level scan for real duplication and stale boundaries across orchestrator routes, frontend API/token access, state-count helpers, confirm flows, and legacy/compat references.
-- Found one small frontend boundary drift: onboarding modals still read `localStorage` directly for the current token after token access moved into `apiClient.ts`.
-- Updated `OnboardWorkerModal.vue` and `OnboardReceiverModal.vue` to use `getToken()` from `apiClient.ts`.
-- Confirmed remaining direct token storage access is limited to `apiClient.ts` and `Login.vue`, where login rollback/removal owns the boundary.
+- Re-read `state.md`, confirmed the onboarding token-boundary cleanup was committed, and started from a clean working tree.
+- Performed a state-only final cross-check for duplication/boundary drift across token access, commit/publish paths, state-count helpers, feature imports, and legacy/compat references.
+- Confirmed direct token storage access is limited to `apiClient.ts` and login rollback/removal in `Login.vue`.
+- Confirmed remaining manual commit/publish paths are intentional special cases: background tasks, admin GC conditional publish, progress rich payload, receiver failed-ack no-publish branch, and shared delete's DB-then-filesystem ordering.
+- Confirmed state-count helpers are intentionally split by semantics: batch summary math, dashboard pipeline rollups, and per-state chart presentation.
 
 ## Validation
-- Frontend build/type-check: `npm --prefix frontend run build` passed.
-- Ruff: `.venv/Scripts/ruff.exe check .` passed.
-- Format: `.venv/Scripts/ruff.exe format . --check` passed.
+- Git status was clean at the start of the round.
+- Cross-check grep found no new concrete cleanup target.
+- No build/test rerun this round because no source code changed.
 
 ## Key decisions
-- `apiClient.ts` is the browser token boundary; components that only need the current token should call `getToken()` instead of reaching into storage.
-- `Login.vue` may still read/remove `localStorage` directly because it owns rollback and clearing behavior during login probing.
-- No further concrete structural cleanup surfaced in the final scan.
+- Stop structural refactoring now; continuing to search for cleanup would likely create churn rather than reduce maintenance cost.
+- Treat the current module boundaries as the baseline unless a future feature, bug, or test failure exposes a concrete duplication or stale abstraction.
+- Comment-only changes should stop unless a comment is actively misleading.
 
 ## Next suggested priorities
-1. Stop structural refactoring unless a new concrete duplication, stale boundary, or bug appears.
-2. If continuing work, shift from cleanup to feature/bug/test priorities rather than more churn.
-3. Future structural work should be driven by concrete duplication or stale boundary, not file size alone.
+1. Move on to feature, bug, release, or test work; do not continue cleanup-only rounds by default.
+2. If future cleanup is requested, require a concrete trigger: duplicated logic, stale boundary, failing test, or confusing ownership.
+3. Before any release, run the normal full validation suite rather than more structural reshuffling.
