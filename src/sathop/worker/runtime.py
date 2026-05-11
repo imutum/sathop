@@ -13,6 +13,7 @@ import httpx
 import psutil
 
 from sathop import __version__
+from sathop.shared.orch_client import AuthTokenInvalid
 from sathop.shared.protocol import (
     GranuleState,
     LeaseItem,
@@ -163,23 +164,33 @@ class Worker:
             "on" if self._ca_pem else "off",
         )
 
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(self._heartbeat_loop())
-            tg.create_task(self._pipeline_loop())
-            tg.create_task(self._janitor_loop())
-            tg.create_task(self._backpressure_loop())
-            tg.create_task(self.cleaner.loop(self._gc_event))
-            tg.create_task(self._drain_watchdog_loop())
-            tg.create_task(self.progress.serve())
-            if getattr(self.storage, "needs_static_server", False):
-                tg.create_task(
-                    storage.serve_static(
-                        self.s.storage_root,
-                        self.s.storage_port,
-                        tls_cert=self.s.tls_cert_path if self._ca_pem else None,
-                        tls_key=self.s.tls_key_path if self._ca_pem else None,
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(self._heartbeat_loop())
+                tg.create_task(self._pipeline_loop())
+                tg.create_task(self._janitor_loop())
+                tg.create_task(self._backpressure_loop())
+                tg.create_task(self.cleaner.loop(self._gc_event))
+                tg.create_task(self._drain_watchdog_loop())
+                tg.create_task(self.progress.serve())
+                if getattr(self.storage, "needs_static_server", False):
+                    tg.create_task(
+                        storage.serve_static(
+                            self.s.storage_root,
+                            self.s.storage_port,
+                            tls_cert=self.s.tls_cert_path if self._ca_pem else None,
+                            tls_key=self.s.tls_key_path if self._ca_pem else None,
+                        )
                     )
-                )
+        except* AuthTokenInvalid:
+            # Bad SATHOP_TOKEN — let docker restart make the flap visible
+            # rather than silently retrying with the same dead token.
+            log.error("orchestrator rejected token (401) — exiting for container restart")
+            raise SystemExit(1) from None
+        except* SystemExit:
+            # Graceful drain raised SystemExit(0); swallow the group so the
+            # caller's `finally` (httpx client aclose) runs before exit.
+            pass
 
     async def _heartbeat_loop(self) -> None:
         while True:

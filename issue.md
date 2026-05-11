@@ -7,75 +7,30 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：47（修复 7 项 — 2 medium + 5 low）
-- 高优先级问题数：10
-- 中优先级问题数：22（M-007/M-008 已修）
+- 总问题数：43（累计修复 11 项 — 3 high + 3 medium + 5 low）
+- 高优先级问题数：7（H-001/H-002/H-003 已修）
+- 中优先级问题数：21（M-007/M-008/M-018 已修）
 - 低优先级问题数：11（L-001/L-002/L-003/L-011/L-016 已修）
 - 交叉问题数：4
-- 本轮修复（2026-05-11）：
-  - **M-007** SHA256 统一到 `sathop.shared.hashing.sha256_file`
-  - **M-008** 抽取 `sathop.shared.locks.NamedLockRegistry`
-  - **L-001** 提取 `BUNDLE_REF_PREFIX` + `format_bundle_ref/parse_bundle_ref` 到 shared.protocol
-  - **L-002** 抽取 `detect_wrapper_dir` 到 `sathop.shared.bundle_archive`，双侧调用
-  - **L-003** 移除 `SATHOP_VENV_PYTHON` 兼容别名（含 docs/tests）
-  - **L-011** 前端 `stripBatchPrefix` 收敛到 `lib/utils.ts`
-  - **L-016** `resolve_orch` 缺 env 抛 `RuntimeError` + 描述信息
-- 已验证干净的模块：tls.py、stages.py、cleanup.py、_paths.py、progress.py、pubsub.py（已覆盖）、background.py（sweeper 设计良好含竞态防护）、router.ts、useAuthGate.ts、usePermissions.ts、reconcile.py、upload_bundle.py、validate_bundle.py、pull.py（已覆盖）
-- 主要风险领域：路径穿越、进程清理、event loop 阻塞、重复代码/概念、测试覆盖缺口、配置安全、暗色模式、静默错误吞没
+- 已修复（按轮次倒序）：
+  - 第 2 轮：
+    - **H-001 / H-003** 抽取 `sathop.shared.orch_client.OrchClient` 作为基类；401 抛 `AuthTokenInvalid`（BaseException 子类，避免被 `except Exception` 吞），runtime 顶层 `except* AuthTokenInvalid` 转 `SystemExit(1)`，aclose 正常运行
+    - **H-002** worker drain + receiver drain 的 `os._exit` 改为 `raise SystemExit(0)`；runtime `except* SystemExit` 让 aclose finally 完成后退出
+    - **M-018** 前端死代码清理：移除 Pinia、`useMutationToast`、`v-permission` 指令 + `usePermissions` 系统 + RouteMeta.permission 类型、`font-display` 类（Tailwind 未定义，9 个 template 中无副作用），删除对应 ts/test 文件，从 package.json 移除 pinia
+  - 第 1 轮：
+    - **M-007** SHA256 统一到 `sathop.shared.hashing.sha256_file`
+    - **M-008** 抽取 `sathop.shared.locks.NamedLockRegistry`
+    - **L-001** 提取 `BUNDLE_REF_PREFIX` + `format_bundle_ref/parse_bundle_ref`
+    - **L-002** 抽取 `detect_wrapper_dir` 到 `sathop.shared.bundle_archive`
+    - **L-003** 移除 `SATHOP_VENV_PYTHON` 兼容别名
+    - **L-011** 前端 `stripBatchPrefix` 收敛到 `lib/utils.ts`
+    - **L-016** `resolve_orch` 缺 env 抛 `RuntimeError` + 描述信息
+- 已验证干净的模块：tls.py、stages.py、cleanup.py、_paths.py、progress.py、pubsub.py（已覆盖）、background.py（sweeper 设计良好含竞态防护）、router.ts、useAuthGate.ts、reconcile.py、upload_bundle.py、validate_bundle.py、pull.py（已覆盖）
+- 主要风险领域：路径穿越、event loop 阻塞、重复代码/概念、测试覆盖缺口、配置安全、暗色模式、静默错误吞没
 
 ---
 
 ## High Priority
-
-### H-001: Worker agent 在 401 时硬杀进程绕过所有清理逻辑
-
-- 类型：错误处理 / 资源泄漏
-- 位置：`src/sathop/worker/agent.py:47-53` `OrchestratorClient._check_auth()`
-- 证据：
-  ```python
-  if r.status_code == 401:
-      log.error("orch %s returned 401 — SATHOP_TOKEN mismatch; exiting for container restart", path)
-      os._exit(1)
-  ```
-  `os._exit(1)` 立即终止进程，不执行任何 `finally` 块、`atexit` 处理器、`__del__` 方法或 asyncio 任务清理。
-- 问题描述：
-  1. `_check_auth()` 在所有 `_post`/`_get` 调用中执行（`_post` 内部），包括 heartbeat、lease、state report 等。任何一次 401 都直接杀进程。
-  2. 此时可能留有：部分下载的 `.part` 文件、半成品 venv `.building.<tid>` 目录、活跃的 asyncio handler tasks。
-  3. 虽然 docker restart 最终会清理，但数据目录会累积孤儿文件，且磁盘空间可能被耗尽。
-  4. 接收端的 `OrchestratorClient`（`receiver/agent.py`）没有这个行为，两个 client 类已经行为分化。
-- 长期影响：磁盘空间泄漏、垃圾数据累积、容器反复崩溃重启掩盖根本原因。
-- 可能方向：将 401 转为异常由调用方处理（或仅对心跳/租约循环区分对待），避免 `os._exit`；或至少增加退出前的清理步骤。
-- 置信度：高
-
-### H-002: Receiver drain watchdog 使用 os._exit(0) 绕过清理
-
-- 类型：资源泄漏
-- 位置：`src/sathop/receiver/runtime.py:73,81`
-- 证据：
-  ```python
-  log.info("drain complete — all pulls finished, exiting")
-  os._exit(0)    # line 73
-  ...
-  log.warning("drain timeout ... forcing exit")
-  os._exit(0)    # line 81
-  ```
-- 问题描述：与 H-001 相同模式 — `os._exit(0)` 跳过 `finally`、context manager `__aexit__`、httpx client `aclose()`。虽然 drain 场景下影响较小（进程本来就要退出），但未关闭的 HTTP 连接和临时文件仍然被遗弃。
-- 长期影响：连接泄漏（对端 TIME_WAIT 堆积）、临时 `.part-*` 文件残留。
-- 可能方向：正常路径用 `asyncio.get_running_loop().stop()` 或抛出 `SystemExit(0)`；超时路径至少尝试 `aclose()` 后再 `os._exit`。
-- 置信度：高
-
-### H-003: 两个重复的 OrchestratorClient 类已经行为分化
-
-- 类型：重复代码 / 维护风险
-- 位置：`src/sathop/worker/agent.py` 和 `src/sathop/receiver/agent.py`
-- 证据：
-  - Worker 版有 `_check_auth()` → `os._exit(1)` 逻辑；Receiver 版没有
-  - Worker 版有 `_post`/`_get` 包装方法（含 `raise_for_status`）；Receiver 版直接用 `self._client.post/get`
-  - 两者都实现了 `register()`、`heartbeat()`、`aclose()`，结构高度相似
-- 问题描述：两个类本质上是同一概念（"与 orchestrator 通信的 HTTP client"），但已各自演化出不同行为。任何对错误处理、重试、超时的改进都需要在两边各自实现。
-- 长期影响：每增加一个 endpoint，两边都要改；安全/错误处理的修复只在一处生效。
-- 可能方向：抽取共享基类或组合模式，worker/receiver 差异通过配置或策略注入。或者至少在 `shared/` 中提供统一的 `OrchClient`。
-- 置信度：高
 
 ### H-004: add_granules 端点缺少 granule schema 验证
 
@@ -371,21 +326,6 @@
 - 长期影响：多 worker 部署时偶发启动失败。
 - 可能方向：捕获 `BucketAlreadyOwnedByYou` / `BucketAlreadyExists` 异常并静默继续。
 - 置信度：中
-
-### M-018: Frontend 存在 5 处死代码路径
-
-- 类型：死代码
-- 位置：
-  - `frontend/src/main.ts:2,25` — Pinia 注册但零 store
-  - `frontend/src/composables/useToast.ts:16-25` — `useMutationToast` 导出但无导入
-  - `frontend/src/directives/permission.ts` + `main.ts:28` — `v-permission` 指令注册但无模板使用
-  - `frontend/src/env.d.ts:12-18` + `router.ts:53-60` — 路由权限守卫逻辑完整但无路由声明 `meta.permission`
-  - 9 个组件使用 `font-display` class 但该 class 未在 Tailwind 配置或 CSS 中定义
-- 证据：grep 全项目确认以上符号无引用。
-- 问题描述：死代码增加维护负担和构建体积。权限系统尤其浪费 — 完整的 directive + route guard + type augmentation 但从未激活。
-- 长期影响：开发者可能误用 `v-permission` 以为它有效；`font-display` 无效让字体回退到默认。
-- 可能方向：删除未使用的注册（Pinia、permission directive）和未使用的导出（useMutationToast）；要么实现权限要么删除整个权限框架；在 Tailwind 配置中定义 `font-display` 或从模板中移除。
-- 置信度：高
 
 ### M-019: Frontend 硬编码 Tailwind 颜色在暗色模式下不兼容
 

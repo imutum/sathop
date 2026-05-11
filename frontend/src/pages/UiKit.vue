@@ -20,7 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 <template>
   <section class="space-y-10 py-2">
     <header class="space-y-1">
-      <h1 class="font-display text-2xl font-semibold">UI Kit</h1>
+      <h1 class="text-2xl font-semibold">UI Kit</h1>
       <p class="text-sm text-muted-foreground">
         shadcn-vue 组件视觉冒烟入口。配合 light/dark 切换走查 token 是否对齐。
       </p>

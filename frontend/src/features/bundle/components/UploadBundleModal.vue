@@ -56,7 +56,7 @@ const onSubmit = handleSubmit((vals) => {
 
 <template>
   <Modal :dirty="meta.dirty" @close="emit('close')">
-    <h2 class="font-display mb-5 text-lg font-semibold">上传任务包</h2>
+    <h2 class="mb-5 text-lg font-semibold">上传任务包</h2>
     <form class="space-y-4 text-sm" @submit.prevent="onSubmit">
       <FormField v-slot="{ value, handleChange }" name="file">
         <FormItem>

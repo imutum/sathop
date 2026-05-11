@@ -220,7 +220,7 @@ function onForget(n: string) {
 
 <template>
   <Modal width-class="w-[min(1200px,95vw)]" :dirty="dirty" @close="tryClose">
-    <h2 class="font-display mb-1 text-lg font-semibold">新建任务</h2>
+    <h2 class="mb-1 text-lg font-semibold">新建任务</h2>
     <div class="mb-4 flex items-center gap-1.5 text-2xs text-muted-foreground">
       <span>提示：</span>
       <kbd class="kbd">Ctrl</kbd>

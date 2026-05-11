@@ -1,11 +1,9 @@
 import { createApp } from "vue";
-import { createPinia } from "pinia";
 import { VueQueryPlugin, QueryClient } from "@tanstack/vue-query";
 
 import "./index.css";
 import App from "./App.vue";
 import { router } from "./router";
-import { permissionDirective } from "./directives/permission";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,8 +20,6 @@ const queryClient = new QueryClient({
 });
 
 createApp(App)
-  .use(createPinia())
   .use(router)
   .use(VueQueryPlugin, { queryClient })
-  .directive("permission", permissionDirective)
   .mount("#app");

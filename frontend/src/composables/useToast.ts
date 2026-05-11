@@ -11,15 +11,3 @@ export function useToast() {
     error: (text: string) => toast.error(text, { duration: Infinity }),
   };
 }
-
-// Helper for VueQuery-style mutations: hand to onSuccess/onError directly.
-export function useMutationToast() {
-  const t = useToast();
-  return {
-    onSuccess: (msg: string) => () => t.success(msg),
-    onError: (prefix?: string) => (e: unknown) => {
-      const text = e instanceof Error ? e.message : String(e);
-      t.error(prefix ? `${prefix}：${text}` : text);
-    },
-  };
-}

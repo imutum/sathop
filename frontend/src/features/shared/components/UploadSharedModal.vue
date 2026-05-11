@@ -73,7 +73,7 @@ const onSubmit = handleSubmit((vals) => {
 
 <template>
   <Modal :dirty="meta.dirty" @close="emit('close')">
-    <h2 class="font-display mb-5 text-lg font-semibold">
+    <h2 class="mb-5 text-lg font-semibold">
       {{ lockName ? `替换 ${lockName}` : "上传共享文件" }}
     </h2>
     <form class="space-y-4 text-sm" @submit.prevent="onSubmit">

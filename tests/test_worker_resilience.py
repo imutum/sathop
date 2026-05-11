@@ -63,11 +63,6 @@ def _http_error(status: int, path: str = "http://orch/api/x") -> httpx.HTTPStatu
     return httpx.HTTPStatusError(f"HTTP {status}", request=req, response=httpx.Response(status, request=req))
 
 
-class _FakeExit(Exception):
-    """Stand-in for os._exit — raised instead so pytest doesn't treat the
-    fatal path as a real process exit (which kills the test runner)."""
-
-
 # ─── work_dir orphan GC (pure function — fastest) ──────────────────────────
 
 
@@ -148,9 +143,9 @@ async def test_heartbeat_404_triggers_re_register(tmp_path):
 
 
 def _client_with_401(endpoint_filter: str | None = None) -> OrchestratorClient:
-    """Build an OrchestratorClient whose underlying httpx transport returns
-    401 for every (or only matching) request — the perfect way to exercise
-    `_check_auth` without spinning up a real server."""
+    """OrchestratorClient whose mocked transport returns 401 for every (or
+    only matching) request — exercises shared OrchClient._check across all
+    worker methods without a live server."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         if endpoint_filter is None or endpoint_filter in request.url.path:
@@ -175,22 +170,17 @@ def _client_with_401(endpoint_filter: str | None = None) -> OrchestratorClient:
         ("get_deletable", lambda c: c.get_deletable("t")),
     ],
 )
-async def test_agent_401_fatal(name, call, monkeypatch):
-    """Every orch endpoint shares one auth policy: 401 ⇒ os._exit(1). One
-    parametrized test catches a regression on any of the 4 entry points
-    (POST and GET both go through _post / _get)."""
-    exits: list[int] = []
+async def test_agent_401_raises_auth_token_invalid(name, call):
+    """Every orch endpoint shares one auth policy: 401 ⇒ AuthTokenInvalid.
+    The runtime's top-level `except* AuthTokenInvalid` turns this into a
+    clean SystemExit(1) so aclose runs and docker restart makes the
+    misconfig visible."""
+    from sathop.shared.orch_client import AuthTokenInvalid
 
-    def fake_exit(code: int) -> None:
-        exits.append(code)
-        raise _FakeExit(code)
-
-    monkeypatch.setattr("os._exit", fake_exit)
     c = _client_with_401()
     try:
-        with pytest.raises(_FakeExit):
+        with pytest.raises(AuthTokenInvalid):
             await call(c)
-        assert exits == [1], f"expected fatal exit on {name} 401"
     finally:
         await c.aclose()
 

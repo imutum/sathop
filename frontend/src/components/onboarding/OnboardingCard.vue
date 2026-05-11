@@ -30,7 +30,7 @@ const STEPS: Step[] = [
         class="flex h-full flex-col rounded-lg border border-border bg-muted/40 p-4"
       >
         <div class="flex items-center gap-2.5">
-          <span class="font-display grid h-7 w-7 place-items-center rounded-lg bg-primary/15 text-[12.5px] font-semibold text-primary tabular-nums">
+          <span class="grid h-7 w-7 place-items-center rounded-lg bg-primary/15 text-[12.5px] font-semibold text-primary tabular-nums">
             {{ i + 1 }}
           </span>
           <span class="text-muted-foreground"><Icon :name="s.icon" /></span>

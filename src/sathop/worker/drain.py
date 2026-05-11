@@ -1,9 +1,12 @@
-"""Worker graceful drain helpers."""
+"""Worker graceful drain helpers.
+
+The watchdog raises `SystemExit(0)` when handlers settle (or the deadline
+hits); the runtime's `except* SystemExit` swallows the wrapper so `main`'s
+`finally` aclose runs before the process exits."""
 
 from __future__ import annotations
 
 import asyncio
-import os
 import signal
 import time
 from collections.abc import Callable, Sized
@@ -28,12 +31,12 @@ async def drain_watchdog_loop(is_draining: Callable[[], bool], active: Sized, lo
     log.info("drain watchdog armed; %d handler(s) in flight", len(active))
     while time.monotonic() < deadline:
         if not active:
-            log.info("drain complete — all handlers finished, exiting")
-            os._exit(0)
+            log.info("drain complete — all handlers finished")
+            raise SystemExit(0)
         await asyncio.sleep(DRAIN_POLL_INTERVAL_SEC)
     log.warning(
         "drain timeout (%ds) reached with %d handler(s) still in flight — forcing exit; lease sweeper will reclaim",
         DRAIN_WATCHDOG_TIMEOUT_SEC,
         len(active),
     )
-    os._exit(0)
+    raise SystemExit(0)

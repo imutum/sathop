@@ -79,7 +79,7 @@ async function copySnippet() {
 
 <template>
   <Modal width-class="w-[min(820px,95vw)]" @close="$emit('close')">
-    <h2 class="font-display mb-1 text-lg font-semibold">接入新接收端</h2>
+    <h2 class="mb-1 text-lg font-semibold">接入新接收端</h2>
     <p class="mb-5 text-xs text-muted-foreground">
       填好下面的参数 → 复制下方一段命令到目标机器执行 → 接收端会自动注册并开始拉取产物
     </p>

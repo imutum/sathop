@@ -131,7 +131,11 @@ async def test_ack_posts_ackreport(captured_client):
     assert body["error"] is None
 
 
-async def test_4xx_raises_for_status():
+async def test_401_raises_auth_token_invalid():
+    """Receiver shares OrchClient with worker: 401 ⇒ AuthTokenInvalid; the
+    runtime's `except* AuthTokenInvalid` turns it into SystemExit(1)."""
+    from sathop.shared.orch_client import AuthTokenInvalid
+
     def handler(req: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"detail": "invalid token"})
 
@@ -142,7 +146,7 @@ async def test_4xx_raises_for_status():
         headers={"Authorization": "Bearer bad"},
     )
     try:
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(AuthTokenInvalid):
             await c.heartbeat(ReceiverHeartbeat(receiver_id="r", disk_free_gb=0.0))
     finally:
         await c.aclose()

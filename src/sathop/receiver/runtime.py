@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import shutil
 import signal
 import ssl
@@ -12,6 +11,7 @@ from pathlib import Path
 import httpx
 
 from sathop import __version__
+from sathop.shared.orch_client import AuthTokenInvalid
 from sathop.shared.protocol import AckReport, PullItem, PullRequest, ReceiverHeartbeat, ReceiverRegister
 
 from . import puller
@@ -69,8 +69,8 @@ class Receiver:
         log.info("drain watchdog armed; %d pull(s) in flight", len(self._inflight))
         while time.monotonic() < deadline:
             if not self._inflight:
-                log.info("drain complete — all pulls finished, exiting")
-                os._exit(0)
+                log.info("drain complete — all pulls finished")
+                raise SystemExit(0)
             await asyncio.sleep(DRAIN_POLL_INTERVAL_SEC)
         log.warning(
             "drain timeout (%ds) reached with %d pull(s) still in flight — forcing exit; "
@@ -78,7 +78,7 @@ class Receiver:
             DRAIN_WATCHDOG_TIMEOUT_SEC,
             len(self._inflight),
         )
-        os._exit(0)
+        raise SystemExit(0)
 
     def _build_pull_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -128,11 +128,17 @@ class Receiver:
         )
         log.info("registered as %s v%s (%s)", self.s.receiver_id, __version__, self.s.platform)
 
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(self._heartbeat_loop())
-            tg.create_task(self._pull_loop())
-            tg.create_task(self._drain_watchdog_loop())
-            tg.create_task(self._health.serve())
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(self._heartbeat_loop())
+                tg.create_task(self._pull_loop())
+                tg.create_task(self._drain_watchdog_loop())
+                tg.create_task(self._health.serve())
+        except* AuthTokenInvalid:
+            log.error("orchestrator rejected token (401) — exiting for container restart")
+            raise SystemExit(1) from None
+        except* SystemExit:
+            pass
 
     async def _heartbeat_loop(self) -> None:
         while True:
