@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useQuery } from "@tanstack/vue-query";
+import { RouterLink } from "vue-router";
+import { API } from "@/api";
 import { getToken } from "@/apiClient";
 import { useToast } from "@/composables/useToast";
 import { Icon } from "@/components/Icon";
@@ -19,6 +22,7 @@ import {
   workerOpsHint,
   workerPublicUrl,
 } from "@/features/onboarding/snippets";
+import { useRegistrationWatch } from "@/features/onboarding/useRegistrationWatch";
 
 defineEmits<{ close: [] }>();
 
@@ -102,9 +106,20 @@ const valid = computed(() => {
   return cfg.value.hostPort.length > 0 && !directHostInvalid.value;
 });
 
+// After-copy registration watcher. Shares the global TanStack Query cache,
+// so SSE-driven invalidation (useLiveStream) refetches automatically when
+// the orchestrator publishes a `workers` scope nudge — no extra polling.
+const workersQuery = useQuery({ queryKey: ["workers"], queryFn: API.workers });
+const registrationWatch = useRegistrationWatch(
+  computed(() => cfg.value.workerId),
+  workersQuery.data,
+  (w, id) => w.worker_id === id,
+);
+
 async function copySnippet() {
   await navigator.clipboard.writeText(snippet.value);
   toast.success("已复制到剪贴板");
+  registrationWatch.start();
 }
 </script>
 
@@ -354,6 +369,45 @@ async function copySnippet() {
           </Button>
         </div>
         <pre class="overflow-x-auto p-3 pr-20 font-mono text-2xs leading-relaxed">{{ snippet }}</pre>
+      </div>
+
+      <div
+        v-if="registrationWatch.state.value !== 'idle'"
+        class="mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs"
+        :class="{
+          'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300':
+            registrationWatch.state.value === 'waiting',
+          'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300':
+            registrationWatch.state.value === 'registered',
+          'border-border bg-muted/40 text-muted-foreground':
+            registrationWatch.state.value === 'timeout',
+        }"
+      >
+        <Icon
+          v-if="registrationWatch.state.value === 'waiting'"
+          name="refresh"
+          :size="13"
+          class="animate-spin"
+        />
+        <Icon v-else-if="registrationWatch.state.value === 'registered'" name="check" :size="13" />
+        <Icon v-else name="info" :size="13" />
+        <span class="flex-1">
+          <template v-if="registrationWatch.state.value === 'waiting'">
+            等待 <code class="font-mono">{{ cfg.workerId }}</code> 注册（60 秒内自动检测）…
+          </template>
+          <template v-else-if="registrationWatch.state.value === 'registered'">
+            <code class="font-mono">{{ cfg.workerId }}</code> 已注册
+            <RouterLink
+              :to="{ path: '/workers', query: { id: cfg.workerId } }"
+              class="ml-1 underline underline-offset-2"
+              @click="$emit('close')"
+            >查看节点 →</RouterLink>
+          </template>
+          <template v-else>
+            60 秒内未检测到注册。检查目标机器日志：
+            <code class="font-mono">docker logs sathop-worker</code>
+          </template>
+        </span>
       </div>
     </div>
 

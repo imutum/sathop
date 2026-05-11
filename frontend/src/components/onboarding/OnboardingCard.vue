@@ -10,8 +10,8 @@ type Step = {
 };
 
 const STEPS: Step[] = [
-  { icon: "workers", title: "启动 worker" },
-  { icon: "bundles", title: "上传任务包", cta: { to: "/bundles", label: "前往任务包", variant: "default" } },
+  { icon: "workers", title: "接入 worker", cta: { to: "/workers", label: "前往工作节点", variant: "default" } },
+  { icon: "bundles", title: "上传任务包", cta: { to: "/bundles", label: "前往任务包", variant: "outline" } },
   { icon: "pulse", title: "新建批次", cta: { to: "/batches", label: "前往批次", variant: "outline" } },
 ];
 </script>
@@ -38,11 +38,9 @@ const STEPS: Step[] = [
         </div>
         <p class="mt-3 flex-1 text-xs leading-relaxed text-muted-foreground">
           <template v-if="i === 0">
-            在 worker 主机上配置
-            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-mini text-foreground">deploy/worker/.env</code>，
-            <br />
-            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-mini text-foreground">docker compose up -d</code>
-            拉起即可注册。
+            点击「接入工作节点」按钮生成
+            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-mini text-foreground">docker run</code>
+            命令，复制到目标机器执行即可注册。
           </template>
           <template v-else-if="i === 1">用户脚本入口、依赖、输入/输出契约。</template>
           <template v-else>选定任务包 + 凭证，提交首组数据粒。</template>
