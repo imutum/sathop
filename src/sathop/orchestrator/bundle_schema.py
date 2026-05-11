@@ -31,6 +31,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from sathop.shared.safe_path import is_safe_name
+
 
 @dataclass(frozen=True)
 class InputSlot:
@@ -130,6 +132,10 @@ def parse_shared_files(manifest: dict) -> list[str]:
     for idx, item in enumerate(raw):
         if not isinstance(item, str) or not item:
             raise ValueError(f"shared_files[{idx}] must be a non-empty string")
+        if not is_safe_name(item):
+            raise ValueError(
+                f"shared_files[{idx}]={item!r} must be a single safe segment (no '/', '\\', '..')"
+            )
         if item in seen:
             raise ValueError(f"shared_files has duplicate entry {item!r}")
         seen.add(item)

@@ -7,12 +7,15 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：43（累计修复 11 项 — 3 high + 3 medium + 5 low）
-- 高优先级问题数：7（H-001/H-002/H-003 已修）
+- 总问题数：39（累计修复 15 项 — 6 high + 3 medium + 5 low + 1 cross）
+- 高优先级问题数：4（H-001/H-002/H-003/H-004/H-009/H-010 已修）
 - 中优先级问题数：21（M-007/M-008/M-018 已修）
 - 低优先级问题数：11（L-001/L-002/L-003/L-011/L-016 已修）
-- 交叉问题数：4
+- 交叉问题数：3（C-004 已修）
 - 已修复（按轮次倒序）：
+  - 第 3 轮：
+    - **H-004** add_granules 加 schema 验证；抽出 `_validate_granules_for_bundle` helper，create / add_granules 共用，duplicate / 错误以 422 拒绝
+    - **H-009 / H-010 / C-004** 路径穿越统一防护：新建 `sathop.shared.safe_path`（`is_safe_name` 输入边界 + `safe_join` I/O 边界），Pydantic 校验 `InputSpec.filename`，`parse_shared_files` 拒绝含分隔符 / `..` 的名称；worker `runtime.py` 输入下载、`shared.py` 共享写入、`storage.py` LocalStorage put/delete 全用 `safe_join`；附 21 个回归测试
   - 第 2 轮：
     - **H-001 / H-003** 抽取 `sathop.shared.orch_client.OrchClient` 作为基类；401 抛 `AuthTokenInvalid`（BaseException 子类，避免被 `except Exception` 吞），runtime 顶层 `except* AuthTokenInvalid` 转 `SystemExit(1)`，aclose 正常运行
     - **H-002** worker drain + receiver drain 的 `os._exit` 改为 `raise SystemExit(0)`；runtime `except* SystemExit` 让 aclose finally 完成后退出
@@ -31,16 +34,6 @@
 ---
 
 ## High Priority
-
-### H-004: add_granules 端点缺少 granule schema 验证
-
-- 类型：输入验证缺失
-- 位置：`src/sathop/orchestrator/api/batches.py:212-230`
-- 证据：`create` 端点（line 103）对每个 granule 调用 `validate_granule(schema, ...)`（line 146），但 `add_granules`（line 212）直接调用 `_new_granule()` 插入，完全跳过验证。注释和 `batch_transitions` 中也没有任何保护。
-- 问题描述：用户可以在批次创建后通过 `POST /api/batches/{id}/granules` 注入格式错误的 granule，worker lease 到这些 granule 后会在处理阶段崩溃。
-- 长期影响：数据完整性被破坏；worker 反复失败消耗资源。
-- 可能方向：在 `add_granules` 中加载 bundle manifest 和 schema，对每个新 granule 执行 `validate_granule`。
-- 置信度：高
 
 ### H-005: 9 个源模块完全没有测试覆盖
 
@@ -99,34 +92,6 @@
 - 长期影响：类型相关 bug 在 CI 不可见，只能在运行时暴露。
 - 可能方向：在 CI 中添加 `pyright` 步骤（或使用 `basedpyright`），并将 `pythonVersion` 对齐到 3.11。
 - 置信度：高
-
-### H-009: Shared files 名称存在路径穿越风险
-
-- 类型：安全
-- 位置：`src/sathop/worker/shared.py:144`、`src/sathop/worker/shared.py:42`、`src/sathop/orchestrator/bundle_schema.py:118-137`
-- 证据：
-  ```python
-  dest = shared_root / name   # shared.py:144 — name 直接来自 bundle manifest
-  ```
-  `parse_shared_files` (bundle_schema.py) 只验证 name 是非空字符串，不检查 `../`、路径分隔符或绝对路径。恶意 bundle 可以声明 `shared_files: ["../../../etc/cronjob"]`，worker 的 `_sync_one` 将下载内容写入缓存目录之外。
-- 问题描述：攻击者上传恶意 bundle → worker lease 到该 bundle → `ensure()` 调用 `shared_sync.sync()` → `dest = shared_root / "../../../etc/cronjob"` → 文件写入预期目录之外。
-- 长期影响：worker 节点文件系统被污染；可能覆盖关键系统文件（取决于 worker 的运行用户权限）。
-- 可能方向：在 `parse_shared_files` 中拒绝含 `/`、`\`、`..` 的 name，或在 `_sync_one` 中对解析后的路径做 containment 检查。
-- 置信度：高
-
-### H-010: InputSpec.filename 存在路径穿越风险
-
-- 类型：安全
-- 位置：`src/sathop/worker/runtime.py:323`
-- 证据：
-  ```python
-  dst = input_dir / spec.filename   # filename 来自 orchestrator lease 响应
-  ```
-  `InputSpec.filename` 无任何格式约束。虽然 orchestrator 被认为是可信的，但 DB 损坏或被攻破的 orchestrator 可以下发包含 `../../` 的 filename，使 worker 写入任意路径。
-- 问题描述：与 H-009 相同模式 — 用户提供的路径段直接拼接到基础目录上，不做 sanitization。
-- 长期影响：低概率但高影响 — 需要 orchestrator 先被攻破或 DB 损坏。
-- 可能方向：在 worker 端对 `filename` 做防御性验证（拒绝含路径分隔符的值），或使用 `Path.resolve()` + containment check。
-- 置信度：中
 
 ---
 
@@ -591,19 +556,6 @@
 - 问题描述：名称 `paused` 和 `pause_requested` 不足以区分"谁发起的暂停"和"当前是否暂停"。
 - 长期影响：新开发者需要读注释才能理解三个 paused 相关字段的区别。
 - 可能方向：`paused` → `backpressure_paused`；`pause_requested` → `operator_paused`。需要同步修改 DB 列、协议字段和前端。
-- 置信度：中
-
-### C-004: 用户提供的路径段在 3 处未经 sanitization 直接拼接到基础目录
-
-- 涉及范围：`worker/shared.py`、`worker/runtime.py`、`worker/runtime_helpers.py`
-- 共同模式：用户或 bundle 提供的字符串（`shared_files.name`、`InputSpec.filename`、`object_key_template` 渲染结果）直接拼接到 `Path` 基础目录上，不使用 `resolve()` + containment check
-- 代表性位置：
-  - `shared.py:144` — `dest = shared_root / name`
-  - `runtime.py:323` — `dst = input_dir / spec.filename`
-  - `runtime_helpers.py:53` — `render_key()` 返回的 key 在 `runtime.py:384` 用作 `storage.put(out, key)`
-- 问题描述：三处都可以通过 `../` 逃逸基础目录。第 1 处依赖于恶意 bundle manifest（但 bundle 来自用户上传），第 2 处依赖于 orchestrator 被攻破（低概率），第 3 处依赖于 bundle 控制的模板 + meta 数据。
-- 长期影响：路径穿越是 OWASP Top 10 问题。即使当前威胁模型下风险较低（orchestrator 可信），防御性编程仍应在 I/O 边界做 containment check。
-- 可能方向：在各拼接点统一使用 `(base / segment).resolve()` 并验证结果以 `base.resolve()` 为前缀。同时在输入验证层（bundle_schema、InputSpec 构建）拒绝含路径分隔符的值。
 - 置信度：中
 
 ---

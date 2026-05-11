@@ -83,6 +83,44 @@ def _new_granule(batch_id: str, granule: GranuleCreate) -> Granule:
     )
 
 
+async def _validate_granules_for_bundle(
+    s: AsyncSession,
+    bundle_ref: str,
+    granules: list[GranuleCreate],
+) -> list[str]:
+    """Validate each granule against its bundle's input schema; refuse on
+    duplicates or schema errors. Returns warnings (non-blocking, caller
+    logs them). Used by both `create` and `add_granules` so they reject
+    bad granules identically."""
+    name, version = parse_bundle_ref(bundle_ref)
+    bundle = await s.get(Bundle, (name, version))
+    if bundle is None:
+        raise HTTPException(422, f"bundle {name}@{version} not registered")
+    manifest = json.loads(bundle.manifest_json)
+    schema = InputsSchema.parse(manifest)
+    seen: set[str] = set()
+    dups: set[str] = set()
+    errors: list[str] = []
+    warnings: list[str] = []
+    for g in granules:
+        if g.granule_id in seen:
+            dups.add(g.granule_id)
+        seen.add(g.granule_id)
+        r = validate_granule(schema, g.granule_id, [i.model_dump() for i in g.inputs], g.meta)
+        errors.extend(r.errors)
+        warnings.extend(r.warnings)
+    if dups:
+        raise HTTPException(422, f"duplicate granule_id(s) within batch: {sorted(dups)[:20]}")
+    if errors:
+        raise HTTPException(
+            422,
+            "granule schema validation failed:\n"
+            + "\n".join(errors[:20])
+            + (f"\n... ({len(errors) - 20} more)" if len(errors) > 20 else ""),
+        )
+    return warnings
+
+
 async def _batch_granule_ids(s: AsyncSession, batch_id: str) -> list[str]:
     return (await s.execute(select(Granule.granule_id).where(Granule.batch_id == batch_id))).scalars().all()
 
@@ -104,6 +142,9 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
             raise HTTPException(409, "batch_id already exists")
         batch_id = req.batch_id
 
+    # Re-verify shared-file references at batch-create time too: a shared
+    # name could have been deleted after the bundle was uploaded, and we
+    # want the batch to fail fast rather than crash mid-lease.
     try:
         name, version = parse_bundle_ref(req.bundle_ref)
     except ValueError as e:
@@ -111,40 +152,15 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
     bundle = await s.get(Bundle, (name, version))
     if bundle is None:
         raise HTTPException(422, f"bundle {name}@{version} not registered — upload it to /api/bundles first")
-
-    # Re-verify shared-file references at batch-create time too: a shared name
-    # could have been deleted after the bundle was uploaded, and we want the
-    # batch to fail fast rather than crash mid-lease.
     manifest = json.loads(bundle.manifest_json)
-    shared_names = parse_shared_files(manifest)
-    missing_shared = [n for n in shared_names if await s.get(SharedFile, n) is None]
+    missing_shared = [n for n in parse_shared_files(manifest) if await s.get(SharedFile, n) is None]
     if missing_shared:
         raise HTTPException(
             422,
             f"bundle {name}@{version} references shared file(s) not in registry: {missing_shared}",
         )
 
-    schema = InputsSchema.parse(manifest)
-    seen: set[str] = set()
-    dups: set[str] = set()
-    all_errors: list[str] = []
-    all_warnings: list[str] = []
-    for g in req.granules:
-        if g.granule_id in seen:
-            dups.add(g.granule_id)
-        seen.add(g.granule_id)
-        r = validate_granule(schema, g.granule_id, [i.model_dump() for i in g.inputs], g.meta)
-        all_errors.extend(r.errors)
-        all_warnings.extend(r.warnings)
-    if dups:
-        raise HTTPException(422, f"duplicate granule_id(s) within batch: {sorted(dups)[:20]}")
-    if all_errors:
-        raise HTTPException(
-            422,
-            "granule schema validation failed:\n"
-            + "\n".join(all_errors[:20])
-            + (f"\n... ({len(all_errors) - 20} more)" if len(all_errors) > 20 else ""),
-        )
+    warnings = await _validate_granules_for_bundle(s, req.bundle_ref, req.granules)
 
     b = Batch(
         batch_id=batch_id,
@@ -161,7 +177,7 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
     for g in req.granules:
         s.add(_new_granule(batch_id, g))
     await log(s, "orchestrator", f"created batch {batch_id} with {len(req.granules)} granules")
-    for w in all_warnings[:20]:
+    for w in warnings[:20]:
         await log(s, "orchestrator", w, level="warn")
     await commit_and_publish(s, "batches")
 
@@ -201,7 +217,8 @@ async def detail(batch_id: str, s: AsyncSession = Depends(session)) -> BatchSumm
 
 @router.post("/{batch_id}/granules")
 async def add_granules(batch_id: str, req: GranuleBulkAdd, s: AsyncSession = Depends(session)) -> dict:
-    await _get_batch_or_404(s, batch_id)
+    batch = await _get_batch_or_404(s, batch_id)
+    warnings = await _validate_granules_for_bundle(s, batch.bundle_ref, req.granules)
 
     existing = set(
         (await s.execute(select(Granule.granule_id).where(Granule.batch_id == batch_id))).scalars().all()
@@ -216,6 +233,8 @@ async def add_granules(batch_id: str, req: GranuleBulkAdd, s: AsyncSession = Dep
             continue
         s.add(_new_granule(batch_id, g))
         added += 1
+    for w in warnings[:20]:
+        await log(s, "orchestrator", w, level="warn")
     await commit_and_publish(s, "batches" if added else None)
     return {"added": added, "skipped": skipped}
 

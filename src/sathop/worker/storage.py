@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 from sathop.shared.hashing import sha256_file
 from sathop.shared.protocol import UploadedObject
+from sathop.shared.safe_path import safe_join
 
 
 class Storage(Protocol):
@@ -37,7 +38,7 @@ class LocalStorage:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def put(self, src: Path, object_key: str) -> UploadedObject:
-        dst = self.root / object_key
+        dst = safe_join(self.root, object_key)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), dst)
         return UploadedObject(
@@ -48,10 +49,10 @@ class LocalStorage:
         )
 
     def delete(self, object_key: str) -> None:
-        p = self.root / object_key
+        p = safe_join(self.root, object_key)
         p.unlink(missing_ok=True)
         for parent in p.parents:
-            if parent == self.root or not parent.exists():
+            if parent == self.root.resolve() or not parent.exists():
                 break
             try:
                 parent.rmdir()

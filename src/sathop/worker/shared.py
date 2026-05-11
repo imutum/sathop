@@ -18,6 +18,7 @@ from pathlib import Path
 
 from sathop.shared.http import bearer_headers
 from sathop.shared.locks import NamedLockRegistry
+from sathop.shared.safe_path import safe_join
 
 log = logging.getLogger("sathop.worker.shared")
 
@@ -131,7 +132,7 @@ def _sync_one(name: str, shared_root: Path, orchestrator_url: str, token: str) -
         digest = h.hexdigest()
         if digest != remote_sha:
             raise RuntimeError(f"shared {name!r} sha256 mismatch: orch={remote_sha} got={digest}")
-        dest = shared_root / name
+        dest = safe_join(shared_root, name)
         tmp_path.replace(dest)
         _sidecar_path(shared_root, name).write_text(digest, encoding="utf-8")
     except Exception:

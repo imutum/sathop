@@ -24,6 +24,7 @@ from sathop.shared.protocol import (
     WorkerHeartbeat,
     WorkerRegister,
 )
+from sathop.shared.safe_path import safe_join
 
 from . import bundle, downloader, drain, storage, tls
 from ._paths import work_dir_path
@@ -331,7 +332,7 @@ class Worker:
             await self._report_state(gid, GranuleState.DOWNLOADING)
             log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
             for spec in item.inputs:
-                dst = input_dir / spec.filename
+                dst = safe_join(input_dir, spec.filename)
                 auth = auth_for(item.credentials, spec.credential, gid, log)
                 cb = self._make_download_progress_cb(gid, spec.filename)
                 await self.downloader.fetch(spec.url, dst, auth=auth, progress_cb=cb)

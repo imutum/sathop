@@ -4,7 +4,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from sathop.shared.safe_path import is_safe_name
 
 BUNDLE_REF_PREFIX = "orch:"
 
@@ -201,6 +203,13 @@ class InputSpec(BaseModel):
     size: int | None = None
     checksum: str | None = None
     credential: str | None = None
+
+    @field_validator("filename")
+    @classmethod
+    def _no_path_traversal(cls, v: str) -> str:
+        if not is_safe_name(v):
+            raise ValueError(f"filename must be a single safe segment (no '/', '\\', '..'); got {v!r}")
+        return v
 
 
 class GranuleCreate(BaseModel):
