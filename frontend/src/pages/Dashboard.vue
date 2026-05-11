@@ -2,7 +2,7 @@
 import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
-import { API, STATE_ORDER, type GranuleState } from "@/api";
+import { API, type GranuleState } from "@/api";
 import { fmtAge, stateLabel } from "@/i18n";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ import HintTip from "@/components/HintTip.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import Stat from "@/components/Stat.vue";
 import PipelineHealth from "@/features/batch/components/PipelineHealth.vue";
+import { pipelineSegments, pipelineTotals } from "@/features/batch/pipelineSummary";
 import NodeStat from "@/features/nodes/components/NodeStat.vue";
 import OnboardingCard from "@/components/onboarding/OnboardingCard.vue";
 import { Icon } from "@/components/Icon";
@@ -46,16 +47,10 @@ const stuck = computed(() => overview.data.value?.stuck_by_state ?? {});
 const stuckTotal = computed(() =>
   Object.values(stuck.value).reduce((a, b) => a + (b ?? 0), 0),
 );
-const failed = computed(() => (counts.value.failed ?? 0) + (counts.value.blacklisted ?? 0));
-// 进行中 = STATE_ORDER 减去终态 deleted 和 待分配 pending（pending 在 PipelineHealth
-// chip 单独显示，避免顶部 stat 被四个卡片占满）。
-const inflightTotal = computed(() =>
-  STATE_ORDER.reduce(
-    (s, k) => (k === "deleted" || k === "pending" ? s : s + (counts.value[k] ?? 0)),
-    0,
-  ),
-);
-const done = computed(() => counts.value.deleted ?? 0);
+const pipeline = computed(() => pipelineTotals(counts.value));
+const failed = computed(() => pipeline.value.failed);
+const inflightTotal = computed(() => pipeline.value.active);
+const done = computed(() => pipeline.value.done);
 
 const stuckHint = computed(() =>
   stuckTotal.value > 0
@@ -78,7 +73,7 @@ const activeReceivers = computed(
     ).length,
 );
 
-const hasChartData = computed(() => STATE_ORDER.some((s) => (counts.value[s] ?? 0) > 0));
+const hasChartData = computed(() => pipelineSegments(counts.value).length > 0);
 
 const active = computed(() => inflight.data.value ?? []);
 
@@ -120,8 +115,6 @@ function fmtHours(h: number): string {
 
     <OnboardingCard v-if="firstRun" />
 
-    <!-- Four stat cards. Each carries a tooltip that explains *what the
-         number means* — operators new to SatHop shouldn't have to dig. -->
     <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
       <Stat
         label="进行中"
@@ -296,8 +289,6 @@ function fmtHours(h: number): string {
       </Card>
     </div>
 
-    <!-- Stuck panel — only shown when something is genuinely stuck. The
-         border-warning rim makes it impossible to miss. -->
     <Card v-if="stuckTotal > 0" class="border-warning/40">
       <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
         <div class="space-y-1.5">

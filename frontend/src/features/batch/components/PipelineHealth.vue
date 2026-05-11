@@ -1,19 +1,12 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { STATE_ORDER, type GranuleState } from "@/api";
+import type { GranuleState } from "@/api";
 import { stateLabel } from "@/i18n";
+import { pipelineSegments, pipelineTotals } from "@/features/batch/pipelineSummary";
 
-// Pipeline health visualization: a single horizontal stacked bar showing
-// where each granule currently sits in the pipeline, plus a 4-cell summary
-// strip (待分配 / 进行中 / 已完成 / 异常). Stage tints are constrained —
-// neutral for waiting, sky for in-flight, success for done, danger for
-// errored — so the eye can read distribution at a glance.
 const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
 
-// Stage tint palette. The granule pipeline has 11 named states, so we
-// allow Tailwind palette colors here (sky/amber/violet) — they're the
-// only way to give each state a distinguishable hue. This palette is
-// quarantined to PipelineHealth; everything else stays on tokens.
+// Stage colors stay local because they are presentation-only, not pipeline semantics.
 const STAGE: Record<GranuleState, { bar: string; chip: string; dot: string }> = {
   pending:     { bar: "bg-muted-foreground/40", chip: "text-muted-foreground", dot: "bg-muted-foreground" },
   queued:      { bar: "bg-amber-500/70",        chip: "text-amber-600",        dot: "bg-amber-500" },
@@ -28,38 +21,17 @@ const STAGE: Record<GranuleState, { bar: string; chip: string; dot: string }> = 
   blacklisted: { bar: "bg-danger/70",           chip: "text-danger",           dot: "bg-danger" },
 };
 
-// 4 大命运分桶 — 跟 i18n 10 阶段命名对齐：
-//   待分配  = pending                          (orchestrator 还没派)
-//   进行中  = queued..downloaded..uploaded..acked  (worker 链 + 分发 + 清理)
-//   已完成  = deleted                          (终态)
-//   异常    = failed + blacklisted             (待重试 + 已拉黑)
-const PENDING: GranuleState[] = ["pending"];
-const DONE: GranuleState[] = ["deleted"];
-const FAILED: GranuleState[] = ["failed", "blacklisted"];
-const IN_PROGRESS: GranuleState[] = [
-  "queued",
-  "downloading",
-  "downloaded",
-  "processing",
-  "processed",
-  "uploaded",
-  "acked",
-];
-
-const total = computed(() =>
-  STATE_ORDER.reduce((s, k) => s + (props.counts[k] ?? 0), 0),
-);
-const pending = computed(() => PENDING.reduce((s, k) => s + (props.counts[k] ?? 0), 0));
-const inFlight = computed(() => IN_PROGRESS.reduce((s, k) => s + (props.counts[k] ?? 0), 0));
-const done = computed(() => DONE.reduce((s, k) => s + (props.counts[k] ?? 0), 0));
-const failed = computed(() => FAILED.reduce((s, k) => s + (props.counts[k] ?? 0), 0));
+const totals = computed(() => pipelineTotals(props.counts));
+const total = computed(() => totals.value.total);
+const pending = computed(() => totals.value.pending);
+const inFlight = computed(() => totals.value.active);
+const done = computed(() => totals.value.done);
+const failed = computed(() => totals.value.failed);
 
 const segments = computed(() =>
-  STATE_ORDER.filter((s) => (props.counts[s] ?? 0) > 0).map((s) => ({
-    state: s,
-    label: stateLabel(s),
-    value: props.counts[s] ?? 0,
-    pct: total.value > 0 ? ((props.counts[s] ?? 0) / total.value) * 100 : 0,
+  pipelineSegments(props.counts).map((seg) => ({
+    ...seg,
+    label: stateLabel(seg.state),
   })),
 );
 
@@ -78,8 +50,6 @@ const chips = computed(() => [
 
 <template>
   <div class="space-y-5">
-    <!-- Stacked segment bar — one slice per non-zero stage, tinted per
-         STAGE map. Hover-tooltips on each slice expose the state name. -->
     <div>
       <div class="mb-2 flex items-center justify-between text-xs">
         <span class="text-muted-foreground">阶段分布</span>
@@ -103,8 +73,6 @@ const chips = computed(() => [
       </div>
     </div>
 
-    <!-- 4-chip summary — terminal / inflight / pending / failed buckets,
-         each labeled in Chinese with a percentage of total. -->
     <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
       <div
         v-for="c in chips"
@@ -125,8 +93,6 @@ const chips = computed(() => [
       </div>
     </div>
 
-    <!-- Per-stage legend — only states with count > 0 appear, sorted by
-         pipeline order so the eye reads the journey left → right. -->
     <div v-if="segments.length > 0" class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
       <span
         v-for="seg in segments"
