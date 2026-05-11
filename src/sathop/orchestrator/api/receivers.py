@@ -113,8 +113,9 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
         raise HTTPException(404, "object not found")
 
     if not req.success:
-        obj.failed_pulls = (obj.failed_pulls or 0) + 1
-        exhausted = obj.failed_pulls >= settings.max_pull_failures
+        new_failed = (obj.failed_pulls or 0) + 1
+        obj.failed_pulls = new_failed
+        exhausted = new_failed >= settings.max_pull_failures
         await log(
             s,
             req.receiver_id,

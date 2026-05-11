@@ -153,13 +153,12 @@ async def serve_static(
     root.mkdir(parents=True, exist_ok=True)
     app.mount("/", StaticFiles(directory=str(root)), name="storage")
 
-    kwargs: dict[str, object] = {
-        "host": "0.0.0.0",
-        "port": port,
-        "log_level": "warning",
-    }
-    if tls_cert and tls_key:
-        kwargs["ssl_certfile"] = str(tls_cert)
-        kwargs["ssl_keyfile"] = str(tls_key)
-    config = uvicorn.Config(app, **kwargs)
+    config = uvicorn.Config(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="warning",
+        ssl_certfile=str(tls_cert) if tls_cert and tls_key else None,
+        ssl_keyfile=str(tls_key) if tls_cert and tls_key else None,
+    )
     await uvicorn.Server(config).serve()

@@ -122,7 +122,9 @@ async def _validate_granules_for_bundle(
 
 
 async def _batch_granule_ids(s: AsyncSession, batch_id: str) -> list[str]:
-    return (await s.execute(select(Granule.granule_id).where(Granule.batch_id == batch_id))).scalars().all()
+    return list(
+        (await s.execute(select(Granule.granule_id).where(Granule.batch_id == batch_id))).scalars().all()
+    )
 
 
 @router.post("", response_model=BatchSummary)

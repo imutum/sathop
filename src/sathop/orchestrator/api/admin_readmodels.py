@@ -61,11 +61,15 @@ def stuck_granule_row(granule: Granule, *, now: datetime) -> dict[str, Any]:
 
 
 async def admin_overview(s: AsyncSession, *, now: datetime) -> dict[str, Any]:
-    state_counts = dict(
-        (await s.execute(select(Granule.state, func.count(Granule.granule_id)).group_by(Granule.state))).all()
-    )
-    stuck = dict(
-        (
+    state_counts = {
+        state: count
+        for state, count in (
+            await s.execute(select(Granule.state, func.count(Granule.granule_id)).group_by(Granule.state))
+        ).all()
+    }
+    stuck = {
+        state: count
+        for state, count in (
             await s.execute(
                 select(Granule.state, func.count(Granule.granule_id))
                 .where(Granule.state.in_(list(NON_TERMINAL)))
@@ -73,7 +77,7 @@ async def admin_overview(s: AsyncSession, *, now: datetime) -> dict[str, Any]:
                 .group_by(Granule.state)
             )
         ).all()
-    )
+    }
     last_events = (await s.execute(select(Event).order_by(Event.id.desc()).limit(10))).scalars().all()
     return {
         "state_counts": state_counts,

@@ -31,6 +31,26 @@ jobs:
       - name: ruff format --check
         run: uv run ruff format --check .
 
+  typecheck:
+    # Pyright on src/ only — pyrightconfig.json's "include" scopes the check
+    # so we don't drag in test-only patterns. Runs against full deps (typed
+    # transitive deps matter for inference) but isn't gated on tests passing.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Sync workspace (prod + dev deps)
+        run: uv sync --all-extras --dev
+      - name: pyright
+        run: uv tool run pyright src
+
   gitleaks:
     # Scan full history for accidentally committed secrets. Uses the gitleaks
     # binary directly (not gitleaks-action) so it works for both public and

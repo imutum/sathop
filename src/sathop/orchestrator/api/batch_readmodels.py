@@ -125,7 +125,7 @@ async def batch_exhausted_objects_bulk(s: AsyncSession, batch_ids: list[str]) ->
         .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
         .group_by(Granule.batch_id)
     )
-    return dict((await s.execute(stmt)).all())
+    return {bid: n for bid, n in (await s.execute(stmt)).all()}
 
 
 async def exhausted_objects_by_granule(s: AsyncSession, granule_ids: list[str]) -> dict[str, int]:
@@ -139,4 +139,4 @@ async def exhausted_objects_by_granule(s: AsyncSession, granule_ids: list[str]) 
         .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
         .group_by(GranuleObject.granule_id)
     )
-    return dict((await s.execute(stmt)).all())
+    return {gid: n for gid, n in (await s.execute(stmt)).all()}

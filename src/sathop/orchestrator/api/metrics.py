@@ -108,15 +108,21 @@ async def _collect(s: AsyncSession) -> bytes:
 
     # Granule state counts — seed every state so absent rows still emit 0
     # (otherwise Prometheus can't distinguish "0" from "series never existed").
-    state_counts = dict(
-        (await s.execute(select(Granule.state, func.count(Granule.granule_id)).group_by(Granule.state))).all()
-    )
+    state_counts: dict[str, int] = {
+        state: count
+        for state, count in (
+            await s.execute(select(Granule.state, func.count(Granule.granule_id)).group_by(Granule.state))
+        ).all()
+    }
     for st in GranuleState:
         g_granules.labels(state=st.value).set(state_counts.get(st.value, 0))
 
-    batch_counts = dict(
-        (await s.execute(select(Batch.status, func.count(Batch.batch_id)).group_by(Batch.status))).all()
-    )
+    batch_counts: dict[str, int] = {
+        status: count
+        for status, count in (
+            await s.execute(select(Batch.status, func.count(Batch.batch_id)).group_by(Batch.status))
+        ).all()
+    }
     for st, n in batch_counts.items():
         g_batches.labels(status=st).set(n)
 
@@ -148,19 +154,21 @@ async def _collect(s: AsyncSession) -> bytes:
         g_recv_bps.labels(receiver_id=r.receiver_id).set(r.recent_pull_bps or 0)
 
     day_ago = now - timedelta(hours=24)
-    ev_counts = dict(
-        (
+    ev_counts: dict[str, int] = {
+        level: count
+        for level, count in (
             await s.execute(
                 select(Event.level, func.count(Event.id)).where(Event.ts >= day_ago).group_by(Event.level)
             )
         ).all()
-    )
+    }
     for level in ("info", "warn", "error"):
         g_events24.labels(level=level).set(ev_counts.get(level, 0))
 
     stuck_threshold = now - timedelta(hours=STUCK_AGE_HOURS)
-    stuck = dict(
-        (
+    stuck: dict[str, int] = {
+        state: count
+        for state, count in (
             await s.execute(
                 select(Granule.state, func.count(Granule.granule_id))
                 .where(Granule.state.in_(list(NON_TERMINAL)))
@@ -168,7 +176,7 @@ async def _collect(s: AsyncSession) -> bytes:
                 .group_by(Granule.state)
             )
         ).all()
-    )
+    }
     for st in NON_TERMINAL:
         g_stuck.labels(state=st).set(stuck.get(st, 0))
 

@@ -2,6 +2,7 @@
   "venvPath": ".",
   "venv": ".venv",
   "pythonVersion": "3.11",
+  "include": ["src"],
   "extraPaths": ["src"],
   "exclude": ["legacy/**", ".venv/**", "**/__pycache__"],
   "reportMissingImports": "error"

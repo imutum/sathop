@@ -7,12 +7,16 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：10（累计修复 43 项 — 6 high + 21 medium + 12 low + 3 cross + 1 关闭项 L-009/C-002）
-- 高优先级问题数：4（H-001/H-002/H-003/H-004/H-009/H-010 已修）
+- 总问题数：7（累计修复 46 项 — 7 high + 21 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
+- 高优先级问题数：3（H-001/H-002/H-003/H-004/H-008/H-009/H-010 已修）
 - 中优先级问题数：2（M-001/M-002/M-003/M-004/M-005/M-006/M-007/M-008/M-009/M-010/M-011/M-012/M-013/M-014/M-015/M-016/M-017/M-018/M-021/M-022/M-023/M-024 已修）
-- 低优先级问题数：3（L-001/L-002/L-003/L-004/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
+- 低优先级问题数：1（L-001/L-002/L-003/L-004/L-005/L-006/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
 - 交叉问题数：1（C-001/C-004 已修；C-002 关闭）
 - 已修复（按轮次倒序）：
+  - 第 10 轮：
+    - **H-008** 在 CI 加 `typecheck` job 跑 `uv tool run pyright src`；先把 `pyrightconfig.json` 加 `"include": ["src"]` 收紧扫描范围，并清掉 13 处真实类型问题：`worker/storage.py::serve_static` 抛弃 `**dict[str, object]` 改为显式 kwargs；`admin_readmodels` / `batch_readmodels` / `metrics.py` 共 6 处 `dict((await s.execute(...)).all())` 改成 typed dict-comp；`batches._batch_granule_ids` 用 `list(...)` 包 `Sequence[str]`；`receivers.ack` 把 `obj.failed_pulls` 重赋值前抽出局部变量让 pyright 能 narrow None。`pyright src` 现在 0 error
+    - **L-005** 项目根加 `.env.example`，列出三个组件本地 dev 需要的最小变量集，明确指向 `deploy/<component>/.env.example` 作为容器部署的权威模板
+    - **L-006** orchestrator `.env.example` 补 `SATHOP_MAX_INFLIGHT_PER_WORKER` 注释；worker `.env.example` 补 `SATHOP_PROCESS_CONCURRENCY` / `SATHOP_UPLOAD_CONCURRENCY` / `SATHOP_TLS_CERT` / `SATHOP_TLS_KEY`（默认注释掉，描述默认值与什么时候打开）
   - 第 9 轮：
     - **M-006** C-001 已用 httpx 替换 urllib，配 30 s/120 s/600 s 显式超时，issue 原描述（线程池被永久占用、urllib 不一致）已不成立；保留同步调用是 ensure() 路径有意为之（一次性，无需取消语义），关闭
     - **M-011** `deploy/worker/docker-compose.yml` 把 `minio:latest` / `aria2-pro:latest` 改为 `${SATHOP_MINIO_TAG:-RELEASE.2024-12-18T13-15-44Z}` / `${SATHOP_ARIA2_TAG:-2024.10.20}`；`.env.example` 加可选覆盖说明 — 默认锁定到已知稳定版，操作员验证过新版后可单点覆盖
@@ -117,16 +121,6 @@
 - 可能方向：创建非 root 用户（如 `app` 或 `sathop`），在 COPY 源码后 `USER app`。
 - 置信度：高
 
-### H-008: CI 流程无类型检查步骤
-
-- 类型：CI/CD 缺口
-- 位置：`.github/workflows/ci.yml`
-- 证据：CI 运行 ruff lint + format check + pytest，但没有 pyright 或 mypy 步骤。`pyrightconfig.json` 存在于仓库中（`reportMissingImports: "error"`），但从未在 CI 中执行。
-- 问题描述：类型错误直接流入生产环境而未被检测到。Python 3.13（pyrightconfig 指定）与 Python 3.11（CI/生产实际使用）之间的版本差异会进一步产生误报或漏报。
-- 长期影响：类型相关 bug 在 CI 不可见，只能在运行时暴露。
-- 可能方向：在 CI 中添加 `pyright` 步骤（或使用 `basedpyright`），并将 `pythonVersion` 对齐到 3.11。
-- 置信度：高
-
 ---
 
 ## Medium Priority
@@ -158,26 +152,6 @@
 ---
 
 ## Low Priority
-
-### L-005: 没有根级 .env.example 文件
-
-- 类型：文档
-- 位置：项目根目录
-- 证据：`deploy/<component>/.env.example` 存在，但根目录没有 `.env.example`。`.dockerignore` 忽略 `.env` 意味着用户会在根目录创建 `.env` 用于本地开发，但缺少模板。
-- 问题描述：新开发者需要从 deploy 目录的模板自行推导根级 env。
-- 长期影响：新手引导摩擦。
-- 可能方向：创建根级 `.env.example` 或 README 指向 deploy 目录的模板。
-- 置信度：中
-
-### L-006: receiver/worker .env.example 缺少部分环境变量文档
-
-- 类型：文档
-- 位置：`deploy/worker/.env.example`、`deploy/orchestrator/.env.example`
-- 证据：worker 模板缺少 `SATHOP_PROCESS_CONCURRENCY`、`SATHOP_UPLOAD_CONCURRENCY`、`SATHOP_TLS_CERT`、`SATHOP_TLS_KEY`。orchestrator 模板缺少 `SATHOP_MAX_INFLIGHT_PER_WORKER`、`SATHOP_BUNDLES`、`SATHOP_SHARED`。
-- 问题描述：操作员可能不知道这些配置项存在。
-- 长期影响：无法充分利用配置项。
-- 可能方向：补全 `.env.example` 文件。
-- 置信度：中
 
 ### L-007: publish-before-commit vs commit_and_publish 模式不统一 — 已解决
 
@@ -219,13 +193,6 @@
 - 不确定点：当前的两种 scheme 覆盖了已知数据源（NASA Earthdata、LADSWeb），是否需要提前设计扩展点？
 - 为什么重要：如果需要新 scheme，当前设计需要修改 Pydantic model（破坏 API 兼容性）和两个 downloader 的 auth translator。
 - 建议后续检查方向：survey 未来可能接入的数据源认证方式。
-
-### Q-003: pyrightconfig.json 的 pythonVersion=3.13 是故意的吗？
-
-- 背景：pyrightconfig 指定 3.13，但 CI 和 Docker 镜像使用 3.11。`pyproject.toml` 声明 `>=3.11`。
-- 不确定点：可能是开发者的本地 Python 版本（3.13）被写入配置，而非项目目标版本。
-- 为什么重要：类型检查结果不可信会导致类型错误流入生产。
-- 建议后续检查方向：确认团队的标准 Python 版本后对齐。
 
 ### Q-004: 项目是否需要端到端集成测试？
 
