@@ -9,10 +9,6 @@ import { useTheme } from "@/composables/useTheme";
 import { useLiveStream } from "@/composables/useLiveStream";
 import { logout } from "@/composables/useAuthGate";
 
-// Sidebar + topbar + <router-view>. Sidebar collapses (persisted), mobile
-// gets the same nav via a Sheet drawer. Topbar carries only the bits an
-// operator actually checks at a glance: SSE uplink + theme toggle.
-
 const { connected } = useLiveStream();
 const route = useRoute();
 
@@ -45,7 +41,6 @@ const isDark = computed(() => effective.value === "dark");
 
 <template>
   <div class="flex h-full bg-background text-foreground">
-    <!-- ─── Sidebar (md+) ────────────────────────────────────────────────── -->
     <aside
       :class="[
         collapsed ? 'w-[72px]' : 'w-60',
@@ -123,7 +118,6 @@ const isDark = computed(() => effective.value === "dark");
         </button>
       </div>
 
-      <!-- Collapse toggle anchored to the sidebar's right edge. -->
       <button
         type="button"
         @click="collapsed = !collapsed"
@@ -135,7 +129,6 @@ const isDark = computed(() => effective.value === "dark");
       </button>
     </aside>
 
-    <!-- ─── Mobile drawer (same nav inside Sheet) ────────────────────────── -->
     <Sheet v-model:open="mobileOpen">
       <SheetContent side="left" class="w-72 max-w-[80vw] gap-0 p-0">
         <div class="flex h-16 items-center gap-3 border-b border-border px-4">
@@ -189,7 +182,6 @@ const isDark = computed(() => effective.value === "dark");
       </SheetContent>
     </Sheet>
 
-    <!-- ─── Main column ──────────────────────────────────────────────────── -->
     <div class="flex min-w-0 flex-1 flex-col">
       <header class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/85 px-4 backdrop-blur-md md:px-6 lg:px-8">
         <div class="flex items-center gap-3">
