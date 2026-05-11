@@ -10,7 +10,6 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
-    IN_FLIGHT_STATES,
     LEASED_STATES,
     BatchCreate,
     BatchSummary,
@@ -46,6 +45,7 @@ from .batch_readmodels import (
     exhausted_objects_by_granule,
     granule_row,
 )
+from .batch_transitions import CANCELLABLE_STATES, cancel_granule_state, retry_granule_state
 
 
 def _parse_orch_ref(ref: str) -> tuple[str, str]:
@@ -289,7 +289,7 @@ async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dic
     )
     rows = (await s.execute(stmt)).scalars().all()
     for granule in rows:
-        _retry_one(granule, now)
+        retry_granule_state(granule, now)
     if rows:
         await commit_and_publish(s, "batches")
     else:
@@ -297,44 +297,10 @@ async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dic
     return {"ok": True, "reset": len(rows)}
 
 
-# Cancel makes sense while the worker hasn't released the lease yet. After
-# UPLOADED the data is already on worker storage (and soon on receiver), so
-# cancel is a no-op operationally.
-_CANCELLABLE = set(IN_FLIGHT_STATES)
-
-# retry_count resets to 0 so the auto-blacklist counter starts fresh for the retry.
-_RETRYABLE = {
-    GranuleState.FAILED.value,
-    GranuleState.BLACKLISTED.value,
-}
-
-
-def _cancel_one(g: Granule, now) -> bool:
-    if g.state not in _CANCELLABLE:
-        return False
-    g.state = GranuleState.BLACKLISTED.value
-    g.leased_by = None
-    g.lease_expires_at = None
-    g.updated_at = now
-    return True
-
-
-def _retry_one(g: Granule, now) -> bool:
-    if g.state not in _RETRYABLE:
-        return False
-    g.state = GranuleState.PENDING.value
-    g.retry_count = 0
-    g.error = None
-    g.leased_by = None
-    g.lease_expires_at = None
-    g.updated_at = now
-    return True
-
-
 @router.post("/{batch_id}/granules/{granule_id}/cancel")
 async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depends(session)) -> dict:
     g = await _granule_in_batch_or_404(s, batch_id, granule_id)
-    if not _cancel_one(g, utcnow()):
+    if not cancel_granule_state(g, utcnow()):
         raise HTTPException(409, f"cannot cancel granule in state {g.state!r}")
     await log(s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id)
     await commit_and_publish(s, "batches")
@@ -344,7 +310,7 @@ async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depen
 @router.post("/{batch_id}/granules/{granule_id}/retry")
 async def retry_granule(batch_id: str, granule_id: str, s: AsyncSession = Depends(session)) -> dict:
     g = await _granule_in_batch_or_404(s, batch_id, granule_id)
-    if not _retry_one(g, utcnow()):
+    if not retry_granule_state(g, utcnow()):
         raise HTTPException(409, f"cannot retry granule in state {g.state!r}")
     await log(s, "admin", f"retried granule {granule_id}", granule_id=granule_id)
     await commit_and_publish(s, "batches")
@@ -361,14 +327,14 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
             await s.execute(
                 select(Granule)
                 .where(Granule.batch_id == batch_id)
-                .where(Granule.state.in_(list(_CANCELLABLE)))
+                .where(Granule.state.in_(list(CANCELLABLE_STATES)))
             )
         )
         .scalars()
         .all()
     )
     for g in rows:
-        _cancel_one(g, now)
+        cancel_granule_state(g, now)
     if rows:
         await log(s, "admin", f"cancelled batch {batch_id}: {len(rows)} granules blacklisted", level="warn")
         await commit_and_publish(s, "batches")

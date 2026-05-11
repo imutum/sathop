@@ -1,27 +1,28 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree contains a focused `batches.py` read-model split.
+- Working tree contains a focused batch write-side state-transition split.
 - `src/sathop/orchestrator/api/batch_readmodels.py` owns BatchSummary/GranuleRow assembly, state counts, ETA, and exhausted-object read queries.
-- `src/sathop/orchestrator/api/batches.py` now keeps route handlers and write-side mutations.
+- `src/sathop/orchestrator/api/batch_transitions.py` owns cancel/retry granule state rules.
+- `src/sathop/orchestrator/api/batches.py` now keeps route handlers, DB queries, transaction boundaries, logging, and response wiring.
 
 ## Completed this round
-- Established this state file because none existed.
-- Reviewed the existing uncommitted batch read-model split against the cleanup goal.
-- Verified the split is a long-term boundary improvement rather than a local patch: read-side query/model assembly is separated from write endpoints without changing behavior.
-- Confirmed tests had already been updated to import ETA/count helpers from the new read-model module.
+- Re-read `state.md`, confirmed the previous read-model split was committed and the working tree was clean.
+- Re-opened `batches.py` write-side code and chose the smallest stable boundary: pure cancel/retry state transitions.
+- Added `batch_transitions.py` with `CANCELLABLE_STATES`, `cancel_granule_state`, and `retry_granule_state`.
+- Updated `batches.py` to use the transition module while keeping write-side queries and commit/log behavior in the API file.
 
 ## Validation
-- Batch tests: `.venv/Scripts/python.exe -m pytest tests/test_batch_admin.py tests/test_batch_env.py tests/test_batch_granules.py tests/test_batch_credentials.py tests/test_batch_delete.py tests/test_batch_summary_exhausted.py tests/test_batch_eta.py tests/test_batch_create_prefix.py` passed (`52 passed`).
+- Focused batch tests: `.venv/Scripts/python.exe -m pytest tests/test_batch_admin.py tests/test_batch_delete.py tests/test_batch_granules.py tests/test_batch_eta.py tests/test_batch_summary_exhausted.py` passed (`36 passed`).
 - Full suite: `.venv/Scripts/python.exe -m pytest` passed (`430 passed`).
 - Ruff: `.venv/Scripts/ruff.exe check .` passed.
 - Format: `.venv/Scripts/ruff.exe format . --check` passed.
 
 ## Key decisions
-- Do not split `batches.py` write operations yet. Cancel/retry/delete share transaction and state-transition semantics, so moving them before a clearer service boundary would add indirection without enough payoff.
-- Avoid compatibility re-exports for old private helper names; tests now depend on the new module boundary directly.
+- Extracting only pure transition rules avoids a premature service layer. Batch cancel/retry/delete still share DB query, logging, and transaction behavior that is clearer in the route layer for now.
+- Function names in `batch_transitions.py` include `_state` to avoid import aliases in `batches.py` and keep call sites explicit.
 
 ## Next suggested priorities
-1. Re-open `batches.py` and look specifically for a clean write-side state-transition helper/service boundary.
-2. If that is not clearly simpler, inspect `orchestrator/api/workers.py` for lease/heartbeat read-write separation.
+1. Inspect whether batch creation has a similarly clean boundary for request validation/building; do not split if it only creates indirection.
+2. If batch creation does not present a simple split, move to `src/sathop/orchestrator/api/workers.py` and assess lease/heartbeat boundaries.
 3. Keep each loop iteration small and commit only cohesive refactors with full tests passing.
