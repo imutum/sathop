@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/card";
 import CopyButton from "@/components/CopyButton.vue";
 import HintTip from "@/components/HintTip.vue";
 import NodeLifecycleActions from "@/features/nodes/components/NodeLifecycleActions.vue";
+import { useNodeLifecycle } from "@/features/nodes/useNodeLifecycle";
 import ProgressBar from "@/components/ProgressBar.vue";
 import TextInput from "@/ui/TextInput.vue";
 import { Icon } from "@/components/Icon";
@@ -20,38 +21,33 @@ const props = defineProps<{ worker: WorkerInfo; focused?: boolean }>();
 const qc = useQueryClient();
 const toast = useToast();
 
-const enable = useMutation({
-  mutationFn: (next: boolean) => API.setWorkerEnabled(props.worker.worker_id, next),
-  onSuccess: (_r, next) => {
-    qc.setQueryData<WorkerInfo[]>(["workers"], (prev) =>
-      prev?.map((w) =>
-        w.worker_id === props.worker.worker_id ? { ...w, enabled: next } : w,
-      ) ?? prev,
-    );
-    qc.invalidateQueries({ queryKey: ["workers"] });
-    toast.success(next ? "已启用" : "已禁用，已在手任务排空后停止接新单");
+const lifecycle = useNodeLifecycle<WorkerInfo>({
+  id: props.worker.worker_id,
+  queryKey: "workers",
+  getId: (worker) => worker.worker_id,
+  setEnabled: (next) => API.setWorkerEnabled(props.worker.worker_id, next),
+  forget: () => API.forgetWorker(props.worker.worker_id),
+  restart: () => API.restartWorker(props.worker.worker_id),
+  enabledMessage: "已启用",
+  disabledMessage: "已禁用，已在手任务排空后停止接新单",
+  deletedMessage: `已删除节点 ${props.worker.worker_id}`,
+  restartMessage: "已发送重启信号，下次心跳生效",
+  forgetConfirm: {
+    title: `永久移除节点 ${props.worker.worker_id}？`,
+    description:
+      "将从注册表中删除这条节点记录。\n" +
+      "如果 worker 容器仍在运行，下次心跳会自动重新注册（misclick 重启容器即恢复）。\n" +
+      "想让它彻底不再回来：先停掉容器再点移除。",
+    confirmText: "永久移除",
+    tone: "danger",
   },
-  onError: (e: Error) => toast.error(`失败：${e.message}`),
-});
-
-const forget = useMutation({
-  mutationFn: () => API.forgetWorker(props.worker.worker_id),
-  onSuccess: () => {
-    qc.setQueryData<WorkerInfo[]>(["workers"], (prev) =>
-      prev?.filter((w) => w.worker_id !== props.worker.worker_id) ?? prev,
-    );
-    qc.invalidateQueries({ queryKey: ["workers"] });
-    toast.success(`已删除节点 ${props.worker.worker_id}`);
+  restartConfirm: {
+    title: `重启节点 ${props.worker.worker_id}？`,
+    description:
+      "向该 worker 发送重启信号 — 它会在下一次心跳收到后立即退出，由容器 restart 策略拉起。\n" +
+      "在手任务的 lease 在 30 分钟后被回收并重新分配，重启过程中不接新单。",
+    confirmText: "重启",
   },
-  onError: (e: Error) => toast.error(`删除失败：${e.message}`),
-});
-
-const restart = useMutation({
-  mutationFn: () => API.restartWorker(props.worker.worker_id),
-  onSuccess: () => {
-    toast.success("已发送重启信号，下次心跳生效");
-  },
-  onError: (e: Error) => toast.error(`重启失败：${e.message}`),
 });
 
 const pause = useMutation({
@@ -81,32 +77,6 @@ const gc = useMutation({
   onError: (e: Error) => toast.error(`触发失败：${e.message}`),
 });
 
-function onSetEnabled(next: boolean): void {
-  enable.mutate(next);
-}
-async function onForget(): Promise<void> {
-  const ok = await requestConfirm({
-    title: `永久移除节点 ${props.worker.worker_id}？`,
-    description:
-      "将从注册表中删除这条节点记录。\n" +
-      "如果 worker 容器仍在运行，下次心跳会自动重新注册（misclick 重启容器即恢复）。\n" +
-      "想让它彻底不再回来：先停掉容器再点移除。",
-    confirmText: "永久移除",
-    tone: "danger",
-  });
-  if (ok) forget.mutate();
-}
-async function onRestart(): Promise<void> {
-  const ok = await requestConfirm({
-    title: `重启节点 ${props.worker.worker_id}？`,
-    description:
-      "向该 worker 发送重启信号 — 它会在下一次心跳收到后立即退出，由容器 restart 策略拉起。\n" +
-      "在手任务的 lease 在 30 分钟后被回收并重新分配，重启过程中不接新单。",
-    confirmText: "重启",
-  });
-  if (ok) restart.mutate();
-}
-
 function onTogglePause(): void {
   pause.mutate(!props.worker.pause_requested);
 }
@@ -135,9 +105,6 @@ async function onGc(): Promise<void> {
   if (ok) gc.mutate();
 }
 
-const lifecyclePending = computed(
-  () => enable.isPending.value || forget.isPending.value || restart.isPending.value,
-);
 const inflightTotal = computed(
   () =>
     props.worker.queue_pending_download +
@@ -437,10 +404,10 @@ function onKey(e: KeyboardEvent) {
             </span>
             <NodeLifecycleActions
               :enabled="worker.enabled"
-              :pending="lifecyclePending"
-              @set-enabled="onSetEnabled"
-              @forget="onForget"
-              @restart="onRestart"
+              :pending="lifecycle.pending.value"
+              @set-enabled="lifecycle.setEnabled"
+              @forget="lifecycle.confirmForget"
+              @restart="lifecycle.confirmRestart"
               disable-title="禁用此节点（在手任务继续，可点启用恢复）"
               forget-title="永久从注册表中删除（仅在已禁用且无任务时允许）"
               restart-title="向该 worker 发送重启信号（一次心跳内生效）"
