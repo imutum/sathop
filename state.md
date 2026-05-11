@@ -1,7 +1,7 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree carries one source change: `admin.py::gc_bundles` migrated to `commit_and_publish`.
+- Working tree clean. All changes from this round committed.
 - `src/sathop/orchestrator/pubsub.py` owns event publishing, event logging, and `commit_and_publish` (`str | None` scopes, filters falsy values).
 - `src/sathop/orchestrator/api/admin.py` no longer imports raw `publish` — all DB-write-then-publish flows route through `commit_and_publish`.
 - The only remaining direct `publish()` callers are intentional:
@@ -26,27 +26,23 @@
 - `frontend/src/features/batch/types.ts` owns create-batch pure form transforms: credential payload/validity, env parsing, and dirty-draft checks.
 
 ## Completed this round
-- Audited the three next-round suggestions from the previous round:
-  - **Worker `client.report_*` try/except**: not repetitive in practice — each report has its own semantics (404→`LeaseRevoked`, debug-swallow, bare). No abstraction available.
-  - **Admin pre-flight checks**: each route's pre-check is different (`clamp_limit`, `NON_TERMINAL` membership, `age_days < 0`). No common shape to extract.
-  - **Frontend loading/error scaffolding**: already abstracted via `QueryState` (6 pages); the 2 holdouts (Dashboard, BatchDetail) have legitimate non-3-state layouts.
-- Found one concrete migration opportunity that the previous round missed: `admin.py::gc_bundles` was the last surviving DB-write path using raw `s.commit()` + conditional `publish(...)` instead of `commit_and_publish`. Migrated to the new ternary form.
-- Removed the now-unused `publish` import from `admin.py`.
+- New-lens audit from angles not covered in prior rounds: deps (`pyproject.toml`), CLI surface (`pyproject [project.scripts]` vs. docs), unused imports/duplicates.
+  - Found: `httpx` and `pyyaml` listed redundantly in both base deps AND each component's extras. Removed 5 dup lines.
+  - Found: `sathop-pull` CLI script undocumented in CLAUDE.md. Added entry.
+  - No sound files to delete, no dead imports, no stale config.
+- Lockfile rebuilt: same 53 packages, 10 duplicate `requires-dist` entries removed.
 
 ## Validation
-- Net diff: 3 lines down across `admin.py` (1 line of imports churn, 2 lines of body collapse).
-- `pytest tests/` → 430 passed in 77s.
-- `ruff check` + `ruff format --check admin.py` → clean.
-- Grep audit confirms remaining direct `publish()` callers all have a documented reason to stay raw (see Current status).
+- `pytest tests/` → 430 passed in 78s.
+- `ruff check` → clean.
+- `uv lock --check` passes.
+- Net diff: −13 lines across `pyproject.toml` + `uv.lock`; `CLAUDE.md` +1 line (local-only, gitignored).
 
 ## Key decisions
-- Did NOT migrate `shared.py::delete`'s split `commit → unlink → publish` — the ordering matters: subscribers shouldn't be nudged until the FS unlink completes.
-- Did NOT touch `background.py` or `progress.py` raw publishes — they're not request-scoped DB writes, so `commit_and_publish` is the wrong abstraction.
-- Resisted the temptation to refactor Dashboard/BatchDetail into `QueryState` — their "render with empty fallbacks + non-blocking error alert" pattern is genuinely different from QueryState's "all-or-nothing slot dispatch".
+- Leaving `pyyaml` and `httpx` in base `[project.dependencies]` instead of removing them from base and keeping them in extras: both are runtime essentials (httpx for every component's agent, pyyaml for bundle manifest parsing), so making each component declare them separately just adds noise.
+- Did NOT create a formal `shared` extra for `httpx`/`pyyaml` — base deps are the natural place for "everyone needs this", and the pattern matches what venv resolution already treats as transitive.
 
 ## Next suggested priorities
-1. Default back to feature, bug, release, or test work. The orchestrator commit/publish pattern is now uniform; the next concrete cleanup target is not visible without a real trigger.
-2. If a future round wants to keep looking, candidates I deliberately did NOT pursue this round but flagged as possibly worth a look:
-   - `frontend/src/pages/Batches.vue` (494 lines) and `frontend/src/pages/BatchDetail.vue` (421 lines) are the largest frontend pages; check whether sections can move into `features/batch/components/` without bloating prop drilling.
-   - `tests/test_bundle_registry.py` is 599 lines — verify it's still mapping one test class per scenario, not accumulating helpers.
-3. Before any release, run the normal full validation suite rather than more structural reshuffling.
+1. Feature, bug, release, or test work. The low-hanging dep/documentation cleanup is done.
+2. If a future round wants to keep looking without a concrete trigger: examine whether `Dockerfile` lines that install both `--no-install-project` and then the full sync can be simplified now that base deps are known to cover cross-component needs. (Low value.)
+3. Before any release, run the normal full validation suite.
