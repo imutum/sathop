@@ -141,3 +141,39 @@ export function rowHasErrors(e: RowErrors): boolean {
 export function hasAnyInput(r: Row): boolean {
   return Object.values(r.inputs).some((x) => x.url.trim() !== "");
 }
+
+export function rowHasDraftContent(row: Row): boolean {
+  return (
+    row.granule_id.trim() !== "" ||
+    Object.values(row.inputs).some((i) => i.url.trim() !== "" || i.filename.trim() !== "") ||
+    Object.values(row.meta).some((v) => v.trim() !== "")
+  );
+}
+
+export function credentialsHaveDraftContent(drafts: Record<string, CredDraft>): boolean {
+  return Object.values(drafts).some((d) => d.username.trim() !== "" || d.secret.trim() !== "");
+}
+
+export function credentialsPayload(drafts: Record<string, CredDraft>): Record<string, ApiCredential> {
+  return Object.fromEntries(Object.entries(drafts).map(([name, draft]) => [name, credDraftToApi(name, draft)]));
+}
+
+export function credentialsAreValid(names: string[], drafts: Record<string, CredDraft>): boolean {
+  return names.every((name) => {
+    const draft = drafts[name];
+    if (!draft) return false;
+    return draft.secret.trim() !== "" && (draft.scheme !== "basic" || draft.username.trim() !== "");
+  });
+}
+
+export function parseExecutionEnv(text: string | undefined): Record<string, string> {
+  const raw = text?.trim() ?? "";
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, String(value)]));
+  } catch {
+    return {};
+  }
+}

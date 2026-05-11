@@ -1,7 +1,7 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree contains a focused frontend node-lifecycle helper split.
+- Working tree contains a focused frontend create-batch helper extraction.
 - `src/sathop/orchestrator/api/batch_readmodels.py` owns BatchSummary/GranuleRow assembly, state counts, ETA, and exhausted-object read queries.
 - `src/sathop/orchestrator/api/batch_transitions.py` owns cancel/retry granule state rules.
 - `src/sathop/orchestrator/api/worker_heartbeat.py` owns worker heartbeat version logging, queue/disk field application, revoke calculation, and one-shot signal consumption.
@@ -14,13 +14,14 @@
 - `frontend/src/api.ts` remains the public typed endpoint catalog and API facade used by pages/components.
 - `frontend/src/features/batch/summary.ts` owns frontend batch count totals, completed/error/in-flight totals, and closed-batch detection.
 - `frontend/src/features/nodes/useNodeLifecycle.ts` owns shared worker/receiver enable, forget, restart mutations, cache updates, confirmations, and toast handling.
+- `frontend/src/features/batch/types.ts` now also owns create-batch pure form transforms: credential payload/validity, env parsing, and dirty-draft checks.
 
 ## Completed this round
-- Re-read `state.md`, confirmed the batch-summary helper split was committed, and started from a clean working tree.
-- Compared `WorkerCard.vue` and `ReceiverCard.vue` and found the duplicated concept is node lifecycle actions, not card presentation.
-- Added `frontend/src/features/nodes/useNodeLifecycle.ts` to centralize enable/disable, forget, restart, optimistic cache updates, confirmation prompts, pending state, and toast messages.
-- Updated `WorkerCard.vue` and `ReceiverCard.vue` to call the shared lifecycle helper while leaving worker-specific pause/revoke/cache-GC/capacity logic local to `WorkerCard.vue`.
-- Kept `NodeLifecycleActions.vue` as the presentational button group; it still emits actions and does not own mutation behavior.
+- Re-read `state.md`, confirmed the node-lifecycle helper split was committed, and started from a clean working tree.
+- Inspected `CreateBatchModal.vue`, `CreateBatchCsvModal.vue`, `CreateBatchGranuleTable.vue`, `CreateBatchCredentials.vue`, `types.ts`, and `schemas.ts`.
+- Chose not to split CSV or table components further because those boundaries already exist and are cohesive.
+- Moved create-batch pure form calculations from `CreateBatchModal.vue` into `frontend/src/features/batch/types.ts`: `parseExecutionEnv`, credential payload/validity, row dirty detection, and credential dirty detection.
+- Kept the modal responsible for query wiring, mutation, credential persistence side effects, and template composition.
 
 ## Validation
 - Frontend build/type-check: `npm --prefix frontend run build` passed.
@@ -29,11 +30,11 @@
 - Format: `.venv/Scripts/ruff.exe format . --check` passed.
 
 ## Key decisions
-- Shared node lifecycle behavior is a stable abstraction because workers and receivers use the same enable/forget/restart flow with only endpoint/query-key/message differences.
-- Worker-only controls stay in `WorkerCard.vue`; moving pause/revoke/cache-GC/capacity into the lifecycle helper would blur the worker-vs-receiver boundary.
-- The lifecycle helper exposes only the pending flag and action handlers needed by cards, not raw mutation objects.
+- `CreateBatchModal.vue` should keep orchestration and side effects, but not own pure data transforms that are part of create-batch form semantics.
+- `types.ts` remains the correct home for these helpers because it already owns create-batch row and credential transformations.
+- CSV/table/credential components are already appropriately split; moving their internals would add indirection without reducing concepts.
 
 ## Next suggested priorities
-1. Inspect `frontend/src/features/batch/components/CreateBatchModal.vue` and related create-batch helpers for form-state boundaries.
-2. If create-batch cleanup is low-value, review dashboard/chart components for duplicated state-count presentation helpers.
-3. If frontend cleanup is low-value, pause refactoring and do a high-level audit for stale docs/comments before making more structural changes.
+1. Review dashboard/chart components for duplicated state-count presentation helpers.
+2. If dashboard cleanup is low-value, do a high-level docs/comment audit for stale architecture references after the recent helper splits.
+3. If no clear cleanup remains, stop structural refactoring and report that the project is currently in a clean enough state.

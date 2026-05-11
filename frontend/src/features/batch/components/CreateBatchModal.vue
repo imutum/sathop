@@ -11,10 +11,14 @@ import {
   type CredDraft,
   type Row,
   type Schema,
-  credDraftToApi,
+  credentialsAreValid,
+  credentialsHaveDraftContent,
+  credentialsPayload,
   emptyCred,
   emptyRow,
   hasAnyInput,
+  parseExecutionEnv,
+  rowHasDraftContent,
   rowHasErrors,
   rowToGranule,
   validateRow,
@@ -114,19 +118,7 @@ watch(
   { immediate: true },
 );
 
-// JSON validity is enforced by the zod schema; this computed only converts
-// the validated string into the `Record<string, string>` payload shape.
-const parsedEnv = computed<Record<string, string>>(() => {
-  const txt = headerValues.envText?.trim() ?? "";
-  if (!txt) return {};
-  try {
-    const v = JSON.parse(txt);
-    if (typeof v !== "object" || v === null || Array.isArray(v)) return {};
-    return Object.fromEntries(Object.entries(v).map(([k, val]) => [k, String(val)]));
-  } catch {
-    return {};
-  }
-});
+const parsedEnv = computed(() => parseExecutionEnv(headerValues.envText));
 
 const rowErrors = computed(() =>
   schema.value
@@ -137,17 +129,9 @@ const allRowsOk = computed(
   () => !!schema.value && rows.value.length > 0 && rowErrors.value.every((e) => !rowHasErrors(e)),
 );
 
-const credsPayload = computed(() =>
-  Object.fromEntries(Object.entries(creds).map(([n, d]) => [n, credDraftToApi(n, d)])),
-);
+const credsPayload = computed(() => credentialsPayload(creds));
 
-const credsValid = computed(() =>
-  requiredCreds.value.every((n) => {
-    const d = creds[n];
-    if (!d) return false;
-    return d.secret.trim() !== "" && (d.scheme !== "basic" || d.username.trim() !== "");
-  }),
-);
+const credsValid = computed(() => credentialsAreValid(requiredCreds.value, creds));
 
 const create = useMutation({
   mutationFn: () =>
@@ -190,18 +174,6 @@ const disabledReason = computed<string | null>(() => {
 });
 
 const canSubmit = computed(() => disabledReason.value === null && !create.isPending.value);
-
-function rowHasDraftContent(row: Row) {
-  return (
-    row.granule_id.trim() !== "" ||
-    Object.values(row.inputs).some((i) => i.url.trim() !== "" || i.filename.trim() !== "") ||
-    Object.values(row.meta).some((v) => v.trim() !== "")
-  );
-}
-
-function credentialsHaveDraftContent(drafts: Record<string, CredDraft>) {
-  return Object.values(drafts).some((d) => d.username.trim() !== "" || d.secret.trim() !== "");
-}
 
 const dirty = computed(
   () =>
