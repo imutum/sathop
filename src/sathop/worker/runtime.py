@@ -214,9 +214,9 @@ class Worker:
                 )
                 if resp.restart_requested:
                     self._start_drain("restart_requested via orchestrator")
-                if self._remote_pause != resp.pause_requested:
-                    log.info("remote pause %s", "engaged" if resp.pause_requested else "released")
-                    self._remote_pause = resp.pause_requested
+                if self._remote_pause != resp.operator_paused:
+                    log.info("remote pause %s", "engaged" if resp.operator_paused else "released")
+                    self._remote_pause = resp.operator_paused
                 if resp.gc_requested:
                     log.info("orchestrator requested cache GC — waking gc loop")
                     self._gc_event.set()

@@ -7,12 +7,14 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：1（累计修复 51 项 — 10 high + 23 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
+- 总问题数：0（累计修复 52 项 — 10 high + 23 medium + 14 low + 4 cross + 1 half-rename note；L-007/L-009/C-002 关闭）
 - 高优先级问题数：0（H-001..H-010 全部已修；H-005 9/9 模块全部覆盖）
 - 中优先级问题数：0（M-001/M-002/M-003/M-004/M-005/M-006/M-007/M-008/M-009/M-010/M-011/M-012/M-013/M-014/M-015/M-016/M-017/M-018/M-019/M-020/M-021/M-022/M-023/M-024 已修）
 - 低优先级问题数：0（L-001/L-002/L-003/L-004/L-005/L-006/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
-- 交叉问题数：1（C-001/C-004 已修；C-002 关闭）
+- 交叉问题数：0（C-001/C-003/C-004 已修；C-002 关闭）
 - 已修复（按轮次倒序）：
+  - 第 17 轮：
+    - **C-003**（半重命名）`pause_requested` → `operator_paused` 全链路（Python attr + Pydantic 字段 + 前端 API + UI 引用 + 测试）。聚合字段 `paused`（worker 自报的"当前是否在收新活"合并状态）保留原名 — N-002 已论证 worker 端把背压暂停 + 操作员暂停合并成单个 bool 是有意为之，强行改成 `backpressure_paused` 反而误导。DB 列名继续叫 `pause_requested`（`mapped_column("pause_requested", …)` 解耦 Python 属性与 SQL 列名），既零迁移又让代码中 WHO-set-the-pause 一目了然。修改面：`shared/protocol.py`、`orchestrator/db.py`、`api/workers.py`（read model + PUT body + response）、`api/events.py`、`worker/runtime.py`、`apiTypes.ts`、`api.ts`、`WorkerCard.vue`、`tests/test_node_lifecycle.py`。`npm run build` + 563 测试全过 — 至此 issue.md 所有 issue 关闭
   - 第 16 轮：
     - **H-005**（关闭）剩余 4 个进程级模块全部补齐测试覆盖：`worker/drain.py`（5 tests — `install_signal_handlers` 成功路径 + asyncio `add_signal_handler` 抛 NotImplementedError 时回退到 `signal.signal`，回调签名与 `start_drain` 一致；`drain_watchdog_loop` 三分支：active 空立即 SystemExit、active 渐空再 SystemExit、deadline 到达超时 SystemExit + warn "lease sweeper will reclaim"，超时常量 monkeypatch 到 0.05s）；`receiver/health.py`（4 tests — `/health` 返回 `{status:"ok"}`，其它路径 404 锁死最小暴露面，host/port 透传，默认 host `127.0.0.1`）；`worker/main.py` + `receiver/main.py`（6 tests，单文件 `test_entrypoints.py` — `main()` happy path + 异常路径都跑 finally aclose，receiver 双 aclose 顺序，`run()` 委托给 `asyncio.run`）。新增 15 测试，全部通过；累计 563 测试。H-005 关闭
   - 第 15 轮：
@@ -82,23 +84,6 @@
     - **L-016** `resolve_orch` 缺 env 抛 `RuntimeError` + 描述信息
 - 已验证干净的模块：tls.py、stages.py、cleanup.py、_paths.py、progress.py、pubsub.py（已覆盖）、background.py（sweeper 设计良好含竞态防护）、router.ts、useAuthGate.ts、reconcile.py、upload_bundle.py、validate_bundle.py、pull.py（已覆盖）
 - 主要风险领域：路径穿越、event loop 阻塞、重复代码/概念、测试覆盖缺口、配置安全、暗色模式、静默错误吞没
-
----
-
-## Cross-Cutting Problems
-
-### C-003: Paused / pause_requested 命名在三个层面表达不同语义
-
-- 涉及范围：`protocol.py`、`db.py`、`workers.py`、`runtime.py`、前端
-- 共同模式：三个 "pause" 概念共存：
-  1. `Worker.paused`（db column）— worker 自报的磁盘背压暂停
-  2. `Worker.pause_requested`（db column）— 操作员手动设置的暂停标记
-  3. `WorkerHeartbeat.paused`（protocol field）— worker 聚合了以上两者的综合状态
-- 代表性位置：`protocol.py:97-102,140`、`db.py:67,83`、`workers.py:280-294`
-- 问题描述：名称 `paused` 和 `pause_requested` 不足以区分"谁发起的暂停"和"当前是否暂停"。
-- 长期影响：新开发者需要读注释才能理解三个 paused 相关字段的区别。
-- 可能方向：`paused` → `backpressure_paused`；`pause_requested` → `operator_paused`。需要同步修改 DB 列、协议字段和前端。
-- 置信度：中
 
 ---
 

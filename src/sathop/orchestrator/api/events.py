@@ -88,7 +88,7 @@ async def list_workers(s: AsyncSession = Depends(session)) -> list[dict]:
             "enabled": w.enabled,
             "paused": w.paused,
             "desired_capacity": w.desired_capacity,
-            "pause_requested": bool(w.pause_requested),
+            "operator_paused": bool(w.operator_paused),
         }
         for w in rows
     ]

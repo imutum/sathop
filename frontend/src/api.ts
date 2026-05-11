@@ -79,10 +79,10 @@ const nodeApi = {
     deleteJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}`),
   restartWorker: (workerId: string) =>
     postJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}/restart`),
-  setWorkerPaused: (workerId: string, paused: boolean) =>
-    putJson<{ ok: boolean; pause_requested: boolean }>(
+  setWorkerPaused: (workerId: string, operator_paused: boolean) =>
+    putJson<{ ok: boolean; operator_paused: boolean }>(
       `/api/workers/${encodeURIComponent(workerId)}/pause`,
-      { paused },
+      { operator_paused },
     ),
   revokeWorkerLeases: (workerId: string) =>
     postJson<{ ok: boolean; revoked: number }>(

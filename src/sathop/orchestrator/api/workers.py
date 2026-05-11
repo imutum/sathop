@@ -128,7 +128,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         desired_capacity=w.desired_capacity,
         revoked_granule_ids=revoked,
         restart_requested=restart_requested,
-        pause_requested=bool(w.pause_requested),
+        operator_paused=bool(w.operator_paused),
         gc_requested=gc_requested,
     )
 
@@ -223,14 +223,18 @@ async def deletable(worker_id: str, s: AsyncSession = Depends(session)) -> list[
         .scalar_subquery()
     )
     rows = (
-        await s.execute(
-            select(GranuleObject)
-            .where(GranuleObject.worker_id == worker_id)
-            .where(GranuleObject.acked_at.is_not(None))
-            .where(GranuleObject.deleted_at.is_(None))
-            .where(GranuleObject.granule_id.in_(fully_acked_granules))
+        (
+            await s.execute(
+                select(GranuleObject)
+                .where(GranuleObject.worker_id == worker_id)
+                .where(GranuleObject.acked_at.is_not(None))
+                .where(GranuleObject.deleted_at.is_(None))
+                .where(GranuleObject.granule_id.in_(fully_acked_granules))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     by_granule: dict[str, list[str]] = {}
     for o in rows:
@@ -285,7 +289,7 @@ async def set_enabled(
 @router.put("/{worker_id}/pause")
 async def set_paused(
     worker_id: str,
-    paused: bool = Body(embed=True),
+    operator_paused: bool = Body(embed=True),
     s: AsyncSession = Depends(session),
 ) -> dict:
     """Operator-set persistent pause. Distinct from `enabled=false`:
@@ -293,10 +297,10 @@ async def set_paused(
       - disabled: prelude to forgetting the row entirely
     Heartbeat reply propagates the flag; worker stops new leases until cleared."""
     w = await _worker_or_404(s, worker_id)
-    w.pause_requested = paused
-    await log(s, worker_id, f"worker {'paused' if paused else 'resumed'} via UI")
+    w.operator_paused = operator_paused
+    await log(s, worker_id, f"worker {'paused' if operator_paused else 'resumed'} via UI")
     await commit_and_publish(s, "workers")
-    return {"ok": True, "pause_requested": paused}
+    return {"ok": True, "operator_paused": operator_paused}
 
 
 @router.post("/{worker_id}/revoke-all")

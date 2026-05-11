@@ -77,11 +77,17 @@ class Worker(Base):
     # restart. One-shot — a re-click after the heartbeat consumed it sets a new ts.
     restart_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     # Operator-set persistent pause flag — distinct from `paused` (which the
-    # worker self-reports for disk backpressure). True ⇒ heartbeat reply tells
-    # the worker to stop accepting new leases until the operator clears it.
+    # worker self-reports as the aggregate "not accepting leases for any
+    # reason"). True ⇒ heartbeat reply tells the worker to stop accepting new
+    # leases until the operator clears it. SQL column is still named
+    # `pause_requested` for back-compat with existing DBs (no rename
+    # migration); the Python attribute is `operator_paused` to make the
+    # WHO-set-this-pause direction obvious at the call sites.
     # Nullable so _ensure_columns can ALTER TABLE on existing DBs; readers
     # coerce NULL → False.
-    pause_requested: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)
+    operator_paused: Mapped[bool | None] = mapped_column(
+        "pause_requested", Boolean, default=False, nullable=True
+    )
     # Operator-clicked "立即清理缓存" timestamp; one-shot, mirrors restart_requested_at.
     gc_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
@@ -278,7 +284,9 @@ def _ensure_columns(sync_conn) -> None:
                 # Surface table/column/type so the operator can pinpoint which
                 # additive migration failed instead of a bare DB error spinning
                 # the container in a crash loop.
-                log.exception("migration failed: ALTER TABLE %s ADD COLUMN %s %s", table_name, col.name, col_type)
+                log.exception(
+                    "migration failed: ALTER TABLE %s ADD COLUMN %s %s", table_name, col.name, col_type
+                )
                 raise RuntimeError(
                     f"failed to add column {col.name!r} ({col_type}) to table {table_name!r}: {e}"
                 ) from e

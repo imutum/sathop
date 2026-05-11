@@ -187,31 +187,31 @@ async def test_worker_pause_endpoint_propagates_via_heartbeat(client):
     """PUT /pause sets the persistent flag; the next heartbeat reply
     forwards it, and /api/workers exposes it for the UI."""
     await _add_worker()
-    r = client.put("/api/workers/w1/pause", json={"paused": True})
+    r = client.put("/api/workers/w1/pause", json={"operator_paused": True})
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "pause_requested": True}
+    assert r.json() == {"ok": True, "operator_paused": True}
 
     # /api/workers reflects the flag so the frontend renders the pause Badge
     [row] = client.get("/api/workers").json()
-    assert row["pause_requested"] is True
+    assert row["operator_paused"] is True
 
-    # Worker-side observes pause_requested=True on the next heartbeat reply.
+    # Worker-side observes operator_paused=True on the next heartbeat reply.
     r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
     assert r.status_code == 200
     body = r.json()
-    assert body["pause_requested"] is True
-    # Persistent: pause_requested stays True across heartbeats until cleared.
+    assert body["operator_paused"] is True
+    # Persistent: operator_paused stays True across heartbeats until cleared.
     r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
-    assert r.json()["pause_requested"] is True
+    assert r.json()["operator_paused"] is True
 
     # Resume → flag flips, heartbeat reply mirrors it.
-    assert client.put("/api/workers/w1/pause", json={"paused": False}).status_code == 200
+    assert client.put("/api/workers/w1/pause", json={"operator_paused": False}).status_code == 200
     r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
-    assert r.json()["pause_requested"] is False
+    assert r.json()["operator_paused"] is False
 
 
 async def test_worker_pause_404_when_unknown(client):
-    r = client.put("/api/workers/ghost/pause", json={"paused": True})
+    r = client.put("/api/workers/ghost/pause", json={"operator_paused": True})
     assert r.status_code == 404
 
 

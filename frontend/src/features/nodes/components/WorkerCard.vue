@@ -78,7 +78,7 @@ const gc = useMutation({
 });
 
 function onTogglePause(): void {
-  pause.mutate(!props.worker.pause_requested);
+  pause.mutate(!props.worker.operator_paused);
 }
 
 async function onRevokeAll(): Promise<void> {
@@ -203,7 +203,7 @@ function onKey(e: KeyboardEvent) {
         </div>
         <div class="flex shrink-0 items-center gap-1.5">
           <HintTip
-            v-if="worker.pause_requested"
+            v-if="worker.operator_paused"
             text="管理员手动暂停 — 在手任务继续，不接新单。点下方「恢复」按钮解除"
           >
             <Badge tone="warn">手动暂停</Badge>
@@ -369,17 +369,17 @@ function onKey(e: KeyboardEvent) {
                 type="button"
                 :disabled="pause.isPending.value"
                 @click="onTogglePause"
-                :title="worker.pause_requested
+                :title="worker.operator_paused
                   ? '恢复领取新任务'
                   : '暂停领取新任务（在手的继续跑完）'"
                 :class="[
                   'rounded-md border px-2 py-0.5 text-mini font-medium transition disabled:opacity-50',
-                  worker.pause_requested
+                  worker.operator_paused
                     ? 'border-success/30 bg-success/10 text-success hover:bg-success/15'
                     : 'border-border bg-background text-muted-foreground hover:border-warn/40 hover:text-warn',
                 ]"
               >
-                {{ pause.isPending.value ? "…" : worker.pause_requested ? "恢复" : "暂停" }}
+                {{ pause.isPending.value ? "…" : worker.operator_paused ? "恢复" : "暂停" }}
               </button>
               <button
                 type="button"

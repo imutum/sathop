@@ -67,7 +67,7 @@ export type WorkerInfo = {
   paused: boolean;
   desired_capacity: number | null;
   // 仅反映管理员手动暂停的开关位置 — UI 用这个区分"恢复"按钮的显隐 / 文案。
-  pause_requested: boolean;
+  operator_paused: boolean;
 };
 
 export type ReceiverInfo = {
