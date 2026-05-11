@@ -8,11 +8,13 @@
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
 - 总问题数：2（累计修复 50 项 — 9 high + 23 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
-- 高优先级问题数：1（H-001/H-002/H-003/H-004/H-006/H-007/H-008/H-009/H-010 已修；H-005 部分覆盖 — 3/9 模块已测）
+- 高优先级问题数：1（H-001/H-002/H-003/H-004/H-006/H-007/H-008/H-009/H-010 已修；H-005 部分覆盖 — 5/9 模块已测）
 - 中优先级问题数：0（M-001/M-002/M-003/M-004/M-005/M-006/M-007/M-008/M-009/M-010/M-011/M-012/M-013/M-014/M-015/M-016/M-017/M-018/M-019/M-020/M-021/M-022/M-023/M-024 已修）
 - 低优先级问题数：0（L-001/L-002/L-003/L-004/L-005/L-006/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
 - 交叉问题数：1（C-001/C-004 已修；C-002 关闭）
 - 已修复（按轮次倒序）：
+  - 第 15 轮：
+    - **H-005**（续）覆盖两个 CLI 入口：`cli/reconcile.py`（14 tests，`_fmt_age` s/m/h/d 边界 + naive ISO 兼容；`main()` clean / 空状态 / stuck granule / 心跳过期 / 批次错误聚合 / require_token=False 匿名 / 缺 orch-url 异常 / Bearer header 透传与无 token 时省略），`cli/upload_bundle.py`（15 tests，`_should_include` 五种黑名单情形 + `.env.example` 保留；`_build_zip` 缺 manifest / YAML 错 / 字段不全 / 排除项均生效；`main()` happy path + 409 提示 bump version + 4xx 透传 + `--description` 传 query + Bearer header + 目录不存在）。两份测试都用 `httpx.Client` monkeypatch 套 MockTransport 路由，零网络依赖，~0.2s 跑完。548 测试通过（519 + 29），lint clean
   - 第 14 轮：
     - **H-006** `tests/conftest.py` 新增 `patch_settings` fixture：snapshot-then-restore 语义，首次 patch 某字段时记一份原值，fixture teardown 时按记录回滚 — 即使测试 `assert`/异常崩在中途，状态也不会泄漏到下一个测试。这是项目里唯一保留 `object.__setattr__(settings, …)` 的地方。27 个测试文件全部迁移到 `patch_settings(field=value, …)` 调用，函数签名加 `patch_settings` fixture 参数；测试主体里的 try/finally 包装（仅为还原 settings 而设）一并删除（fixture 自动还原）。同时清理 20 个文件里没再用到 `settings` 的 `from sathop.orchestrator.config import settings` 死导入。`ruff check` clean，全部 519 测试通过 — H-006 在不改 Settings 类本身的前提下消除 4 条隐患（frozen 绕过集中、xdist-safe 单写点、Settings 重构成本从 27 文件降为 1 文件、状态泄漏消除）
   - 第 13 轮：
@@ -83,23 +85,20 @@
 
 ## High Priority
 
-### H-005: 6 个源模块仍无测试覆盖（原 9 个，第 11 轮覆盖 3 个）
+### H-005: 4 个源模块仍无测试覆盖（原 9 个，第 11/15 轮已覆盖 5 个）
 
 - 类型：测试缺口
-- 已覆盖（第 11 轮）：
-  - `src/sathop/shared/config.py` — `tests/test_shared_config.py`（32 tests）
-  - `src/sathop/shared/http.py` — `tests/test_shared_http.py`（10 tests）
-  - `src/sathop/worker/runtime_helpers.py` — `tests/test_runtime_helpers.py`（26 tests）
+- 已覆盖：
+  - 第 11 轮：`shared/config.py`（32 tests）、`shared/http.py`（10 tests）、`worker/runtime_helpers.py`（26 tests）
+  - 第 15 轮：`cli/reconcile.py`（14 tests）、`cli/upload_bundle.py`（15 tests）
 - 仍未覆盖：
   - `src/sathop/worker/drain.py` — 信号处理、优雅关闭（含 `raise SystemExit(0)`）
   - `src/sathop/worker/main.py` — 入口点
   - `src/sathop/receiver/main.py` — 入口点
   - `src/sathop/receiver/health.py` — HealthServer 类
-  - `src/sathop/cli/reconcile.py` — 138 行 reconcile 逻辑
-  - `src/sathop/cli/upload_bundle.py` — zip 构建 + HTTP 上传
-- 问题描述：剩余 6 个模块都涉及进程级编排（signal handler、subprocess、HTTP server、CLI argv 解析），单元测试需要 subprocess fixture 或 monkeypatch sys.argv，工程量超过本轮可消化。优先纯函数三件套已锁，剩余的留待后续轮次按需补齐。
-- 长期影响：信号 / 入口点路径若被改坏不会被测试发现；CLI 工具回归只有人工 smoke。
-- 可能方向：drain.py 可用 `os.kill(self_pid, SIGTERM)` + asyncio task 验证 SystemExit 传播；CLI 工具用 `subprocess.run` + mock orchestrator；health.py 起一个本地 socket 自检。
+- 问题描述：剩余 4 个模块都涉及进程级编排（signal handler、HTTP server、入口点 argv 解析）；需要 subprocess fixture 或 signal harness。CLI 已闭环覆盖（MockTransport），方法可复用到 worker/receiver main.py（asyncio.run 顶层封装）。
+- 长期影响：信号 / 入口点路径若被改坏不会被测试发现。
+- 可能方向：drain.py 用 `os.kill(self_pid, SIGTERM)` + asyncio task 验证 SystemExit 传播；health.py 起本地 socket 自检；worker/receiver main.py monkeypatch `Runtime.run` + sys.argv。
 - 置信度：高
 
 ---
