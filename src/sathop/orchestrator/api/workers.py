@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import timedelta
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import distinct, func, select, update
@@ -31,10 +30,17 @@ from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, GranuleStageTiming, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from .worker_heartbeat import (
+    LEASE_DURATION,
+    apply_worker_heartbeat,
+    consume_gc_signal,
+    consume_restart_signal,
+    record_worker_version,
+    renew_worker_leases,
+    revoked_active_granules,
+)
 
 router = APIRouter(prefix="/workers", tags=["workers"], dependencies=[Depends(require_token)])
-
-LEASE_DURATION = timedelta(minutes=30)
 
 
 async def _worker_or_404(s: AsyncSession, worker_id: str, detail: str = "worker not found") -> Worker:
@@ -156,81 +162,6 @@ async def _held_granule_sample(s: AsyncSession, worker_id: str, limit: int = 5) 
     return list({*leased, *uploaded})[:limit]
 
 
-async def _record_worker_version(s: AsyncSession, worker: Worker, req: WorkerHeartbeat) -> None:
-    """Update the heartbeat version and log only when a real value changes."""
-    if not req.version or req.version == worker.version:
-        return
-    await log(
-        s,
-        req.worker_id,
-        f"worker version changed {worker.version!r} → {req.version!r} "
-        "(if this keeps flipping, two containers likely share the worker_id)",
-        level="warn",
-    )
-    worker.version = req.version
-
-
-def _apply_worker_heartbeat(worker: Worker, req: WorkerHeartbeat, now) -> None:
-    worker.last_seen = now
-    worker.disk_used_gb = req.disk_used_gb
-    worker.disk_total_gb = req.disk_total_gb
-    worker.cpu_percent = req.cpu_percent
-    worker.mem_percent = req.mem_percent
-    worker.monthly_egress_gb = req.monthly_egress_gb
-    worker.queue_pending_download = req.queue_pending_download
-    worker.queue_downloading = req.queue_downloading
-    worker.queue_pending_processing = req.queue_pending_processing
-    worker.queue_processing = req.queue_processing
-    worker.queue_pending_upload = req.queue_pending_upload
-    worker.queue_uploading = req.queue_uploading
-    worker.paused = req.paused
-
-
-async def _renew_worker_leases(s: AsyncSession, worker_id: str, now) -> None:
-    await s.execute(
-        update(Granule)
-        .where(Granule.leased_by == worker_id)
-        .where(Granule.state.in_(LEASED_STATES))
-        .where(Granule.lease_expires_at < now + LEASE_DURATION / 2)
-        .values(lease_expires_at=now + LEASE_DURATION)
-    )
-
-
-async def _revoked_active_granules(s: AsyncSession, req: WorkerHeartbeat) -> list[str]:
-    if not req.active_granule_ids:
-        return []
-    still_owned = (
-        (
-            await s.execute(
-                select(Granule.granule_id)
-                .where(Granule.granule_id.in_(req.active_granule_ids))
-                .where(Granule.leased_by == req.worker_id)
-                .where(Granule.state.in_(LEASED_STATES))
-            )
-        )
-        .scalars()
-        .all()
-    )
-    owned_set = set(still_owned)
-    return [gid for gid in req.active_granule_ids if gid not in owned_set]
-
-
-async def _consume_restart_signal(s: AsyncSession, worker: Worker) -> bool:
-    requested = worker.restart_requested_at is not None
-    if requested:
-        worker.restart_requested_at = None
-        await log(s, worker.worker_id, "restart signal delivered to worker")
-    return requested
-
-
-async def _consume_gc_signal(s: AsyncSession, worker: Worker) -> bool:
-    requested = worker.gc_requested_at is not None
-    if requested:
-        worker.gc_requested_at = None
-        await log(s, worker.worker_id, "cache GC signal delivered to worker")
-    return requested
-
-
 @router.post("/register", response_model=WorkerRegisterResponse)
 async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> WorkerRegisterResponse:
     w = await s.get(Worker, req.worker_id)
@@ -262,16 +193,16 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
 async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) -> WorkerHeartbeatResponse:
     w = await _worker_or_404(s, req.worker_id, "worker not registered")
     now = utcnow()
-    await _record_worker_version(s, w, req)
-    _apply_worker_heartbeat(w, req, now)
-    await _renew_worker_leases(s, req.worker_id, now)
+    await record_worker_version(s, w, req)
+    apply_worker_heartbeat(w, req, now)
+    await renew_worker_leases(s, req.worker_id, now)
 
     # Diff worker's active set vs. DB; any mismatch becomes a cancellation
     # instruction in this heartbeat response.
-    revoked = await _revoked_active_granules(s, req)
+    revoked = await revoked_active_granules(s, req)
 
-    restart_requested = await _consume_restart_signal(s, w)
-    gc_requested = await _consume_gc_signal(s, w)
+    restart_requested = await consume_restart_signal(s, w)
+    gc_requested = await consume_gc_signal(s, w)
 
     await commit_and_publish(s, "workers")
     return WorkerHeartbeatResponse(

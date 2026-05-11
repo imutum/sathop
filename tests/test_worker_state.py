@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.api.workers import _renew_worker_leases
+from sathop.orchestrator.api.worker_heartbeat import renew_worker_leases
 from sathop.orchestrator.background import sweep_expired_leases
 from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Granule, Worker, utcnow
@@ -177,7 +177,7 @@ async def test_heartbeat_renews_only_leases_near_expiry(client):
         assert stale is not None and stale.lease_expires_at is not None
         fresh_before = fresh.lease_expires_at
         stale_before = stale.lease_expires_at
-        await _renew_worker_leases(s, "w1", now)
+        await renew_worker_leases(s, "w1", now)
         await s.commit()
 
     async with orch_db._session_maker() as s:
