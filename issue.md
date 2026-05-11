@@ -7,12 +7,14 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：3（累计修复 49 项 — 8 high + 23 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
-- 高优先级问题数：2（H-001/H-002/H-003/H-004/H-007/H-008/H-009/H-010 已修；H-005 部分覆盖 — 3/9 模块已测）
+- 总问题数：2（累计修复 50 项 — 9 high + 23 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
+- 高优先级问题数：1（H-001/H-002/H-003/H-004/H-006/H-007/H-008/H-009/H-010 已修；H-005 部分覆盖 — 3/9 模块已测）
 - 中优先级问题数：0（M-001/M-002/M-003/M-004/M-005/M-006/M-007/M-008/M-009/M-010/M-011/M-012/M-013/M-014/M-015/M-016/M-017/M-018/M-019/M-020/M-021/M-022/M-023/M-024 已修）
 - 低优先级问题数：0（L-001/L-002/L-003/L-004/L-005/L-006/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
 - 交叉问题数：1（C-001/C-004 已修；C-002 关闭）
 - 已修复（按轮次倒序）：
+  - 第 14 轮：
+    - **H-006** `tests/conftest.py` 新增 `patch_settings` fixture：snapshot-then-restore 语义，首次 patch 某字段时记一份原值，fixture teardown 时按记录回滚 — 即使测试 `assert`/异常崩在中途，状态也不会泄漏到下一个测试。这是项目里唯一保留 `object.__setattr__(settings, …)` 的地方。27 个测试文件全部迁移到 `patch_settings(field=value, …)` 调用，函数签名加 `patch_settings` fixture 参数；测试主体里的 try/finally 包装（仅为还原 settings 而设）一并删除（fixture 自动还原）。同时清理 20 个文件里没再用到 `settings` 的 `from sathop.orchestrator.config import settings` 死导入。`ruff check` clean，全部 519 测试通过 — H-006 在不改 Settings 类本身的前提下消除 4 条隐患（frozen 绕过集中、xdist-safe 单写点、Settings 重构成本从 27 文件降为 1 文件、状态泄漏消除）
   - 第 13 轮：
     - **M-019** `PipelineHealth.vue` STAGE 表 + `chips` 数组 + `StateBarChart.vue` TONE 表里所有字面 Tailwind 色阶都成对带上 `dark:` 变体，规律一致：`bg-X-500` → `dark:bg-X-400`、`bg-X-600` → `dark:bg-X-500`、`text-X-600`/`text-X-700` → `dark:text-X-400`（dark slate 上字色 600/700 看不清；bar 500 太刺眼）。status tokens（success/danger）走 CSS 变量已自动切换，无需变动。`npm run build` 通过
     - **M-020** 四个 useQuery 子组件补错误分支：`ProgressTimeline.vue`、`StageTimingStrip.vue`、`GranuleEvents.vue` 用单行内联 `text-2xs text-danger` 与现有 "加载中…" 样式对齐（紧贴上下文，不打断卡片版面）；`BatchTimingCard.vue` 卡片主体大，错误用 `Alert variant="destructive"` 与 Batches/Bundles/Events 页面顶层 useQuery 错误一致。错误文案统一为"加载XX失败：{message}"
@@ -98,25 +100,6 @@
 - 问题描述：剩余 6 个模块都涉及进程级编排（signal handler、subprocess、HTTP server、CLI argv 解析），单元测试需要 subprocess fixture 或 monkeypatch sys.argv，工程量超过本轮可消化。优先纯函数三件套已锁，剩余的留待后续轮次按需补齐。
 - 长期影响：信号 / 入口点路径若被改坏不会被测试发现；CLI 工具回归只有人工 smoke。
 - 可能方向：drain.py 可用 `os.kill(self_pid, SIGTERM)` + asyncio task 验证 SystemExit 传播；CLI 工具用 `subprocess.run` + mock orchestrator；health.py 起一个本地 socket 自检。
-- 置信度：高
-
-### H-006: 测试中通过 object.__setattr__ 修改 frozen Settings 单例 — 27 个测试文件
-
-- 类型：测试基础设施风险
-- 位置：所有使用 `object.__setattr__(settings, ...)` 的 orchestrator 测试文件
-- 证据：典型模式：
-  ```python
-  object.__setattr__(settings, "db_path", tmp_path / "test.db")
-  object.__setattr__(settings, "token", "")
-  ```
-  这出现在 27 个测试文件中。
-- 问题描述：
-  1. 绕过 frozen dataclass 的不可变性约定
-  2. Settings 是模块级单例 — 测试间共享可变状态，pytest-xdist 下会崩溃
-  3. 如果 Settings 从 frozen dataclass 重构为其他形式，所有 27 个文件的测试都会静默失败
-  4. try/finally 中恢复设置的测试如果在设置恢复前崩溃，状态泄漏到后续测试
-- 长期影响：测试基础设施极度脆弱，Settings 重构的成本是 27 个文件的手动修改。
-- 可能方向：引入 `monkeypatch.setenv` 或测试用 Settings factory，避免直接修改单例。
 - 置信度：高
 
 ---

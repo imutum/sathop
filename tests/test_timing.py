@@ -9,17 +9,18 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Granule, GranuleStageTiming, Worker, utcnow
 from sathop.orchestrator.main import app
 from sathop.shared.protocol import GranuleState
 
 
 @pytest.fixture
-async def client(tmp_path):
-    object.__setattr__(settings, "db_path", tmp_path / "test.db")
-    object.__setattr__(settings, "token", "")
-    object.__setattr__(settings, "max_inflight_per_worker", 0)
+async def client(tmp_path, patch_settings):
+    patch_settings(
+        db_path=tmp_path / "test.db",
+        token="",
+        max_inflight_per_worker=0,
+    )
     await orch_db.init_db()
     try:
         yield TestClient(app)

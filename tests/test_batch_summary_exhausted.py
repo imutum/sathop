@@ -16,10 +16,12 @@ from sathop.shared.protocol import GranuleState
 
 
 @pytest.fixture
-async def client(tmp_path):
-    object.__setattr__(settings, "db_path", tmp_path / "test.db")
-    object.__setattr__(settings, "token", "")
-    object.__setattr__(settings, "max_pull_failures", 3)
+async def client(tmp_path, patch_settings):
+    patch_settings(
+        db_path=tmp_path / "test.db",
+        token="",
+        max_pull_failures=3,
+    )
     await orch_db.init_db()
     try:
         yield TestClient(app)

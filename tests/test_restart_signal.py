@@ -13,15 +13,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Receiver, Worker
 from sathop.orchestrator.main import app
 
 
 @pytest.fixture
-async def client(tmp_path):
-    object.__setattr__(settings, "db_path", tmp_path / "test.db")
-    object.__setattr__(settings, "token", "")
+async def client(tmp_path, patch_settings):
+    patch_settings(
+        db_path=tmp_path / "test.db",
+        token="",
+    )
     await orch_db.init_db()
     try:
         yield TestClient(app)

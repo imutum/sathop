@@ -9,16 +9,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Event, Granule, Receiver, Worker, utcnow
 from sathop.orchestrator.main import app
 from sathop.shared.protocol import GranuleState
 
 
 @pytest.fixture
-async def client(tmp_path):
-    object.__setattr__(settings, "db_path", tmp_path / "test.db")
-    object.__setattr__(settings, "token", "")  # disable auth for test
+async def client(tmp_path, patch_settings):
+    # Empty token disables auth so the test can hit /api/metrics directly.
+    patch_settings(db_path=tmp_path / "test.db", token="")
     await orch_db.init_db()
     try:
         yield TestClient(app)
@@ -96,14 +95,11 @@ async def test_metrics_exposes_expected_series(client):
     assert 'sathop_batches{status="running"} 1.0' in body
 
 
-async def test_metrics_requires_token_when_enabled(client):
-    object.__setattr__(settings, "token", "secret123")
-    try:
-        r1 = client.get("/api/metrics")
-        assert r1.status_code == 401
-        r2 = client.get("/api/metrics", headers={"Authorization": "Bearer secret123"})
-        assert r2.status_code == 200
-        r3 = client.get("/api/metrics?token=secret123")
-        assert r3.status_code == 200
-    finally:
-        object.__setattr__(settings, "token", "")
+async def test_metrics_requires_token_when_enabled(client, patch_settings):
+    patch_settings(token="secret123")
+    r1 = client.get("/api/metrics")
+    assert r1.status_code == 401
+    r2 = client.get("/api/metrics", headers={"Authorization": "Bearer secret123"})
+    assert r2.status_code == 200
+    r3 = client.get("/api/metrics?token=secret123")
+    assert r3.status_code == 200

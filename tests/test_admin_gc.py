@@ -25,10 +25,12 @@ from sathop.orchestrator.main import app
 
 
 @pytest.fixture
-async def client(tmp_path):
-    object.__setattr__(settings, "db_path", tmp_path / "test.db")
-    object.__setattr__(settings, "token", "")
-    object.__setattr__(settings, "bundle_storage", tmp_path / "bundles")
+async def client(tmp_path, patch_settings):
+    patch_settings(
+        db_path=tmp_path / "test.db",
+        token="",
+        bundle_storage=tmp_path / "bundles",
+    )
     await orch_db.init_db()
     try:
         yield TestClient(app)

@@ -9,16 +9,14 @@ import pytest
 
 from sathop.orchestrator import background as retention
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Event, Granule, GranuleObject, GranuleStageTiming, utcnow
 from sathop.shared.protocol import GranuleState
 
 
 @pytest.fixture
-async def orch_session(tmp_path):
-    """Spin up an isolated orchestrator SQLite for one test. Settings is a frozen
-    dataclass, so db_path is patched via object.__setattr__ (safe: test-only)."""
-    object.__setattr__(settings, "db_path", tmp_path / "test.db")
+async def orch_session(tmp_path, patch_settings):
+    """Spin up an isolated orchestrator SQLite for one test."""
+    patch_settings(db_path=tmp_path / "test.db")
     await orch_db.init_db()
     try:
         yield orch_db._session_maker

@@ -8,14 +8,13 @@ import pytest
 
 from sathop.orchestrator import db as orch_db
 from sathop.orchestrator.api.batch_readmodels import batch_eta_seconds_bulk, batch_state_counts
-from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Granule, GranuleStageTiming, utcnow
 from sathop.shared.protocol import GranuleState
 
 
 @pytest.fixture
-async def db(tmp_path):
-    object.__setattr__(settings, "db_path", tmp_path / "eta.db")
+async def db(tmp_path, patch_settings):
+    patch_settings(db_path=tmp_path / "eta.db")
     await orch_db.init_db()
     try:
         yield orch_db

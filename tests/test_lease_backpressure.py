@@ -14,17 +14,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Batch, Granule, GranuleObject, Worker, utcnow
 from sathop.orchestrator.main import app
 from sathop.shared.protocol import GranuleState
 
 
 @pytest.fixture
-async def client(tmp_path):
-    object.__setattr__(settings, "db_path", tmp_path / "test.db")
-    object.__setattr__(settings, "token", "")
-    object.__setattr__(settings, "max_inflight_per_worker", 0)  # reset
+async def client(tmp_path, patch_settings):
+    patch_settings(
+        db_path=tmp_path / "test.db",
+        token="",
+        max_inflight_per_worker=0,  # baseline; per-test overrides bump this
+    )
     await orch_db.init_db()
     try:
         yield TestClient(app)
@@ -92,8 +93,8 @@ async def test_cap_zero_leases_all_up_to_capacity(client):
 # ─── cap=N enforcement ─────────────────────────────────────────────────────
 
 
-async def test_cap_blocks_when_pre_upload_holdings_at_cap(client):
-    object.__setattr__(settings, "max_inflight_per_worker", 2)
+async def test_cap_blocks_when_pre_upload_holdings_at_cap(client, patch_settings):
+    patch_settings(max_inflight_per_worker=2)
     await _seed_worker()
     # Worker already holds 2 pre-upload granules
     for i in range(2):
@@ -107,8 +108,8 @@ async def test_cap_blocks_when_pre_upload_holdings_at_cap(client):
     assert r.json()["items"] == []
 
 
-async def test_cap_allows_partial_lease_when_under_cap(client):
-    object.__setattr__(settings, "max_inflight_per_worker", 3)
+async def test_cap_allows_partial_lease_when_under_cap(client, patch_settings):
+    patch_settings(max_inflight_per_worker=3)
     await _seed_worker()
     await _seed_granule("held-0", "b", GranuleState.PROCESSING.value, leased_by="w1")
     # 5 pending; cap 3 minus 1 held = 2 new leases
@@ -119,10 +120,10 @@ async def test_cap_allows_partial_lease_when_under_cap(client):
     assert len(r.json()["items"]) == 2
 
 
-async def test_cap_counts_post_upload_objects_still_on_worker(client):
+async def test_cap_counts_post_upload_objects_still_on_worker(client, patch_settings):
     """UPLOADED clears leased_by, but objects still live on the worker until
     receiver acks + delete-confirms. Those count against the cap."""
-    object.__setattr__(settings, "max_inflight_per_worker", 2)
+    patch_settings(max_inflight_per_worker=2)
     await _seed_worker()
     # Granule is UPLOADED (no leased_by), but object still on worker
     await _seed_granule("up1", "b", GranuleState.UPLOADED.value)
@@ -137,8 +138,8 @@ async def test_cap_counts_post_upload_objects_still_on_worker(client):
     assert r.json()["items"] == []
 
 
-async def test_cap_ignores_already_deleted_objects(client):
-    object.__setattr__(settings, "max_inflight_per_worker", 2)
+async def test_cap_ignores_already_deleted_objects(client, patch_settings):
+    patch_settings(max_inflight_per_worker=2)
     await _seed_worker()
     # Object exists but is marked deleted → no storage held
     await _seed_granule("old", "b", GranuleState.DELETED.value)
@@ -150,9 +151,9 @@ async def test_cap_ignores_already_deleted_objects(client):
     assert len(r.json()["items"]) == 2
 
 
-async def test_cap_mixes_pre_and_post(client):
+async def test_cap_mixes_pre_and_post(client, patch_settings):
     """1 pre-upload leased + 1 post-upload object = 2 held; cap=2 blocks."""
-    object.__setattr__(settings, "max_inflight_per_worker", 2)
+    patch_settings(max_inflight_per_worker=2)
     await _seed_worker()
     await _seed_granule("dl", "b", GranuleState.DOWNLOADING.value, leased_by="w1")
     await _seed_granule("up", "b", GranuleState.UPLOADED.value)
@@ -163,9 +164,9 @@ async def test_cap_mixes_pre_and_post(client):
     assert r.json()["items"] == []
 
 
-async def test_cap_does_not_affect_other_workers(client):
+async def test_cap_does_not_affect_other_workers(client, patch_settings):
     """w1 at cap; w2 has no holdings and should lease freely."""
-    object.__setattr__(settings, "max_inflight_per_worker", 2)
+    patch_settings(max_inflight_per_worker=2)
     await _seed_worker("w1")
     await _seed_worker("w2")
     for i in range(2):

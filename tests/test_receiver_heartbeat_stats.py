@@ -13,7 +13,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.config import settings
 from sathop.orchestrator.db import Receiver
 from sathop.orchestrator.main import app
 from sathop.receiver.config import Settings as RecvSettings
@@ -169,9 +168,11 @@ async def test_fetch_one_does_not_credit_bytes_on_sha_mismatch(tmp_path):
 
 
 @pytest.fixture
-async def client(tmp_path):
-    object.__setattr__(settings, "db_path", tmp_path / "test.db")
-    object.__setattr__(settings, "token", "")
+async def client(tmp_path, patch_settings):
+    patch_settings(
+        db_path=tmp_path / "test.db",
+        token="",
+    )
     await orch_db.init_db()
     try:
         yield TestClient(app)

@@ -17,10 +17,12 @@ from sathop.orchestrator.main import app
 
 
 @pytest.fixture
-async def client(tmp_path):
-    object.__setattr__(settings, "db_path", tmp_path / "test.db")
-    object.__setattr__(settings, "token", "")
-    object.__setattr__(settings, "shared_storage", tmp_path / "shared")
+async def client(tmp_path, patch_settings):
+    patch_settings(
+        db_path=tmp_path / "test.db",
+        token="",
+        shared_storage=tmp_path / "shared",
+    )
     await orch_db.init_db()
     try:
         yield TestClient(app)
@@ -165,26 +167,23 @@ async def test_download_404_for_missing(client):
     assert r.status_code == 404
 
 
-async def test_download_accepts_query_token(client):
+async def test_download_accepts_query_token(client, patch_settings):
     """Browsers / curl without Authorization header still work via ?token=.
     This requires the orchestrator to actually enforce the token — flip it on."""
-    object.__setattr__(settings, "token", "secret")
-    try:
-        r = client.put(
-            "/api/shared/tok.bin",
-            files={"file": ("tok.bin", io.BytesIO(b"data"), "x")},
-            headers={"Authorization": "Bearer secret"},
-        )
-        assert r.status_code == 200
+    patch_settings(token="secret")
+    r = client.put(
+        "/api/shared/tok.bin",
+        files={"file": ("tok.bin", io.BytesIO(b"data"), "x")},
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert r.status_code == 200
 
-        r_no_auth = client.get("/api/shared/tok.bin/download")
-        assert r_no_auth.status_code == 401
+    r_no_auth = client.get("/api/shared/tok.bin/download")
+    assert r_no_auth.status_code == 401
 
-        r_q = client.get("/api/shared/tok.bin/download?token=secret")
-        assert r_q.status_code == 200
-        assert r_q.content == b"data"
-    finally:
-        object.__setattr__(settings, "token", "")
+    r_q = client.get("/api/shared/tok.bin/download?token=secret")
+    assert r_q.status_code == 200
+    assert r_q.content == b"data"
 
 
 # ─── delete ─────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -37,3 +38,29 @@ def free_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+@pytest.fixture
+def patch_settings() -> Callable[..., None]:
+    """Override orchestrator `Settings` fields for one test, with auto-restore.
+
+    `Settings` is a frozen dataclass module-level singleton — fine for prod,
+    but tests need per-test overrides (db_path, token, max_* thresholds…).
+    This fixture is the sole place the project performs the `object.__setattr__`
+    bypass; test files just call `patch_settings(field=value, …)` and the
+    snapshot taken on first patch is rolled back at fixture teardown, even
+    when the test raises.
+    """
+    from sathop.orchestrator.config import settings
+
+    snapshot: dict[str, object] = {}
+
+    def patch(**overrides: object) -> None:
+        for name, value in overrides.items():
+            if name not in snapshot:
+                snapshot[name] = getattr(settings, name)
+            object.__setattr__(settings, name, value)
+
+    yield patch
+    for name, value in snapshot.items():
+        object.__setattr__(settings, name, value)
