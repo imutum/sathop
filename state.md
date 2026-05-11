@@ -1,7 +1,7 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree contains a focused frontend dashboard pipeline-summary helper extraction.
+- Working tree contains a focused docs/comment stale-reference cleanup.
 - `src/sathop/orchestrator/api/batch_readmodels.py` owns BatchSummary/GranuleRow assembly, state counts, ETA, and exhausted-object read queries.
 - `src/sathop/orchestrator/api/batch_transitions.py` owns cancel/retry granule state rules.
 - `src/sathop/orchestrator/api/worker_heartbeat.py` owns worker heartbeat version logging, queue/disk field application, revoke calculation, and one-shot signal consumption.
@@ -15,28 +15,27 @@
 - `frontend/src/features/batch/summary.ts` owns frontend batch count totals, completed/error/in-flight totals, and closed-batch detection.
 - `frontend/src/features/batch/pipelineSummary.ts` owns dashboard/pipeline-health state-count rollups, pipeline totals, and ordered non-zero segments.
 - `frontend/src/features/nodes/useNodeLifecycle.ts` owns shared worker/receiver enable, forget, restart mutations, cache updates, confirmations, and toast handling.
-- `frontend/src/features/batch/types.ts` now also owns create-batch pure form transforms: credential payload/validity, env parsing, and dirty-draft checks.
+- `frontend/src/features/batch/types.ts` owns create-batch pure form transforms: credential payload/validity, env parsing, and dirty-draft checks.
 
 ## Completed this round
-- Re-read `state.md`, confirmed the create-batch helper split was committed, and started from a clean working tree.
-- Reviewed `Dashboard.vue`, `PipelineHealth.vue`, `StateBarChart.vue`, and `summary.ts` for repeated state-count presentation logic.
-- Chose not to reuse `frontend/src/features/batch/summary.ts` for dashboard health because batch in-flight totals and dashboard pipeline-active totals have different semantics.
-- Added `frontend/src/features/batch/pipelineSummary.ts` for dashboard/pipeline-health totals and ordered non-zero segment assembly.
-- Updated `Dashboard.vue` and `PipelineHealth.vue` to share the new helper, removing duplicated bucket constants and local count reducers.
-- Removed stale explanatory template comments while keeping the local stage color map in `PipelineHealth.vue` because it is presentation-only.
+- Re-read `state.md`, confirmed the dashboard pipeline-summary helper split was committed, and started from a clean working tree.
+- Audited docs/comments for stale references after the recent backend/frontend helper splits.
+- Updated `frontend/src/features/batch/schemas.ts` so the create-batch header schema comment points to `types.ts` helpers instead of stale modal-local validation names.
+- Updated ignored local `CLAUDE.md` context references to current worker/receiver modules (`receiver/agent.py`, `worker/runtime.py`, `runtime_helpers.py::auth_for`) and included the `queued` state in the state-machine description.
+- Confirmed no remaining matches for the stale references searched this round.
 
 ## Validation
-- Frontend build/type-check: `npm --prefix frontend run build` passed.
+- Stale-reference grep passed for the corrected worker/receiver/create-batch references.
 - Ruff: `.venv/Scripts/ruff.exe check .` passed.
 - Format: `.venv/Scripts/ruff.exe format . --check` passed.
-- Full pytest was not rerun this round because changes were frontend-only state-count helper extraction.
+- Frontend build and full pytest were not rerun because tracked changes are comments/state only.
 
 ## Key decisions
-- Dashboard/pipeline-health rollups are a separate concept from batch-list in-flight math: pipeline active excludes pending/deleted/failed/blacklisted, while batch summary helpers follow batch completion semantics.
-- `pipelineSummary.ts` owns semantic state buckets and ordered segment data; `PipelineHealth.vue` keeps only visual color mapping and layout.
-- This helper also prevents Dashboard's top "进行中" stat from accidentally counting failed/blacklisted states.
+- Do not create new documentation; only correct stale references that would mislead future maintenance.
+- `CLAUDE.md` is intentionally ignored by Git in this repo, so its local context fixes are kept out of the commit boundary.
+- No code split is justified this round: `StateBarChart.vue` remains a per-state chart presentation component, distinct from pipeline rollup semantics.
 
 ## Next suggested priorities
-1. Do a high-level docs/comment audit for stale architecture references after the recent helper splits.
-2. Check whether `StateBarChart.vue` still earns its separate representation or can remain as-is because it is per-state chart presentation rather than rollup semantics.
-3. If no clear cleanup remains, stop structural refactoring and report that the project is currently in a clean enough state.
+1. Re-check whether any remaining frontend comments explain obvious template structure and can be deleted without losing intent.
+2. If no clear cleanup remains, stop structural refactoring and report that the project is currently in a clean enough state.
+3. Future structural work should be driven by a concrete duplication or stale boundary, not file size alone.

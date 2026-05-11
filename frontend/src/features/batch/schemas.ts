@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-// Header-only schema for the "新建任务" form. Granule rows + credentials
-// have dynamic shape (driven by the bundle manifest) and stay imperative
-// in CreateBatchModal.vue — see validateRow / credsValid there.
+// Header-only schema for the "新建任务" form. Bundle-driven row and credential
+// checks live in types.ts helpers and are composed by CreateBatchModal.vue.
 export const createBatchHeaderSchema = z.object({
   name: z.string().min(1, "请填展示名称"),
   bundleSel: z.string().min(1, "请选择任务包"),
