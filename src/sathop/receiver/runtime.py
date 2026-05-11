@@ -1,5 +1,3 @@
-"""Receiver runtime orchestration."""
-
 from __future__ import annotations
 
 import asyncio

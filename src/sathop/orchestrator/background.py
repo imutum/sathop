@@ -1,5 +1,3 @@
-"""Background tasks: lease-expiry sweeper + retention pruner."""
-
 from __future__ import annotations
 
 import asyncio

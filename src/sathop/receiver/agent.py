@@ -1,5 +1,3 @@
-"""Receiver-side orchestrator API client."""
-
 from __future__ import annotations
 
 from sathop.shared.http import make_orch_client

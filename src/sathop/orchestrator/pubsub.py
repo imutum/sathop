@@ -1,5 +1,3 @@
-"""In-process pub/sub + event logging."""
-
 from __future__ import annotations
 
 import asyncio
