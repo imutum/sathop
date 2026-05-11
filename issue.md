@@ -7,12 +7,15 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：7（累计修复 46 项 — 7 high + 21 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
-- 高优先级问题数：3（H-001/H-002/H-003/H-004/H-008/H-009/H-010 已修）
+- 总问题数：6（累计修复 46 项 — 7 high + 21 medium + 14 low + 3 cross；L-007/L-009/C-002 关闭）
+- 高优先级问题数：3（H-001/H-002/H-003/H-004/H-008/H-009/H-010 已修；H-005 部分覆盖 — 3/9 模块已测）
 - 中优先级问题数：2（M-001/M-002/M-003/M-004/M-005/M-006/M-007/M-008/M-009/M-010/M-011/M-012/M-013/M-014/M-015/M-016/M-017/M-018/M-021/M-022/M-023/M-024 已修）
-- 低优先级问题数：1（L-001/L-002/L-003/L-004/L-005/L-006/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
+- 低优先级问题数：0（L-001/L-002/L-003/L-004/L-005/L-006/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-007/L-009 关闭）
 - 交叉问题数：1（C-001/C-004 已修；C-002 关闭）
 - 已修复（按轮次倒序）：
+  - 第 11 轮：
+    - **H-005**（部分）覆盖 3 个最易测的纯函数模块：`shared/config.py`（32 tests，覆盖 `parse_sathop_url` 的 scheme dispatch / token 双 slot / URL 编码 / 缺 token 缺 host / 子路径 / hostname 大小写等所有分支，`resolve_orch` 的 SATHOP_URL 优先 / split form / 缺 env / 空白 url，`cli_resolve_orch` 的 4 个分支 + require_token=False）；`shared/http.py`（10 tests，bearer_headers 形态 + async/sync client base_url/auth/timeout + MockTransport 端到端发送 Bearer header）；`worker/runtime_helpers.py`（26 tests，6 个纯函数 + 常量不变式：`auth_for` 三态 + 警告路径；`processing_failure_message`/`tail_or_none`/`traceback_tail` 截断；`download_progress_detail` total=0/None/数值；`render_key` 内置字段 / meta 覆盖 / KeyError 回退；`PROCESS_OUTPUT_TAIL_CHARS ≥ 4×PROCESSING_FAILURE_TAIL_CHARS` 不变式锁住 M-023 契约）。新增 68 个测试，全部通过；累计 519 测试。剩余 6 个模块（drain.py 信号/CLI 工具/HealthServer/入口点）暴露面更大、需要 subprocess/signal 编排，留待后续轮次
+    - **L-007** 已在第 5 轮关闭，归档到 Not Issues（不再占 Open list）
   - 第 10 轮：
     - **H-008** 在 CI 加 `typecheck` job 跑 `uv tool run pyright src`；先把 `pyrightconfig.json` 加 `"include": ["src"]` 收紧扫描范围，并清掉 13 处真实类型问题：`worker/storage.py::serve_static` 抛弃 `**dict[str, object]` 改为显式 kwargs；`admin_readmodels` / `batch_readmodels` / `metrics.py` 共 6 处 `dict((await s.execute(...)).all())` 改成 typed dict-comp；`batches._batch_granule_ids` 用 `list(...)` 包 `Sequence[str]`；`receivers.ack` 把 `obj.failed_pulls` 重赋值前抽出局部变量让 pyright 能 narrow None。`pyright src` 现在 0 error
     - **L-005** 项目根加 `.env.example`，列出三个组件本地 dev 需要的最小变量集，明确指向 `deploy/<component>/.env.example` 作为容器部署的权威模板
@@ -73,23 +76,23 @@
 
 ## High Priority
 
-### H-005: 9 个源模块完全没有测试覆盖
+### H-005: 6 个源模块仍无测试覆盖（原 9 个，第 11 轮覆盖 3 个）
 
 - 类型：测试缺口
-- 位置：
-  - `src/sathop/shared/config.py` — URL 解析、token 提取（5+ 分支）
-  - `src/sathop/shared/http.py` — bearer header、client 工厂
-  - `src/sathop/worker/drain.py` — 信号处理、优雅关闭（含 `os._exit(0)`）
-  - `src/sathop/worker/runtime_helpers.py` — 6 个纯函数（`auth_for`, `render_key` 等）
+- 已覆盖（第 11 轮）：
+  - `src/sathop/shared/config.py` — `tests/test_shared_config.py`（32 tests）
+  - `src/sathop/shared/http.py` — `tests/test_shared_http.py`（10 tests）
+  - `src/sathop/worker/runtime_helpers.py` — `tests/test_runtime_helpers.py`（26 tests）
+- 仍未覆盖：
+  - `src/sathop/worker/drain.py` — 信号处理、优雅关闭（含 `raise SystemExit(0)`）
   - `src/sathop/worker/main.py` — 入口点
   - `src/sathop/receiver/main.py` — 入口点
   - `src/sathop/receiver/health.py` — HealthServer 类
   - `src/sathop/cli/reconcile.py` — 138 行 reconcile 逻辑
   - `src/sathop/cli/upload_bundle.py` — zip 构建 + HTTP 上传
-- 证据：grep 所有测试文件的 import 语句，以上模块均未被引用。
-- 问题描述：这些模块包含关键逻辑（URL 解析决定连接正确性、drain 决定进程退出行为、runtime_helpers 被每个 granule 处理调用），但没有任何测试保护。
-- 长期影响：重构或依赖升级后这些路径静默失败。
-- 可能方向：优先覆盖 `shared/config.py`（URL 解析多分支）、`runtime_helpers.py`（纯函数易测）、`drain.py`（关键生命周期）。
+- 问题描述：剩余 6 个模块都涉及进程级编排（signal handler、subprocess、HTTP server、CLI argv 解析），单元测试需要 subprocess fixture 或 monkeypatch sys.argv，工程量超过本轮可消化。优先纯函数三件套已锁，剩余的留待后续轮次按需补齐。
+- 长期影响：信号 / 入口点路径若被改坏不会被测试发现；CLI 工具回归只有人工 smoke。
+- 可能方向：drain.py 可用 `os.kill(self_pid, SIGTERM)` + asyncio task 验证 SystemExit 传播；CLI 工具用 `subprocess.run` + mock orchestrator；health.py 起一个本地 socket 自检。
 - 置信度：高
 
 ### H-006: 测试中通过 object.__setattr__ 修改 frozen Settings 单例 — 27 个测试文件
@@ -151,16 +154,6 @@
 
 ---
 
-## Low Priority
-
-### L-007: publish-before-commit vs commit_and_publish 模式不统一 — 已解决
-
-- 类型：代码风格
-- 状态：第 5 轮收敛 — `log_event` 改为 `session.info` 标记 + commit-time 排空，`background.sweep_expired_leases`、`receivers.ack` 失败分支已迁移到 `commit_and_publish`。`shared.delete` 用新增的 `publish_scopes(s, ...)` 在 commit→unlink→publish 间显式排空 pending events。`progress.py::ingress` 的 bare commit 仍存在（自带 `publish({"scope": "progress", ...})`，无 log_event 调用），与统一模型不冲突。
-- 长期影响：无；保留供未来回顾。
-
----
-
 ## Cross-Cutting Problems
 
 ### C-003: Paused / pause_requested 命名在三个层面表达不同语义
@@ -204,6 +197,12 @@
 ---
 
 ## Not Issues
+
+### N-010: publish-before-commit vs commit_and_publish 模式不统一（原 L-007）
+
+- 检查位置：`src/sathop/orchestrator/pubsub.py`、`background.py`、`api/receivers.py`、`api/shared.py`、`api/progress.py`
+- 表面疑点：状态变更 + SSE 推送在不同 endpoint 用了两种模式。
+- 为什么不是问题：第 5 轮已收敛 — `log_event` 改为 `session.info` 标记 + commit-time 排空；`background.sweep_expired_leases`、`receivers.ack` 失败分支已迁移到 `commit_and_publish`；`shared.delete` 用 `publish_scopes(s, ...)` 在 commit→unlink→publish 间显式排空 pending events。`progress.py::ingress` 的 bare commit 自带 `publish({"scope": "progress", ...})` 且无 `log_event` 调用，与统一模型不冲突。
 
 ### N-008: Worker agent `_get` 与 `_post` 设计对称性（原 L-009）
 
