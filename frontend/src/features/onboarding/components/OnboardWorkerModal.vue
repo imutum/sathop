@@ -9,9 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Modal from "@/ui/Modal.vue";
 import {
+  DEFAULT_WORKER_DIR,
   type ExposeMode,
-  type Platform,
-  linuxPrestep,
+  hostDirPrestep,
+  isAbsolutePath,
+  isPrivateHost,
   workerDockerCompose,
   workerDockerRun,
   workerOpsHint,
@@ -30,8 +32,7 @@ const domain = ref("");
 const ipAddress = ref("");
 const hostPort = ref("");
 const storagePort = ref(9000);
-const dataDir = ref("./data");
-const platform = ref<Platform>(navigator.userAgent.includes("Windows") ? "windows" : "linux");
+const dataDir = ref(DEFAULT_WORKER_DIR);
 const capacity = ref(20);
 const heartbeat = ref(15);
 const downloadConcurrency = ref(1);
@@ -61,14 +62,28 @@ const cfg = computed(() => ({
   ipAddress: ipAddress.value.trim(),
   hostPort: hostPort.value.trim(),
   storagePort: storagePort.value,
-  dataDir: dataDir.value.trim() || "./data",
-  platform: platform.value,
+  dataDir: dataDir.value.trim() || DEFAULT_WORKER_DIR,
   capacity: capacity.value,
   heartbeat: heartbeat.value,
   downloadConcurrency: downloadConcurrency.value,
 }));
 
 const computedPublicUrl = computed(() => workerPublicUrl(cfg.value));
+
+// Direct HTTP mode leaks pulls in plaintext over the wire, so we restrict
+// the operator to internal addressing. Caddy/selfsigned are TLS-protected
+// and may legitimately use public IPs / domains.
+const directHostInvalid = computed(
+  () =>
+    cfg.value.exposeMode === "direct" &&
+    cfg.value.hostPort.length > 0 &&
+    !isPrivateHost(cfg.value.hostPort),
+);
+
+// Relative dataDir is catastrophic for worker — the self-signed cert lives
+// under data/tls and would silently re-generate every time docker run fires
+// from a different PWD, invalidating every receiver's trust bundle.
+const dataDirRelative = computed(() => !isAbsolutePath(cfg.value.dataDir));
 
 const snippet = computed(() => {
   switch (activeTab.value) {
@@ -84,7 +99,7 @@ const valid = computed(() => {
   if (!cfg.value.workerId || !cfg.value.token || !cfg.value.orchUrl) return false;
   if (cfg.value.exposeMode === "caddy") return cfg.value.domain.length > 0;
   if (cfg.value.exposeMode === "selfsigned") return cfg.value.ipAddress.length > 0;
-  return cfg.value.hostPort.length > 0;
+  return cfg.value.hostPort.length > 0 && !directHostInvalid.value;
 });
 
 async function copySnippet() {
@@ -106,8 +121,8 @@ async function copySnippet() {
         <Input id="ow-id" v-model="workerId" placeholder="worker-xxx" class="font-mono text-xs" />
       </div>
       <div>
-        <Label for="ow-data">数据目录</Label>
-        <Input id="ow-data" v-model="dataDir" placeholder="./data" class="font-mono text-xs" />
+        <Label for="ow-data">数据目录（host 绝对路径）</Label>
+        <Input id="ow-data" v-model="dataDir" :placeholder="DEFAULT_WORKER_DIR" class="font-mono text-xs" />
       </div>
       <div class="md:col-span-2">
         <Label for="ow-orch">Orchestrator URL</Label>
@@ -205,33 +220,26 @@ async function copySnippet() {
           class="font-mono text-xs"
         />
         <p class="mt-1 text-2xs text-muted-foreground">
-          Receiver 直接 HTTP 拉取，不加密。Public URL =
+          Receiver 直接 HTTP 拉取，不加密 → 仅限内网 IP。Public URL =
           <code class="font-mono">{{ computedPublicUrl }}</code>
         </p>
+        <Alert v-if="directHostInvalid" variant="destructive" class="mt-2">
+          <AlertDescription class="text-2xs">
+            直接 HTTP 模式必须使用内网 IP（10.x / 172.16–31.x / 192.168.x / 127.x / 100.64–127.x / IPv6 ULA 等）。明文 HTTP 在公网上会让拉取流量完全暴露 — 改用「自签 IP + HTTPS」或「Caddy + 域名」即可加密
+          </AlertDescription>
+        </Alert>
       </div>
     </div>
 
-    <div class="mt-3">
-      <Label>目标平台</Label>
-      <div class="mt-1 inline-flex rounded-md border border-border bg-muted/40 p-0.5">
-        <button
-          type="button"
-          class="rounded px-3 py-1 text-xs font-medium transition"
-          :class="platform === 'linux' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-          @click="platform = 'linux'"
-        >
-          Linux / macOS
-        </button>
-        <button
-          type="button"
-          class="rounded px-3 py-1 text-xs font-medium transition"
-          :class="platform === 'windows' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-          @click="platform = 'windows'"
-        >
-          Windows PowerShell
-        </button>
-      </div>
-    </div>
+    <Alert v-if="dataDirRelative" variant="destructive" class="mt-3">
+      <AlertDescription class="text-2xs">
+        相对路径会被锚定到 <code class="font-mono">docker run</code> 的当前目录——换个目录复制粘贴就会写到别处，<code class="font-mono">data/tls/</code> 下的自签证书也会随之重新生成，所有接收端的信任清单立刻失效。建议使用绝对路径（例如 <code class="font-mono">{{ DEFAULT_WORKER_DIR }}</code>）
+      </AlertDescription>
+    </Alert>
+
+    <p class="mt-2 text-2xs text-muted-foreground">
+      命令统一假设 bash 兼容 shell（Linux / macOS / WSL / Git Bash）。Windows 用户请在 WSL 或 Git Bash 中执行——<code class="font-mono">$(id -u)</code>、<code class="font-mono">$(pwd)</code>、<code class="font-mono">\</code> 续行均为 bash 语法
+    </p>
 
     <details class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
       <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition hover:text-foreground">
@@ -322,11 +330,11 @@ async function copySnippet() {
         </span>
       </div>
 
-      <div v-if="activeTab === 'docker-run' && platform === 'linux'" class="mt-3">
+      <div v-if="activeTab === 'docker-run'" class="mt-3">
         <Alert>
           <AlertDescription class="space-y-1.5">
             <div class="text-xs">先在目标机器上确保数据目录存在并归当前用户：</div>
-            <pre class="overflow-x-auto rounded bg-muted px-2 py-1.5 font-mono text-2xs">{{ linuxPrestep(cfg.dataDir) }}</pre>
+            <pre class="overflow-x-auto rounded bg-muted px-2 py-1.5 font-mono text-2xs">{{ hostDirPrestep(cfg.dataDir) }}</pre>
           </AlertDescription>
         </Alert>
       </div>

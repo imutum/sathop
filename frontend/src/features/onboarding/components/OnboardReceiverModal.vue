@@ -9,9 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import Modal from "@/ui/Modal.vue";
 import {
-  type Platform,
+  DEFAULT_RECEIVER_DIR,
   type TlsMode,
-  linuxPrestep,
+  hostDirPrestep,
+  isAbsolutePath,
   receiverDockerCompose,
   receiverDockerRun,
   receiverOpsHint,
@@ -25,11 +26,13 @@ const toast = useToast();
 const receiverId = ref(`recv-${Math.random().toString(36).slice(2, 8)}`);
 const token = ref(getToken());
 const orchUrl = ref(window.location.origin);
-const outputDir = ref("./downloads");
-const platform = ref<Platform>(navigator.userAgent.includes("Windows") ? "windows" : "linux");
+const outputDir = ref(DEFAULT_RECEIVER_DIR);
 const concurrent = ref(4);
 const poll = ref(10);
-const tlsMode = ref<TlsMode>("strict");
+// Default matches the worker modal's default expose mode (selfsigned). The
+// three options below are ordered to mirror the three deployment postures:
+// trust-orch (selfsigned worker), strict (Caddy/public CA worker), insecure.
+const tlsMode = ref<TlsMode>("trust-orch");
 const showToken = ref(false);
 
 type TabKey = "docker-run" | "compose" | "uvx";
@@ -44,12 +47,16 @@ const cfg = computed(() => ({
   receiverId: receiverId.value.trim() || "recv-unnamed",
   token: token.value,
   orchUrl: orchUrl.value.trim().replace(/\/api\/?$/, ""),
-  outputDir: outputDir.value.trim() || "./downloads",
-  platform: platform.value,
+  outputDir: outputDir.value.trim() || DEFAULT_RECEIVER_DIR,
   concurrent: concurrent.value,
   poll: poll.value,
   tlsMode: tlsMode.value,
 }));
+
+// Relative paths pin the mount target to docker's invocation PWD — copy the
+// command into a different directory and you write to a different archive.
+// Allow it (still useful for ad-hoc tests) but surface a warning.
+const outputDirRelative = computed(() => !isAbsolutePath(cfg.value.outputDir));
 
 const snippet = computed(() => {
   switch (activeTab.value) {
@@ -90,11 +97,11 @@ async function copySnippet() {
         <Input id="ob-id" v-model="receiverId" placeholder="recv-xxx" class="font-mono text-xs" />
       </div>
       <div>
-        <Label for="ob-dir">输出目录</Label>
+        <Label for="ob-dir">归档目录（host 绝对路径）</Label>
         <Input
           id="ob-dir"
           v-model="outputDir"
-          placeholder="./downloads"
+          :placeholder="DEFAULT_RECEIVER_DIR"
           class="font-mono text-xs"
         />
       </div>
@@ -130,32 +137,17 @@ async function copySnippet() {
           默认填的是当前登录 token；要发给同事，可以换成另一个有权限的 token
         </p>
       </div>
-      <div class="md:col-span-2">
-        <Label>目标平台</Label>
-        <div class="mt-1 inline-flex rounded-md border border-border bg-muted/40 p-0.5">
-          <button
-            type="button"
-            class="rounded px-3 py-1 text-xs font-medium transition"
-            :class="platform === 'linux' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-            @click="platform = 'linux'"
-          >
-            Linux / macOS
-          </button>
-          <button
-            type="button"
-            class="rounded px-3 py-1 text-xs font-medium transition"
-            :class="platform === 'windows' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-            @click="platform = 'windows'"
-          >
-            Windows PowerShell
-          </button>
-        </div>
-        <p class="mt-1 text-2xs text-muted-foreground">
-          影响命令的续行符 (<code class="font-mono">\</code> vs
-          <code class="font-mono">`</code>) 与 <code class="font-mono">--user $(id -u):$(id -g)</code> 的添加
-        </p>
-      </div>
     </div>
+
+    <Alert v-if="outputDirRelative" variant="destructive" class="mt-3">
+      <AlertDescription class="text-2xs">
+        相对路径会被锚定到 <code class="font-mono">docker run</code> 的当前目录——换个目录复制粘贴就会写到别处。建议使用绝对路径（例如 <code class="font-mono">{{ DEFAULT_RECEIVER_DIR }}</code>）
+      </AlertDescription>
+    </Alert>
+
+    <p class="mt-2 text-2xs text-muted-foreground">
+      命令统一假设 bash 兼容 shell（Linux / macOS / WSL / Git Bash）。Windows 用户请在 WSL 或 Git Bash 中执行——<code class="font-mono">$(id -u)</code>、<code class="font-mono">$(pwd)</code>、<code class="font-mono">\</code> 续行均为 bash 语法
+    </p>
 
     <div class="mt-3">
       <Label>TLS 信任模式</Label>
@@ -163,18 +155,18 @@ async function copySnippet() {
         <button
           type="button"
           class="rounded px-3 py-1.5 text-xs font-medium transition"
-          :class="tlsMode === 'strict' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-          @click="tlsMode = 'strict'"
+          :class="tlsMode === 'trust-orch' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+          @click="tlsMode = 'trust-orch'"
         >
-          严格（公网证书）
+          信任调度中心 CA（自签 worker，推荐）
         </button>
         <button
           type="button"
           class="rounded px-3 py-1.5 text-xs font-medium transition"
-          :class="tlsMode === 'trust-orch' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-          @click="tlsMode = 'trust-orch'"
+          :class="tlsMode === 'strict' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+          @click="tlsMode = 'strict'"
         >
-          信任调度中心管理的 CA（推荐内网）
+          仅公网 CA（Caddy 域名 worker）
         </button>
         <button
           type="button"
@@ -186,14 +178,14 @@ async function copySnippet() {
         </button>
       </div>
       <p class="mt-1.5 text-2xs text-muted-foreground">
-        <span v-if="tlsMode === 'strict'">
-          只信任系统 CA（Let's Encrypt 等公开证书）。Worker 用「自签 IP + HTTPS」时会握手失败 — 改选另两项
-        </span>
-        <span v-else-if="tlsMode === 'trust-orch'">
+        <span v-if="tlsMode === 'trust-orch'">
           启动时从调度中心拉取所有 worker 的 CA 形成可信清单。中间人没有 worker 私钥就过不了 TLS — 内网最佳搭配
         </span>
+        <span v-else-if="tlsMode === 'strict'">
+          只信任系统 CA（Let's Encrypt 等公开证书）。Worker 用「自签 IP + HTTPS」时会握手失败 — 仅公网域名 worker 适用
+        </span>
         <span v-else>
-          完全跳过证书验证，加密但不验身份。仅在严格管控的物理网络下使用
+          完全跳过证书验证，加密但不验身份。Worker 走明文 HTTP 时 TLS 模式本就无效；仅在严格管控的物理网络下使用
         </span>
       </p>
     </div>
@@ -243,11 +235,11 @@ async function copySnippet() {
         </span>
       </div>
 
-      <div v-if="activeTab === 'docker-run' && platform === 'linux'" class="mt-3">
+      <div v-if="activeTab === 'docker-run'" class="mt-3">
         <Alert>
           <AlertDescription class="space-y-1.5">
             <div class="text-xs">先在目标机器上确保宿主目录存在并归当前用户：</div>
-            <pre class="overflow-x-auto rounded bg-muted px-2 py-1.5 font-mono text-2xs">{{ linuxPrestep(cfg.outputDir) }}</pre>
+            <pre class="overflow-x-auto rounded bg-muted px-2 py-1.5 font-mono text-2xs">{{ hostDirPrestep(cfg.outputDir) }}</pre>
           </AlertDescription>
         </Alert>
       </div>

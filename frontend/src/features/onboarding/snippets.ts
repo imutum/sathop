@@ -1,8 +1,12 @@
 // Code-snippet generators for the onboarding wizards (receiver + worker).
 // Pure functions: take form config, produce a copy-pasteable command string.
 // No DOM, no I/O — testable in isolation.
-
-export type Platform = "linux" | "windows";
+//
+// All emitted commands assume a bash-like shell (Linux/macOS/WSL/Git Bash).
+// Native Windows PowerShell users must paste into WSL or Git Bash — '\' line
+// continuation, `$(id -u)`, and `$(pwd)` are all bash-isms that PowerShell
+// would reject. The docs/UI tell users this; we do not try to emit
+// PowerShell-compatible alternatives.
 
 // ─── Common helpers ────────────────────────────────────────────────────
 
@@ -12,6 +16,12 @@ export const WORKER_IMAGE = "ghcr.io/imutum/sathop/worker:latest";
 // no longer needs caddy — worker handles internal TLS itself via cryptography.
 export const CADDY_IMAGE = "caddy:2-alpine";
 export const DEFAULT_GIT_REPO = "https://github.com/imutum/sathop.git";
+
+// Default host paths emitted as placeholders. Absolute so that copy-pasting
+// into a different PWD does not silently change the mount target — which
+// would lose the worker's persisted self-signed cert across restarts.
+export const DEFAULT_RECEIVER_DIR = "/var/lib/sathop/receiver";
+export const DEFAULT_WORKER_DIR = "/var/lib/sathop/worker";
 
 // http(s)://host:port  →  sathop(s)://TOKEN@host:port
 // Token is %-encoded so a literal '@' or ':' in it can't fracture the URL.
@@ -28,22 +38,28 @@ export function buildSathopUrl(orchUrl: string, token: string): string {
   return `${scheme}://${encodeURIComponent(token)}@${host}${path}`;
 }
 
-// Linux/macOS uses '\' for line continuation; PowerShell uses backtick '`'.
-function linecont(p: Platform): string {
-  return p === "linux" ? "\\" : "`";
+function joinDockerArgs(lines: string[]): string {
+  return lines.join(" \\\n  ");
 }
 
-function joinDockerArgs(lines: string[], p: Platform): string {
-  return lines.join(` ${linecont(p)}\n  `);
+// True when `hostDir` is an absolute filesystem path (POSIX `/x` or Windows
+// `C:\x`). Anything else — `./x`, `x`, `~/x`, empty — is treated as relative
+// for the purpose of warning the operator.
+export function isAbsolutePath(hostDir: string): boolean {
+  const t = hostDir.trim();
+  if (!t) return false;
+  return t.startsWith("/") || /^[A-Za-z]:[\\/]/.test(t);
 }
 
-function userFlag(p: Platform): string[] {
-  return p === "linux" ? ["--user $(id -u):$(id -g)"] : [];
-}
-
-function mountSrc(p: Platform, hostDir: string): string {
-  const d = hostDir.replace(/^\.\//, "").replace(/^\.\\/, "");
-  return p === "linux" ? `"$(pwd)/${d}"` : `"\${PWD}/${d}"`;
+// Host paths are wrapped to survive spaces. Relative paths are pinned to the
+// invocation PWD via $(pwd); absolute paths are passed through. The modal
+// surfaces a warning when the operator enters a relative path because the
+// resulting mount silently shifts with PWD.
+function mountSrc(hostDir: string): string {
+  const trimmed = hostDir.trim();
+  if (isAbsolutePath(trimmed)) return `"${trimmed}"`;
+  const d = trimmed.replace(/^\.\//, "").replace(/^\.\\/, "");
+  return `"$(pwd)/${d}"`;
 }
 
 // ─── Receiver ──────────────────────────────────────────────────────────
@@ -58,7 +74,6 @@ export type ReceiverConfig = {
   token: string;
   orchUrl: string;
   outputDir: string;
-  platform: Platform;
   concurrent: number;
   poll: number;
   tlsMode: TlsMode;
@@ -71,8 +86,12 @@ function receiverEnv(cfg: ReceiverConfig, sathopUrl: string): Array<[string, str
   ];
   if (cfg.concurrent !== 4) out.push(["SATHOP_CONCURRENT_PULLS", String(cfg.concurrent)]);
   if (cfg.poll !== 10) out.push(["SATHOP_POLL_INTERVAL", String(cfg.poll)]);
+  // Receiver defaults to SATHOP_TLS_TRUST_ORCH=true (see receiver/config.py).
+  // "strict" must explicitly opt out, otherwise the UI label "只信任系统 CA"
+  // would not match runtime behaviour (receiver would still fetch + trust
+  // the orch-aggregated worker CA bundle).
+  if (cfg.tlsMode === "strict") out.push(["SATHOP_TLS_TRUST_ORCH", "false"]);
   if (cfg.tlsMode === "insecure") out.push(["SATHOP_TLS_VERIFY", "false"]);
-  if (cfg.tlsMode === "trust-orch") out.push(["SATHOP_TLS_TRUST_ORCH", "true"]);
   return out;
 }
 
@@ -82,17 +101,16 @@ export function receiverDockerRun(cfg: ReceiverConfig): string {
     "docker run -d",
     "--name sathop-receiver",
     "--restart unless-stopped",
-    ...userFlag(cfg.platform),
+    "--user $(id -u):$(id -g)",
     ...receiverEnv(cfg, sathopUrl).map(([k, v]) => `-e ${k}="${v}"`),
-    `-v ${mountSrc(cfg.platform, cfg.outputDir)}:/data/archive`,
+    `-v ${mountSrc(cfg.outputDir)}:/data/archive`,
     RECEIVER_IMAGE,
   ];
-  return joinDockerArgs(lines, cfg.platform);
+  return joinDockerArgs(lines);
 }
 
 export function receiverDockerCompose(cfg: ReceiverConfig): string {
   const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
-  const userLine = cfg.platform === "linux" ? '    user: "${UID:-1000}:${GID:-1000}"\n' : "";
   const envLines = receiverEnv(cfg, sathopUrl)
     .map(([k, v]) => `      ${k}: "${v}"`)
     .join("\n");
@@ -100,7 +118,8 @@ export function receiverDockerCompose(cfg: ReceiverConfig): string {
   receiver:
     image: ${RECEIVER_IMAGE}
     restart: unless-stopped
-${userLine}    environment:
+    user: "\${UID:-1000}:\${GID:-1000}"
+    environment:
 ${envLines}
     volumes:
       - ${cfg.outputDir}:/data/archive
@@ -120,13 +139,16 @@ export function receiverUvx(cfg: ReceiverConfig): string {
   if (cfg.poll !== 10) lines.push(`--poll ${cfg.poll}`);
   if (cfg.tlsMode === "trust-orch") lines.push("--trust-orch-ca");
   if (cfg.tlsMode === "insecure") lines.push("--insecure-tls");
-  return joinDockerArgs(lines, cfg.platform);
+  return joinDockerArgs(lines);
 }
 
-// Linux preflight hint: ensure host dir exists and is owned by current user
-// before docker run mounts it (otherwise --user can't mkdir into root-owned mount).
-export function linuxPrestep(outputDir: string): string {
-  return `mkdir -p ${outputDir} && sudo chown -R "$(id -u):$(id -g)" ${outputDir}`;
+// Preflight hint: ensure host dir exists and is owned by current user before
+// `docker run --user $(id -u):$(id -g)` mounts it. sudo is unconditional —
+// the default placeholder is an absolute path under /var/lib that the
+// operator's account does not own. Relative paths still work; sudo there is
+// harmless (just a no-op chown on already-owned dirs).
+export function hostDirPrestep(outputDir: string): string {
+  return `sudo mkdir -p ${outputDir} && sudo chown -R "$(id -u):$(id -g)" ${outputDir}`;
 }
 
 export function receiverOpsHint(): string {
@@ -148,7 +170,6 @@ export type WorkerConfig = {
   hostPort: string; // "ip:port" for direct mode
   storagePort: number;
   dataDir: string;
-  platform: Platform;
   capacity: number;
   heartbeat: number;
   downloadConcurrency: number;
@@ -169,6 +190,42 @@ function parseHostPort(raw: string): { host: string; port: number | null } {
   } catch {
     return { host: cleaned, port: null };
   }
+}
+
+// True when the host part of `raw` (with optional ":port") is a private /
+// internal address: RFC 1918, loopback, link-local, RFC 6598 CGNAT, IPv6 ULA
+// / loopback / link-local. Bare hostnames pass — assume the operator knows
+// their DNS. Empty input returns false (treated as invalid).
+//
+// Used by the worker onboarding modal to gate `direct` (plaintext HTTP) mode:
+// receivers pulling over HTTP across the public internet would expose every
+// byte, so direct mode is restricted to internal addressing.
+export function isPrivateHost(raw: string): boolean {
+  const { host } = parseHostPort(raw);
+  if (!host) return false;
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const a = +ipv4[1]!;
+    const b = +ipv4[2]!;
+    const c = +ipv4[3]!;
+    const d = +ipv4[4]!;
+    if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    return false;
+  }
+  if (host.includes(":")) {
+    const lower = host.toLowerCase();
+    if (lower === "::1") return true;
+    if (/^f[cd][0-9a-f]/.test(lower)) return true; // fc00::/7
+    if (/^fe[89ab][0-9a-f]/.test(lower)) return true; // fe80::/10
+    return false;
+  }
+  return true; // hostname — operator's call
 }
 
 export function workerPublicUrl(cfg: WorkerConfig): string {
@@ -217,13 +274,13 @@ export function workerDockerRun(cfg: WorkerConfig): string {
     "docker run -d",
     "--name sathop-worker",
     "--restart unless-stopped",
-    ...userFlag(cfg.platform),
+    "--user $(id -u):$(id -g)",
     ...workerEnv(cfg, sathopUrl).map(([k, v]) => `-e ${k}="${v}"`),
     `-p ${hostPortFor(cfg)}:${cfg.storagePort}`,
-    `-v ${mountSrc(cfg.platform, cfg.dataDir)}:/app/data`,
+    `-v ${mountSrc(cfg.dataDir)}:/app/data`,
     WORKER_IMAGE,
   ];
-  const worker = "# --- Worker ---\n" + joinDockerArgs(workerLines, cfg.platform);
+  const worker = "# --- Worker ---\n" + joinDockerArgs(workerLines);
 
   if (cfg.exposeMode !== "caddy") return worker;
 
@@ -245,14 +302,12 @@ export function workerDockerRun(cfg: WorkerConfig): string {
     `--to host.docker.internal:${cfg.storagePort}`,
   ];
   const caddy =
-    "# --- Caddy 反向代理 (HTTPS 自动签发 + 续签) ---\n" + joinDockerArgs(caddyLines, cfg.platform);
+    "# --- Caddy 反向代理 (HTTPS 自动签发 + 续签) ---\n" + joinDockerArgs(caddyLines);
   return `${worker}\n\n${caddy}`;
 }
 
 export function workerDockerCompose(cfg: WorkerConfig): string {
   const sathopUrl = buildSathopUrl(cfg.orchUrl, cfg.token);
-  const userLine =
-    cfg.platform === "linux" ? '    user: "${UID:-1000}:${GID:-1000}"\n' : "";
   const envLines = workerEnv(cfg, sathopUrl)
     .map(([k, v]) => `      ${k}: "${v}"`)
     .join("\n");
@@ -262,7 +317,8 @@ export function workerDockerCompose(cfg: WorkerConfig): string {
   worker:
     image: ${WORKER_IMAGE}
     restart: unless-stopped
-${userLine}    environment:
+    user: "\${UID:-1000}:\${GID:-1000}"
+    environment:
 ${envLines}
 ${cfg.exposeMode !== "caddy" ? portLine : ""}    volumes:
       - ${cfg.dataDir}:/app/data
