@@ -1,5 +1,13 @@
-// Fetch wrapper with Bearer auth + typed API endpoints.
+// Typed API endpoint catalog.
 
+import {
+  authHeaders,
+  deleteJson,
+  getJson,
+  httpError,
+  postJson,
+  putJson,
+} from "./apiClient";
 import type {
   BatchSummary,
   BatchTiming,
@@ -20,6 +28,7 @@ import type {
   WorkerInfo,
 } from "./apiTypes";
 
+export { getToken, setToken, suspendAuthRecovery } from "./apiClient";
 export { IN_FLIGHT_STATES, STATE_ORDER } from "./apiTypes";
 export type {
   BatchSummary,
@@ -46,87 +55,6 @@ export type {
   TimingStage,
   WorkerInfo,
 } from "./apiTypes";
-
-function getToken(): string {
-  return localStorage.getItem("sathop.token") ?? "";
-}
-
-export function setToken(t: string): void {
-  localStorage.setItem("sathop.token", t);
-}
-
-// Recover from a stale token (e.g. admin set SATHOP_TOKEN after the user
-// auto-skipped login in OPEN mode). All /api/* share require_token, so a 401
-// on any endpoint means the cached token is no longer good — drop it and
-// reload so the auth gate can probe again or prompt for a new one.
-// Disabled during login probes so a wrong-typed token shows an inline error
-// instead of looping the page.
-let recoverOn401 = true;
-export function suspendAuthRecovery<T>(fn: () => Promise<T>): Promise<T> {
-  recoverOn401 = false;
-  return fn().finally(() => {
-    recoverOn401 = true;
-  });
-}
-
-function handleAuthFailure(): void {
-  if (!recoverOn401) return;
-  if (!localStorage.getItem("sathop.token")) return;
-  // Latch off so parallel queries that all 401 don't each trigger reload().
-  recoverOn401 = false;
-  localStorage.removeItem("sathop.token");
-  window.location.reload();
-}
-
-function authHeaders(init?: HeadersInit, jsonBody = false): Headers {
-  const headers = new Headers(init);
-  headers.set("Authorization", `Bearer ${getToken()}`);
-  if (jsonBody && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-  return headers;
-}
-
-// Unwrap FastAPI's `{"detail": "..."}` envelope so toast messages stay clean
-// ("bundle is referenced by …" instead of `409 Conflict: {"detail":"…"}`).
-// Falls back to the raw body for non-JSON errors (HTML proxy pages, etc.).
-export async function httpError(r: Response, bodyLimit = 400): Promise<Error> {
-  const body = await r.text();
-  let msg = body.trim();
-  try {
-    const j = JSON.parse(body);
-    const d = j?.detail;
-    if (typeof d === "string") msg = d;
-    else if (Array.isArray(d) && d.length) msg = d.map((x) => x?.msg ?? JSON.stringify(x)).join("; ");
-  } catch {
-    // not JSON
-  }
-  if (!msg) return new Error(`${r.status} ${r.statusText}`);
-  return new Error(msg.length > bodyLimit ? msg.slice(0, bodyLimit) + "…" : msg);
-}
-
-export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const r = await fetch(path, {
-    ...init,
-    headers: authHeaders(init.headers, init.body !== undefined),
-  });
-  if (!r.ok) {
-    if (r.status === 401) handleAuthFailure();
-    throw await httpError(r);
-  }
-  return (await r.json()) as T;
-}
-
-function jsonInit(method: string, body?: unknown): RequestInit {
-  return body === undefined
-    ? { method }
-    : { method, body: JSON.stringify(body) };
-}
-
-const getJson = <T>(path: string) => api<T>(path);
-const postJson = <T>(path: string, body?: unknown) => api<T>(path, jsonInit("POST", body));
-const putJson = <T>(path: string, body?: unknown) => api<T>(path, jsonInit("PUT", body));
-const deleteJson = <T>(path: string) => api<T>(path, { method: "DELETE" });
 
 const adminApi = {
   overview: () => getJson<Overview>("/api/admin/overview"),

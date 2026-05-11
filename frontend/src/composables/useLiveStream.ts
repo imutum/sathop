@@ -4,6 +4,8 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useQueryClient } from "@tanstack/vue-query";
 
+import { getToken } from "@/apiClient";
+
 type Scope =
   | "batches"
   | "workers"
@@ -22,10 +24,6 @@ const SCOPE_TO_KEYS: Record<Scope, string[][]> = {
   bundles: [["bundles"], ["bundle-detail"]],
   shared: [["shared-files"]],
 };
-
-function getToken(): string {
-  return localStorage.getItem("sathop.token") ?? "";
-}
 
 export function useLiveStream() {
   const qc = useQueryClient();

@@ -1,7 +1,7 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree contains a focused admin read-model helper split.
+- Working tree contains a focused frontend API transport split.
 - `src/sathop/orchestrator/api/batch_readmodels.py` owns BatchSummary/GranuleRow assembly, state counts, ETA, and exhausted-object read queries.
 - `src/sathop/orchestrator/api/batch_transitions.py` owns cancel/retry granule state rules.
 - `src/sathop/orchestrator/api/worker_heartbeat.py` owns worker heartbeat version logging, queue/disk field application, revoke calculation, and one-shot signal consumption.
@@ -10,26 +10,29 @@
 - `src/sathop/orchestrator/api/workers.py` now keeps worker routes, endpoint validation, commit/publish/log orchestration, delete-confirm, and operator actions.
 - `src/sathop/orchestrator/api/admin_readmodels.py` owns admin overview, in-flight rows, stuck-granule rows, limit clamping, and stuck-age constants.
 - `src/sathop/orchestrator/api/admin.py` now keeps admin routes, bundle GC mutation, settings info, commit/log/publish behavior, and route-level validation.
+- `frontend/src/apiClient.ts` owns browser token storage, auth headers, 401 recovery, HTTP error parsing, and JSON fetch helpers.
+- `frontend/src/api.ts` remains the public typed endpoint catalog and API facade used by pages/components.
 
 ## Completed this round
-- Re-read `state.md` and confirmed the previous worker lease helper split was committed with a clean working tree.
-- Re-opened `workers.py` and judged remaining operator actions too thin to split without turning the refactor into route-name shuffling.
-- Split admin dashboard/stuck/in-flight read-model assembly into `admin_readmodels.py`.
-- Kept bundle GC and settings info in `admin.py` because they are route-level operational actions, not dashboard read models.
-- Preserved the public admin endpoint behavior and existing `STUCK_AGE_HOURS` import path through `admin.py`.
+- Re-read `state.md`, confirmed the admin read-model split was committed, and started from a clean working tree.
+- Re-checked `admin.py` bundle GC and decided not to split it because it is still a single operational route with commit/log/publish semantics.
+- Inspected `frontend/src/api.ts` and found a stronger boundary between transport/auth behavior and typed endpoint catalog than between individual endpoint domains.
+- Added `frontend/src/apiClient.ts` for token access, auth headers, 401 recovery, HTTP error parsing, and JSON request helpers.
+- Kept `frontend/src/api.ts` as the stable public facade, re-exporting existing auth helpers so current imports do not churn.
+- Updated `useLiveStream` to reuse the shared token getter instead of duplicating localStorage access.
 
 ## Validation
-- Focused admin tests: `.venv/Scripts/python.exe -m pytest tests/test_admin_stuck.py tests/test_admin_gc.py` passed (`11 passed`).
+- Frontend build/type-check: `npm --prefix frontend run build` passed.
 - Full suite: `.venv/Scripts/python.exe -m pytest` passed (`430 passed`).
 - Ruff: `.venv/Scripts/ruff.exe check .` passed.
 - Format: `.venv/Scripts/ruff.exe format . --check` passed.
 
 ## Key decisions
-- `workers.py` should not be split further right now: the remaining operator endpoints are already thin, and moving them would add a module boundary without removing a concept.
-- Admin dashboard/stuck/in-flight queries are a stable read-model boundary because they share row shaping, stuck-age semantics, non-terminal filtering, and query-only behavior.
-- Bundle GC stays in `admin.py` because it performs deletion, blob unlinking, logging, commit, and publish orchestration in one operational route.
+- Splitting `frontend/src/api.ts` by backend domain would force widespread import churn while preserving the same concept count; keeping one `API` facade is cheaper for callers.
+- Transport/auth/error handling is a real boundary because it is shared by endpoint methods and SSE token usage, and can evolve without touching endpoint definitions.
+- CLI modules are currently small enough; their duplicated URL/token parsing already goes through shared config helpers, so further splitting would be low value.
 
 ## Next suggested priorities
-1. Re-open `src/sathop/orchestrator/api/admin.py` after this commit and check whether bundle GC deserves a tiny domain helper; only split if deletion/blob-unlink logic grows beyond the current single route.
-2. Inspect `frontend/src/api.ts` for a domain split if backend API files now look sufficiently clean.
-3. If frontend API splitting is low-value, review CLI modules under `src/sathop/cli/` for duplicated request/validation patterns.
+1. Re-open `frontend/src/apiTypes.ts` and check whether protocol type definitions have a clearer split from frontend-only view types.
+2. If frontend type splitting is low-value, inspect large Vue pages/components for extractable presentation helpers without changing behavior.
+3. If UI cleanup is low-value, review `src/sathop/cli/validate_bundle.py` for validator rule grouping only if new bundle checks are being added.
