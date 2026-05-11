@@ -8,10 +8,9 @@ from sqlalchemy import delete, select, update
 
 from sathop.shared.protocol import LEASED_STATES, GranuleState
 
-from . import db
 from .config import settings
-from .db import Event, Granule, GranuleObject, GranuleStageTiming, utcnow
-from .pubsub import log_event, publish
+from .db import Event, Granule, GranuleObject, GranuleStageTiming, get_session_maker, utcnow
+from .pubsub import commit_and_publish, log_event, publish
 
 _log = logging.getLogger("sathop.orch.background")
 
@@ -19,9 +18,8 @@ SWEEP_INTERVAL_SEC = 60
 
 
 async def sweep_expired_leases() -> int:
-    assert db._session_maker is not None
     now = utcnow()
-    async with db._session_maker() as s:
+    async with get_session_maker()() as s:
         stmt = (
             select(Granule)
             .where(Granule.state.in_(LEASED_STATES))
@@ -49,8 +47,7 @@ async def sweep_expired_leases() -> int:
         if actually_reclaimed == 0:
             return 0
         await log_event(s, "scheduler", f"reclaimed {actually_reclaimed} expired leases", level="warn")
-        await s.commit()
-        publish({"scope": "batches"})
+        await commit_and_publish(s, "batches")
         return actually_reclaimed
 
 
@@ -70,13 +67,12 @@ async def sweep_retention(
     events_days: int | None = None,
     deleted_days: int | None = None,
 ) -> dict[str, int]:
-    assert db._session_maker is not None
     ev_days = settings.retain_events_days if events_days is None else events_days
     del_days = settings.retain_deleted_days if deleted_days is None else deleted_days
     now = utcnow()
     out = {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0}
 
-    async with db._session_maker() as s:
+    async with get_session_maker()() as s:
         if ev_days > 0:
             cutoff = now - timedelta(days=ev_days)
             r = await s.execute(delete(Event).where(Event.ts < cutoff))

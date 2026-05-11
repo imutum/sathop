@@ -7,12 +7,19 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：36（累计修复 18 项 — 6 high + 5 medium + 5 low + 2 cross）
+- 总问题数：29（累计修复 25 项 — 6 high + 10 medium + 7 low + 2 cross）
 - 高优先级问题数：4（H-001/H-002/H-003/H-004/H-009/H-010 已修）
-- 中优先级问题数：19（M-001/M-007/M-008/M-018/M-022 已修）
-- 低优先级问题数：11（L-001/L-002/L-003/L-011/L-016 已修）
+- 中优先级问题数：14（M-001/M-002/M-004/M-007/M-008/M-010/M-013/M-015/M-018/M-022 已修）
+- 低优先级问题数：9（L-001/L-002/L-003/L-004/L-008/L-011/L-016 已修）
 - 交叉问题数：2（C-001/C-004 已修）
 - 已修复（按轮次倒序）：
+  - 第 5 轮：
+    - **M-004 / L-008** 暴露 `db.get_session_maker()` 公共 helper：替代 `background.py` 与 `db.session()` 中的 `assert _session_maker is not None`，`-O` 模式下仍报 `RuntimeError("init_db() not called")`；同时移除 background.py 跨模块访问私有属性的封装泄漏
+    - **M-002** `log_event` 改为标记 `session.info[_LOG_EVENT_PENDING]`，由 `commit_and_publish` / 新增 `publish_scopes(s, *scopes)` 在 commit 后排空；SSE 客户端不再收到尚未持久化的 event nudge。`background.sweep_expired_leases` / `receivers.ack` 失败分支 / `shared.delete` 三处裸 commit 同步迁移
+    - **M-010** `admin.gc_bundles` 改为先 commit_and_publish 再 unlink 孤儿 blob — commit 失败时不再留下"DB 行存在但 blob 已删"的不一致状态。`shared.delete` 的 commit→unlink→publish 顺序本就正确，未改
+    - **M-013** Orchestrator Dockerfile HEALTHCHECK 用 `os.environ.get('SATHOP_PORT','8000')` 替代硬编码 8000，自定义端口部署不再被错判 unhealthy
+    - **M-015** `pyrightconfig.json` `pythonVersion` 3.13 → 3.11，与 CI/Dockerfile/pyproject 对齐
+    - **L-004** `admin.list_stuck` 对无效 state 改为 `HTTPException(400)` 并附允许列表，不再静默返回 `[]` 掩盖前端 bug
   - 第 4 轮：
     - **C-001** urllib → httpx 统一：`shared.http.make_sync_orch_client` 替代 `urllib.request`，`worker/bundle.py::_fetch_from_orch` + `worker/shared.py::_sync_one/prune_orphans` 全部迁移。错误处理/超时/auth 与 async 路径一致。测试切到 `httpx.MockTransport`
     - **M-022** downloader 凭证 scheme 匹配但字段缺失时 `log.warning`（httpx + aria2 两份 auth translator 都加），不再静默无认证下载
@@ -101,21 +108,6 @@
 
 ## Medium Priority
 
-### M-002: log_event 在 commit 前 publish — SSE 客户端可能看到不存在的 event
-
-- 类型：并发一致性
-- 位置：`src/sathop/orchestrator/pubsub.py:54-62`
-- 证据：
-  ```python
-  async def log_event(s, source, message, ...):
-      s.add(Event(...))
-      publish({"scope": "events"})  # publish BEFORE caller's commit
-  ```
-- 问题描述：`publish()` 立即发出 SSE 通知，但 Event 行尚未 commit。SSE 客户端收到 nudge 后立即查询 `/api/events` 可能查不到这条 event。进程崩溃时这条 event 永久丢失。
-- 长期影响：SSE 流不可靠；事件偶尔"消失"。
-- 可能方向：将 `publish` 移到 `commit_and_publish` 之后，或让 `log_event` 返回一个回调由调用方在 commit 后执行。
-- 置信度：高
-
 ### M-003: SSE stream generator 缺少异常保护
 
 - 类型：健壮性
@@ -124,18 +116,6 @@
 - 问题描述：所有连接的 SSE 客户端同时断开。UI 的实时更新静默停止，直到用户刷新页面（或 TanStack Query 的 60s 安全网触发）。
 - 长期影响：SSE 不可靠，降低 UI 实时性体验。
 - 可能方向：在循环体内加宽泛的 try/except（log + continue），或对事件做 `repr()` 兜底。
-- 置信度：中
-
-### M-004: 使用 assert 做运行时校验 — `-O` 下会失效
-
-- 类型：错误处理
-- 位置：
-  - `src/sathop/orchestrator/background.py:22,73` — `assert db._session_maker is not None`
-  - `src/sathop/orchestrator/db.py:284` — `assert _session_maker is not None, "init_db() not called"`
-- 证据：Python `assert` 在 `-O`（优化模式）下被编译器移除。这些检查如果失败（`init_db()` 未调用或失败），会触发 `AssertionError`（非 `-O`）或 `AttributeError`（`-O` 下 `None` 对象无属性）。
-- 问题描述：生产环境使用 `-O` 时，`db.py` 的 session() 依赖会在 `None._session_maker()` 处抛出晦涩的 `AttributeError`，而非明确的 `init_db() not called` 错误信息。
-- 长期影响：故障排查困难；背景任务静默失败。
-- 可能方向：将 `assert` 替换为显式的 `if ... is None: raise RuntimeError(...)`。
 - 置信度：中
 
 ### M-005: Deletable endpoint 存在 N+1 查询
@@ -171,19 +151,6 @@
 - 可能方向：将白名单收紧为仅必要的路径解析变量（`PATH`、`SYSTEMROOT`、`TMP`），其余由 bundle 通过 `manifest.execution.env` 显式声明。
 - 置信度：中（取决于 bundle 的信任模型和部署环境）
 
-### M-010: gc_bundles 和 shared delete 在 commit 前操作文件系统
-
-- 类型：事务安全
-- 位置：
-  - `src/sathop/orchestrator/api/admin.py:138-148` — blob unlink (line 138-144) 仍在 `commit_and_publish` (line 148) **之前**执行
-  - `src/sathop/orchestrator/api/shared.py:205-207` — 同上模式
-- 证据：blob 文件在事务 commit 前被删除。如果 commit 失败（DB 约束冲突等），文件已删除但 DB 行仍然存在 — 数据不一致。
-- 问题描述：后续对已删除 blob 的下载请求返回 500，而 DB 显示 bundle 存在。
-- 更新：`ad74096` 将 gc_bundles 路径从裸 `s.commit()` 迁移至 `commit_and_publish()`，但 blob unlink 仍在 commit 之前发生。commit 消息承认 shared.py::delete 的 commit→unlink→publish 顺序是有意为之。
-- 长期影响：静默数据损坏。
-- 可能方向：先 commit，成功后再删除文件（文件删除失败比 DB 不一致更容易恢复）。
-- 置信度：中
-
 ### M-011: Compose 文件中使用未固定版本的镜像
 
 - 类型：部署风险
@@ -210,16 +177,6 @@
 - 可能方向：使用 `tmp.replace(blob)` 并捕获 `FileExistsError` 后静默成功（内容相同），或用 `os.replace`。
 - 置信度：中
 
-### M-013: Orchestrator HEALTHCHECK 硬编码端口 8000
-
-- 类型：部署配置
-- 位置：`deploy/orchestrator/Dockerfile:41`
-- 证据：`http://127.0.0.1:8000/api/health` — 端口 8000 硬编码。如果 `SATHOP_PORT` 被覆盖，healthcheck 将命中错误端口。
-- 问题描述：容器被标记为 unhealthy，触发重启循环。
-- 长期影响：非默认端口部署不可用。
-- 可能方向：使用 `http://127.0.0.1:${SATHOP_PORT:-8000}/api/health`（在 CMD 或 HEALTHCHECK 中展开环境变量）。
-- 置信度：中
-
 ### M-014: 测试中存在依赖时序的 sleep
 
 - 类型：测试可靠性
@@ -231,16 +188,6 @@
 - 长期影响：开发者对 CI 结果失去信任。
 - 可能方向：用 `asyncio.Event` 或 `MockClock` 代替 sleep；放宽时间断言。
 - 置信度：中
-
-### M-015: pyrightconfig.json 指定 Python 3.13 而 CI 和生产使用 3.11
-
-- 类型：配置不一致
-- 位置：`pyrightconfig.json:4` vs `.github/workflows/ci.yml:22` vs `pyproject.toml:5`
-- 证据：pyrightconfig 指定 `"pythonVersion": "3.13"`，但 CI 使用 3.11，pyproject.toml 声明 `>=3.11`。
-- 问题描述：pyright 可能接受仅在 3.12+ 可用的语法/stdlib 用法，而这些在 3.11 生产环境不可用。反之亦然 — 3.11 上的问题（如某些类型的弃用警告）pyright 不会报告。
-- 长期影响：类型检查结果不可信。
-- 可能方向：将 `pythonVersion` 对齐为 `"3.11"`。
-- 置信度：高
 
 ### M-016: MinioStorage.put() 和 delete() 在 event loop 上执行同步阻塞 I/O
 
@@ -346,16 +293,6 @@
 
 ## Low Priority
 
-### L-004: list_stuck 对无效 state 返回空列表而非 400
-
-- 类型：API 设计
-- 位置：`src/sathop/orchestrator/api/admin.py:48-51`
-- 证据：`if state not in NON_TERMINAL: return []` — 静默返回空列表而非错误。
-- 问题描述：前端传错 state 字符串时静默失败，掩盖 bug。
-- 长期影响：低 — 前端已构建好正确的 state 集合。
-- 可能方向：返回 400 Bad Request。
-- 置信度：中
-
 ### L-005: 没有根级 .env.example 文件
 
 - 类型：文档
@@ -376,29 +313,11 @@
 - 可能方向：补全 `.env.example` 文件。
 - 置信度：中
 
-### L-007: publish-before-commit vs commit_and_publish 模式不统一 — 大部分已解决
+### L-007: publish-before-commit vs commit_and_publish 模式不统一 — 已解决
 
 - 类型：代码风格
-- 位置：仅剩 3 处有意保留的裸 `s.commit()`：
-  - `pubsub.py:61` — `log_event()` 内部的 `publish()`（设计上在 commit 前发布 SSE，见 M-002）
-  - `shared.py:205` — shared file delete 的 commit→unlink→publish 顺序（与 M-010 关联）
-  - `progress.py:33` — progress relay
-  - `receivers.py:126` — receiver ack
-- 证据：`c7fa317` 和 `ad74096` 已将几乎所有 API 路由迁移至 `commit_and_publish()`。`admin.py` 不再导入裸 `publish`。剩余裸 `s.commit()` 调用均经 commit 消息确认为有意保留。
-- 问题描述：剩余裸 commit 各有理由（background sweepers 无 SSE、shared delete 需先 commit 再 unlink、progress relay 为后台任务）。不再是跨文件的不一致问题。
-- 长期影响：低 — 剩余模式已文档化。
-- 可能方向：持续监控是否可进一步收敛。
-- 置信度：高（已改善）
-
-### L-008: background.py 直接访问 db._session_maker 私有属性
-
-- 类型：封装
-- 位置：`src/sathop/orchestrator/background.py:22,73`
-- 证据：`assert db._session_maker is not None; async with db._session_maker() as s:` — 跨模块访问私有变量。
-- 问题描述：`_session_maker` 名义上是模块私有的（下划线前缀），但 background.py 穿透了这一边界。这是因为没有提供非 FastAPI-DI 的 session 获取方式。
-- 长期影响：如果 db.py 的 session 管理方式改变，background.py 也需要修改。
-- 可能方向：在 db.py 中暴露 `get_session()` 公共函数。
-- 置信度：中
+- 状态：第 5 轮收敛 — `log_event` 改为 `session.info` 标记 + commit-time 排空，`background.sweep_expired_leases`、`receivers.ack` 失败分支已迁移到 `commit_and_publish`。`shared.delete` 用新增的 `publish_scopes(s, ...)` 在 commit→unlink→publish 间显式排空 pending events。`progress.py::ingress` 的 bare commit 仍存在（自带 `publish({"scope": "progress", ...})`，无 log_event 调用），与统一模型不冲突。
+- 长期影响：无；保留供未来回顾。
 
 ### L-009: Worker agent 有 _get 方法但几乎只在 get_deletable 中使用
 

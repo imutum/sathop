@@ -280,7 +280,15 @@ async def shutdown_db() -> None:
         _engine = None
 
 
+def get_session_maker() -> async_sessionmaker[AsyncSession]:
+    """Return the live session maker; raise if init_db() has not run.
+    Used by background sweepers and the FastAPI session() dependency — the
+    explicit raise survives `python -O` (unlike `assert`)."""
+    if _session_maker is None:
+        raise RuntimeError("init_db() not called")
+    return _session_maker
+
+
 async def session() -> AsyncIterator[AsyncSession]:
-    assert _session_maker is not None, "init_db() not called"
-    async with _session_maker() as s:
+    async with get_session_maker()() as s:
         yield s

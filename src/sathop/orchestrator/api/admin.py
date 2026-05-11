@@ -7,7 +7,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +48,7 @@ async def list_in_flight(
 @router.get("/stuck/{state}")
 async def list_stuck(state: str, s: AsyncSession = Depends(session)) -> list[dict]:
     if state not in NON_TERMINAL:
-        return []
+        raise HTTPException(400, f"invalid state {state!r}; expected one of {sorted(NON_TERMINAL)}")
     return await stuck_granule_rows(s, now=datetime.now(UTC), state=state, limit=100)
 
 
@@ -124,9 +124,10 @@ async def gc_bundles(
             "freed_bytes_estimate": sum(b.size for b in candidates),
         }
 
-    # Actual delete: drop rows then resolve blob orphans. Two-phase so the
-    # blob unlink decision sees post-delete row counts (a sha shared by two
-    # rows where we delete one must keep the blob).
+    # Actual delete: stage row deletes, decide which blobs are orphaned post-
+    # delete (a sha shared by two rows where we delete one must keep the blob),
+    # commit, then unlink. Order matters: unlinking before commit means a
+    # rollback would leave dangling DB rows referencing missing blobs.
     deleted_meta: list[dict[str, Any]] = []
     freed = 0
     shas: set[str] = set()
@@ -137,18 +138,23 @@ async def gc_bundles(
         await s.delete(b)
     await s.flush()
 
-    unlinked: list[str] = []
+    orphan_shas: list[str] = []
     for sha in shas:
         others = await s.scalar(select(func.count()).select_from(Bundle).where(Bundle.sha256 == sha))
         if not others:
-            blob = settings.bundle_storage / f"{sha}.zip"
-            if blob.is_file():
-                blob.unlink()
-                unlinked.append(sha)
+            orphan_shas.append(sha)
 
     if deleted_meta:
         await log(s, "bundles", f"GC deleted {len(deleted_meta)} bundle(s) ({freed} bytes)")
     await commit_and_publish(s, "bundles" if deleted_meta else None)
+
+    unlinked: list[str] = []
+    for sha in orphan_shas:
+        blob = settings.bundle_storage / f"{sha}.zip"
+        if blob.is_file():
+            blob.unlink()
+            unlinked.append(sha)
+
     return {
         "dry_run": False,
         "age_days": age_days,

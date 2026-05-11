@@ -123,7 +123,7 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
             level="error" if exhausted else "warn",
             granule_id=obj.granule_id,
         )
-        await s.commit()
+        await commit_and_publish(s)
         return {"ok": True, "retried": not exhausted, "failed_pulls": obj.failed_pulls}
 
     if req.sha256 != obj.sha256:

@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..bundle_schema import parse_shared_files
 from ..config import require_token, require_token_or_query, settings
 from ..db import Bundle, SharedFile, session, utcnow
-from ..pubsub import commit_and_publish, publish
+from ..pubsub import commit_and_publish, publish_scopes
 from ..pubsub import log_event as log
 
 router = APIRouter(prefix="/shared", tags=["shared"])
@@ -204,5 +204,5 @@ async def delete(name: str, s: AsyncSession = Depends(session)) -> dict:
     await log(s, "shared", f"deleted {name}")
     await s.commit()
     blob.unlink(missing_ok=True)
-    publish({"scope": "shared"})
+    publish_scopes(s, "shared")
     return {"ok": True}
