@@ -1,7 +1,8 @@
 # SatHop cleanup loop state
 
 ## Current status
-- Working tree contains a focused backend comment/docstring cleanup.
+- Working tree contains a focused orchestrator commit/publish helper cleanup.
+- `src/sathop/orchestrator/pubsub.py` owns event publishing, event logging, and `commit_and_publish` transaction/scope publication helper.
 - `src/sathop/orchestrator/api/batch_readmodels.py` owns BatchSummary/GranuleRow assembly, state counts, ETA, and exhausted-object read queries.
 - `src/sathop/orchestrator/api/batch_transitions.py` owns cancel/retry granule state rules.
 - `src/sathop/orchestrator/api/worker_heartbeat.py` owns worker heartbeat version logging, queue/disk field application, revoke calculation, and one-shot signal consumption.
@@ -18,23 +19,23 @@
 - `frontend/src/features/batch/types.ts` owns create-batch pure form transforms: credential payload/validity, env parsing, and dirty-draft checks.
 
 ## Completed this round
-- Re-read `state.md`, confirmed the frontend layout comment cleanup was committed, and started from a clean working tree.
-- Audited backend Python comments/docstrings for WHAT-only noise versus useful WHY/constraint notes.
-- Removed pure title docstrings from `orchestrator/background.py`, `orchestrator/pubsub.py`, `receiver/agent.py`, `receiver/runtime.py`, and `worker/main.py`.
-- Removed obvious helper docstrings from `shared/http.py` where function names and type signatures already say the same thing.
-- Preserved comments/docstrings that explain concurrency races, backwards compatibility, retention ordering, config precedence, and protocol constraints.
+- Re-read `state.md`, confirmed the backend comment/docstring cleanup was committed, and started from a clean working tree.
+- Scanned for concrete duplication/stale boundaries instead of continuing comment-only churn.
+- Found route-level drift where bundles, shared upload, and receiver routes manually did `commit()` plus `publish({scope})` despite existing `commit_and_publish`.
+- Replaced simple `commit()+publish(scope)` sequences in `bundles.py`, `shared.py`, and `receivers.py` with `commit_and_publish`.
+- Preserved special cases: receiver failed-ack branch still commits without publishing, progress publishes a richer event payload, admin GC publishes only when work happened, and shared delete still unlinks the file after DB commit before publishing.
 
 ## Validation
+- Related pytest subset passed: `tests/test_receiver_agent.py tests/test_receiver_pipeline.py tests/test_receiver_heartbeat_stats.py tests/test_node_lifecycle.py tests/test_restart_signal.py tests/test_shared.py tests/test_bundle_registry.py` (`97 passed`).
 - Ruff: `.venv/Scripts/ruff.exe check .` passed.
 - Format: `.venv/Scripts/ruff.exe format . --check` passed.
-- Full pytest was not rerun because tracked code changes only remove comments/docstrings.
 
 ## Key decisions
-- Keep WHY comments: race guards, compatibility notes, retention/cleanup ordering, and operational failure semantics are worth the lines.
-- Do not mechanically remove every module docstring; only remove cases that merely repeat the filename or function name.
-- No backend structural split is justified by this audit alone.
+- `commit_and_publish` should be the default for simple transaction + scope publication paths across orchestrator routes.
+- Do not force custom publication paths into the helper when they carry richer payloads, conditional publish semantics, or filesystem ordering constraints.
+- This is a boundary consistency cleanup, not a new abstraction.
 
 ## Next suggested priorities
-1. If another cleanup round is needed, do a final high-level scan for concrete duplication or stale boundaries rather than continuing comment-only churn.
-2. If no clear cleanup remains, stop structural refactoring and report that the project is currently in a clean enough state.
-3. Future structural work should be driven by a concrete duplication or stale boundary, not file size alone.
+1. Run one final high-level scan for concrete duplication or stale boundaries; if nothing clear appears, stop structural refactoring.
+2. Avoid further comment-only churn unless a comment is actively misleading.
+3. Future structural work should be driven by concrete duplication or stale boundary, not file size alone.

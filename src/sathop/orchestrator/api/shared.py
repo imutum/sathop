@@ -26,8 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..bundle_schema import parse_shared_files
 from ..config import require_token, require_token_or_query, settings
 from ..db import Bundle, SharedFile, session, utcnow
+from ..pubsub import commit_and_publish, publish
 from ..pubsub import log_event as log
-from ..pubsub import publish
 
 router = APIRouter(prefix="/shared", tags=["shared"])
 
@@ -140,8 +140,7 @@ async def upload(
         verb = "replaced"
 
     await log(s, "shared", f"{verb} {name} ({size} bytes, sha={digest[:12]})")
-    await s.commit()
-    publish({"scope": "shared"})
+    await commit_and_publish(s, "shared")
     return _info(row)
 
 

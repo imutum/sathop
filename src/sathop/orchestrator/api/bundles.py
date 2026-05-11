@@ -23,8 +23,8 @@ from sathop.shared.protocol import BundleDetail, BundleSummary
 from ..bundle_schema import InputsSchema, parse_shared_files
 from ..config import require_token, settings
 from ..db import Batch, Bundle, SharedFile, session, utcnow
+from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ..pubsub import publish
 
 router = APIRouter(prefix="/bundles", tags=["bundles"], dependencies=[Depends(require_token)])
 
@@ -150,8 +150,7 @@ async def upload(
     )
     s.add(b)
     await log(s, "bundles", f"uploaded {name}@{version} ({len(data)} bytes, sha={sha[:12]})")
-    await s.commit()
-    publish({"scope": "bundles"})
+    await commit_and_publish(s, "bundles")
     return _detail(b)
 
 
@@ -326,6 +325,5 @@ async def delete(name: str, version: str, s: AsyncSession = Depends(session)) ->
         blob = settings.bundle_storage / f"{sha}.zip"
         blob.unlink(missing_ok=True)
     await log(s, "bundles", f"deleted {name}@{version}")
-    await s.commit()
-    publish({"scope": "bundles"})
+    await commit_and_publish(s, "bundles")
     return {"ok": True}
