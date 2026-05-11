@@ -1,5 +1,5 @@
-"""Receiver._fetch_one: verify + ack flow covering happy, sha-mismatch, and
-pull-error paths. Plus config.load() env-var handling."""
+"""Receiver._fetch_one_inner: verify + ack flow covering happy, sha-mismatch,
+and pull-error paths. Plus config.load() env-var handling."""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ async def test_fetch_one_happy_path(tmp_path):
             sha256=hashlib.sha256(payload).hexdigest(),
             size=len(payload),
         )
-        await r._fetch_one(asyncio.Semaphore(1), it)
+        await r._fetch_one_inner(it)
 
         assert (tmp_path / "archive" / "b1" / "g1" / "out.bin").read_bytes() == payload
         assert len(acks) == 1
@@ -101,7 +101,7 @@ async def test_fetch_one_sha_mismatch_deletes_and_acks_false(tmp_path):
             sha256="0" * 64,  # wrong
             size=len(payload),
         )
-        await r._fetch_one(asyncio.Semaphore(1), it)
+        await r._fetch_one_inner(it)
 
         # Corrupt file was unlinked
         assert not (tmp_path / "archive" / "b1" / "g1" / "corrupt.bin").exists()
@@ -136,8 +136,7 @@ async def test_concurrent_pulls_same_dest_do_not_race(tmp_path):
         # Two object_ids, identical key — simulates the race shape (orch
         # offering twice, multi-receiver shared volume, etc).
         item2 = item.model_copy(update={"object_id": 2})
-        sem = asyncio.Semaphore(2)
-        await asyncio.gather(r._fetch_one(sem, item), r._fetch_one(sem, item2))
+        await asyncio.gather(r._fetch_one_inner(item), r._fetch_one_inner(item2))
 
         # Both acks should be success — neither task's rename should have
         # tripped over the other's tmp.
@@ -163,7 +162,7 @@ async def test_fetch_one_pull_error_acks_false_with_exception_text(tmp_path):
         sha256="abc",
         size=5,
     )
-    await r._fetch_one(asyncio.Semaphore(1), it)
+    await r._fetch_one_inner(it)
 
     assert len(acks) == 1
     assert acks[0].success is False
@@ -372,7 +371,7 @@ async def test_pull_retries_once_after_refreshing_trust_on_cert_error(tmp_path, 
             sha256=hashlib.sha256(payload).hexdigest(),
             size=len(payload),
         )
-        await r._fetch_one(asyncio.Semaphore(1), it)
+        await r._fetch_one_inner(it)
 
         assert refreshes == 1, "trust must be refreshed before the retry"
         assert calls == 2, "second pull should fire after the refresh"
@@ -414,7 +413,7 @@ async def test_pull_does_not_refresh_when_trust_orch_disabled(tmp_path, monkeypa
         sha256="0" * 64,
         size=1,
     )
-    await r._fetch_one(asyncio.Semaphore(1), it)
+    await r._fetch_one_inner(it)
     assert refreshes == 0
     assert len(acks) == 1
     assert acks[0].success is False

@@ -11,7 +11,6 @@ missing tail, not the whole segment."""
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -174,7 +173,7 @@ async def test_segmented_raises_when_server_ignores_range(tmp_path):
         await r.aclose()
 
 
-# ─── dispatch through _fetch_one ──────────────────────────────────────────
+# ─── dispatch through _fetch_one_inner ───────────────────────────────────
 
 
 async def test_fetch_one_uses_segmented_above_threshold(tmp_path):
@@ -193,7 +192,7 @@ async def test_fetch_one_uses_segmented_above_threshold(tmp_path):
             sha256=hashlib.sha256(payload).hexdigest(),
             size=len(payload),
         )
-        await r._fetch_one(asyncio.Semaphore(1), item)
+        await r._fetch_one_inner(item)
         assert (tmp_path / "archive" / "b1" / "g1" / "big.bin").read_bytes() == payload
         assert len(acks) == 1
         assert acks[0].success is True
@@ -218,7 +217,7 @@ async def test_fetch_one_skips_segmented_below_threshold(tmp_path):
             sha256=hashlib.sha256(payload).hexdigest(),
             size=len(payload),
         )
-        await r._fetch_one(asyncio.Semaphore(1), item)
+        await r._fetch_one_inner(item)
         assert acks[0].success is True
     finally:
         srv.shutdown()
@@ -243,7 +242,7 @@ async def test_fetch_one_falls_back_when_server_lacks_range(tmp_path):
             sha256=hashlib.sha256(payload).hexdigest(),
             size=len(payload),
         )
-        await r._fetch_one(asyncio.Semaphore(1), item)
+        await r._fetch_one_inner(item)
         assert acks[0].success is True
         assert (tmp_path / "archive" / "b1" / "g1" / "no-range.bin").read_bytes() == payload
     finally:
@@ -442,7 +441,7 @@ async def test_fetch_one_segments_disabled_uses_single_stream(tmp_path):
             sha256=hashlib.sha256(payload).hexdigest(),
             size=len(payload),
         )
-        await r._fetch_one(asyncio.Semaphore(1), item)
+        await r._fetch_one_inner(item)
         assert acks[0].success is True
     finally:
         srv.shutdown()

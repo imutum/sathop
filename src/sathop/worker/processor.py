@@ -41,36 +41,33 @@ _GRACEFUL_KILL_WAIT_SEC = 5.0
 # Bundle subprocesses are user-supplied code with full filesystem access; we
 # don't sandbox them. But we DO refuse to leak the worker's own secrets — most
 # critically SATHOP_TOKEN, which would let a malicious bundle call the
-# orchestrator API as the worker. Whitelisted vars cover what programs need to
-# resolve interpreters, locate temp dirs, and emit localized output, and
-# nothing else. Unknown SATHOP_* values are explicitly NOT inherited; the
-# worker injects the small set bundles legitimately need (SATHOP_INPUT_DIR /
-# OUTPUT_DIR / WORK_DIR / SHARED_DIR / GRANULE_ID / BATCH_ID / META_JSON /
-# BUNDLE_PYTHON / PROGRESS_URL) below.
+# orchestrator API as the worker. Beyond that, we also keep HOME / USERPROFILE
+# / APPDATA / LOCALAPPDATA / PROGRAMDATA *off* the whitelist: those directories
+# routinely hold cloud credentials (~/.aws, ~/.config/gcloud, Earthdata cookie
+# jars, browser/profile data on Windows). Bundles that genuinely need a per-
+# user config dir should write to SATHOP_WORK_DIR or have the operator inject
+# the specific values via manifest.execution.env / batch credentials.
+# Unknown SATHOP_* values are explicitly NOT inherited; the worker injects the
+# small set bundles legitimately need (SATHOP_INPUT_DIR / OUTPUT_DIR / WORK_DIR
+# / SHARED_DIR / GRANULE_ID / BATCH_ID / META_JSON / BUNDLE_PYTHON /
+# PROGRESS_URL) below.
 _ENV_WHITELIST: frozenset[str] = frozenset(
     {
-        # Cross-platform
+        # Cross-platform: PATH for executables, locale + TZ for predictable output.
         "PATH",
         "LANG",
         "LC_ALL",
         "LC_CTYPE",
         "LC_MESSAGES",
         "TZ",
-        # POSIX
-        "HOME",
-        "USER",
-        "LOGNAME",
-        "SHELL",
+        # POSIX: temp dirs only — HOME/USER/LOGNAME/SHELL deliberately omitted.
         "TMPDIR",
         "TMP",
         "TEMP",
-        # Windows
+        # Windows: paths Python itself reads at interpreter start, temp + arch
+        # info. USERPROFILE/APPDATA/LOCALAPPDATA/PROGRAMDATA deliberately omitted.
         "SYSTEMROOT",
         "WINDIR",
-        "USERPROFILE",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "PROGRAMDATA",
         "PROGRAMFILES",
         "PROGRAMFILES(X86)",
         "PATHEXT",

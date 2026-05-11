@@ -4,7 +4,6 @@ receivers from busy ones in the UI."""
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -77,7 +76,7 @@ def test_pullstats_zero_bytes_does_not_pollute_window():
     assert len(s._events) == 0
 
 
-# ─── _fetch_one wiring: stats are credited correctly ──────────────────────
+# ─── _fetch_one_inner wiring: stats are credited correctly ───────────────
 
 
 def _serve(payload: bytes) -> tuple[HTTPServer, int]:
@@ -133,7 +132,7 @@ async def test_fetch_one_credits_bytes_on_success(tmp_path):
             sha256=hashlib.sha256(payload).hexdigest(),
             size=len(payload),
         )
-        await r._fetch_one(asyncio.Semaphore(1), it)
+        await r._fetch_one_inner(it)
 
         assert r.stats.in_flight == 0
         # The bytes landed in the rolling window — count, not rate
@@ -158,7 +157,7 @@ async def test_fetch_one_does_not_credit_bytes_on_sha_mismatch(tmp_path):
             sha256="0" * 64,
             size=len(payload),
         )
-        await r._fetch_one(asyncio.Semaphore(1), it)
+        await r._fetch_one_inner(it)
 
         assert r.stats.in_flight == 0
         assert r.stats.recent_bps() == 0

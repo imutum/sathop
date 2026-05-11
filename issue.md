@@ -7,12 +7,16 @@
 
 - 审查时间：2026-05-11（第三轮增量 — 扫描 CLI 工具、worker 辅助模块、frontend router/composables、orchestrator background/pubsub、shared config）
 - 审查范围：全项目 — src/sathop/{shared,orchestrator,worker,receiver,cli}/、frontend/src/、tests/、deploy/、pyproject.toml、Dockerfiles、compose files
-- 总问题数：18（累计修复 36 项 — 6 high + 17 medium + 11 low + 2 cross）
+- 总问题数：15（累计修复 38 项 — 6 high + 18 medium + 12 low + 2 cross；L-009 关闭为非问题）
 - 高优先级问题数：4（H-001/H-002/H-003/H-004/H-009/H-010 已修）
-- 中优先级问题数：7（M-001/M-002/M-003/M-004/M-005/M-007/M-008/M-010/M-012/M-013/M-015/M-016/M-017/M-018/M-021/M-022/M-024 已修）
-- 低优先级问题数：5（L-001/L-002/L-003/L-004/L-008/L-011/L-012/L-013/L-014/L-015/L-016 已修）
+- 中优先级问题数：6（M-001/M-002/M-003/M-004/M-005/M-007/M-008/M-009/M-010/M-012/M-013/M-015/M-016/M-017/M-018/M-021/M-022/M-024 已修）
+- 低优先级问题数：3（L-001/L-002/L-003/L-004/L-008/L-010/L-011/L-012/L-013/L-014/L-015/L-016 已修；L-009 关闭）
 - 交叉问题数：2（C-001/C-004 已修）
 - 已修复（按轮次倒序）：
+  - 第 8 轮：
+    - **L-010** `receiver.runtime._fetch_one` 死方法删除；13 处测试调用点全部迁移到直接调用 `_fetch_one_inner`（Semaphore(1) 包装本就是 no-op）。`test_receiver_segmented.py` / `test_receiver_heartbeat_stats.py` 顺手清掉只为此方法保留的 `import asyncio`
+    - **M-009** `processor._ENV_WHITELIST` 收紧：剔除 `HOME` / `USERPROFILE` / `APPDATA` / `LOCALAPPDATA` / `PROGRAMDATA` / `USER` / `LOGNAME` / `SHELL` — 这些目录是 `~/.aws`、`~/.ssh`、`~/.config/gcloud`、Earthdata cookie jar 的常见位置，bundle 不应默认继承。需要 per-user 配置的 bundle 改走 `manifest.execution.env` 或 batch credentials 显式声明
+    - **L-009** `worker.agent._get` 与 `_post` 设计对称性问题原结论即"无需操作"；归档到 Not Issues，Open 列表反映真实工作量
   - 第 7 轮：
     - **M-005** `workers.deletable` 用 `GROUP BY granule_id HAVING count(*) = count(acked_at)` 子查询过滤，单次 SQL 取代 N+1，worker 持有 100 个 granule 时从 101 次查询降为 1 次
     - **M-016** `Storage` Protocol + `LocalStorage` / `MinioStorage` 全部改为 async；`MinioStorage.put/delete` 用 `asyncio.to_thread` 包 minio-py 调用，MinIO over-WAN 上传不再阻塞 event loop。runtime 的两个调用点加 `await`，`test_storage.py` 切到 async 测试
@@ -134,16 +138,6 @@
 - 可能方向：将 bundle/shared 下载迁移到 `httpx.AsyncClient`（与 API 调用统一），利用其 streaming + 超时 + 取消支持。
 - 置信度：中
 
-### M-009: 环境变量白名单包含敏感路径目录
-
-- 类型：安全
-- 位置：`src/sathop/worker/processor.py:50-83`
-- 证据：`_ENV_WHITELIST` 包含 `APPDATA`、`LOCALAPPDATA`、`USERPROFILE`、`HOME`。恶意 bundle 可以读取 `~/.aws/credentials`、`~/.ssh/id_rsa`、云厂商配置等。
-- 问题描述：设计意图是提供可用的 shell 环境，但白名单范围过宽。Windows 上 `APPDATA` 包含大量凭证文件，`HOME` 下通常有 `.aws/`、`.config/gcloud/` 等。
-- 长期影响：bundle 中的恶意代码可能窃取 worker 节点的云凭证。
-- 可能方向：将白名单收紧为仅必要的路径解析变量（`PATH`、`SYSTEMROOT`、`TMP`），其余由 bundle 通过 `manifest.execution.env` 显式声明。
-- 置信度：中（取决于 bundle 的信任模型和部署环境）
-
 ### M-011: Compose 文件中使用未固定版本的镜像
 
 - 类型：部署风险
@@ -234,26 +228,6 @@
 - 状态：第 5 轮收敛 — `log_event` 改为 `session.info` 标记 + commit-time 排空，`background.sweep_expired_leases`、`receivers.ack` 失败分支已迁移到 `commit_and_publish`。`shared.delete` 用新增的 `publish_scopes(s, ...)` 在 commit→unlink→publish 间显式排空 pending events。`progress.py::ingress` 的 bare commit 仍存在（自带 `publish({"scope": "progress", ...})`，无 log_event 调用），与统一模型不冲突。
 - 长期影响：无；保留供未来回顾。
 
-### L-009: Worker agent 有 _get 方法但几乎只在 get_deletable 中使用
-
-- 类型：死代码风险
-- 位置：`src/sathop/worker/agent.py:61-65`
-- 证据：`_get` 方法定义完整（含 `_check_auth` + `raise_for_status`），但仅 `get_deletable` 一个调用者使用它。
-- 问题描述：不是 bug，但 `_post` 被广泛使用而 `_get` 几乎不用，表明设计可能不对称。
-- 长期影响：无 — 很低。
-- 可能方向：无需操作。
-- 置信度：低
-
-### L-010: Receiver runtime 存在死方法 _fetch_one
-
-- 类型：死代码
-- 位置：`src/sathop/receiver/runtime.py:265-267`
-- 证据：`_fetch_one` (Semaphore 包装) 在生产路径中从未调用。生产路径 `_pull_worker` 直接调用 `_fetch_one_inner`。只有测试文件引用此方法。
-- 问题描述：该方法存在是为了测试便利（Semaphore-based 并发控制），但实际生产代码已切换到 queue-based 并发模型。为测试保留的生产代码存在维护风险。
-- 长期影响：低 — 方法签名变更时测试不会告警（测试调用旧签名）。
-- 可能方向：移除 `_fetch_one`，将测试迁移到直接调用 `_fetch_one_inner`。或保留但加注释说明仅供测试。
-- 置信度：中
-
 ---
 
 ## Cross-Cutting Problems
@@ -321,6 +295,12 @@
 ---
 
 ## Not Issues
+
+### N-008: Worker agent `_get` 与 `_post` 设计对称性（原 L-009）
+
+- 检查位置：`src/sathop/worker/agent.py:61-65`
+- 表面疑点：`_get` 仅 `get_deletable` 一个调用者，`_post` 被广泛使用，看起来设计不对称。
+- 为什么不是问题：API 当前只暴露一个 GET 端点（deletable），其余路径都用 POST。`_get` 的 `_check_auth` + `raise_for_status` 与 `_post` 对称，新增 GET 端点零成本；不是死代码，是与 `_post` 配对的对称基础设施。
 
 ### N-001: secrets.token_urlsafe(6) 批次 ID 生成有碰撞风险吗？
 

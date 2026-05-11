@@ -267,7 +267,3 @@ class Receiver:
                     pass
         finally:
             self.stats.end(pulled_bytes)
-
-    async def _fetch_one(self, sem: asyncio.Semaphore, item: PullItem) -> None:
-        async with sem:
-            await self._fetch_one_inner(item)
