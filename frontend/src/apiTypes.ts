@@ -7,6 +7,7 @@ export type GranuleState =
   | "downloaded"
   | "processing"
   | "processed"
+  | "uploading"
   | "uploaded"
   | "acked"
   | "deleted"
@@ -23,6 +24,7 @@ export const IN_FLIGHT_STATES: GranuleState[] = [
   "downloaded",
   "processing",
   "processed",
+  "uploading",
 ];
 
 // Happy-path state sequence used for chart ordering and dashboard rollups.

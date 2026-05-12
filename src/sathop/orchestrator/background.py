@@ -18,23 +18,26 @@ SWEEP_INTERVAL_SEC = 60
 
 
 async def sweep_expired_leases() -> int:
+    """The single carve-out from `state_machine.apply()`: stays as a bulk
+    UPDATE with a re-asserted predicate. Why: between the SELECT and the
+    write, a concurrent /heartbeat::renew_worker_leases call may have pushed
+    a granule's `lease_expires_at` forward. A per-row apply() would have to
+    `s.refresh(g)` each row to see that fresh value — doubling round-trips.
+    The bulk UPDATE re-evaluates the same predicate at write time, so a
+    just-renewed lease falls outside the WHERE clause and survives untouched.
+
+    All other granule state transitions go through state_machine.apply()."""
     now = utcnow()
     async with get_session_maker()() as s:
         stmt = (
-            select(Granule)
+            select(Granule.granule_id)
             .where(Granule.state.in_(LEASED_STATES))
             .where(Granule.lease_expires_at.is_not(None))
             .where(Granule.lease_expires_at < now)
         )
-        expired = (await s.execute(stmt)).scalars().all()
-        if not expired:
+        ids = (await s.execute(stmt)).scalars().all()
+        if not ids:
             return 0
-        ids = [g.granule_id for g in expired]
-        # Re-assert the expiry predicate on the UPDATE: between our SELECT and
-        # this write, lease() may have refreshed the lease for some of these
-        # IDs. Without this guard the sweeper would clobber a freshly-acquired
-        # lease, and the worker that just got it would see its state report
-        # 409 a few seconds later.
         result = await s.execute(
             update(Granule)
             .where(Granule.granule_id.in_(ids))

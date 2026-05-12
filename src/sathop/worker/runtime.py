@@ -6,7 +6,6 @@ import asyncio
 import logging
 import shutil
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -16,16 +15,25 @@ from sathop import __version__
 from sathop.shared import agent_lifecycle
 from sathop.shared.periodic import run_periodic
 from sathop.shared.protocol import (
-    GranuleState,
     LeaseItem,
     LeaseRequest,
-    ProcessFailure,
     ProgressEvent,
-    UploadedObject,
     WorkerHeartbeat,
     WorkerRegister,
 )
 from sathop.shared.safe_path import safe_join
+from sathop.shared.state_machine import (
+    DeleteConfirmed,
+    DownloadFinished,
+    DownloadStarted,
+    GranuleEvent,
+    ProcessFinished,
+    ProcessingFailed,
+    ProcessStarted,
+    UploadCompleted,
+    UploadedObject,
+    UploadStarted,
+)
 
 from . import bundle, downloader, storage, tls
 from ._paths import work_dir_path
@@ -298,8 +306,8 @@ class Worker:
             handle, result = await self._process_inputs(item, paths, progress_url, stage)
 
             if not result.ok:
-                await self.client.report_failure(
-                    ProcessFailure(
+                await self._emit_best_effort(
+                    ProcessingFailed(
                         granule_id=gid,
                         worker_id=self.s.worker_id,
                         error=processing_failure_message(result.stderr),
@@ -317,17 +325,14 @@ class Worker:
             log.info("[%s] handler aborted (lease revoked)", gid)
         except Exception as e:
             log.exception("[%s] unhandled error", gid)
-            try:
-                await self.client.report_failure(
-                    ProcessFailure(
-                        granule_id=gid,
-                        worker_id=self.s.worker_id,
-                        error=f"worker {type(e).__name__}: {e}\n\n{traceback_tail(e)}",
-                        exit_code=None,
-                    )
+            await self._emit_best_effort(
+                ProcessingFailed(
+                    granule_id=gid,
+                    worker_id=self.s.worker_id,
+                    error=f"worker {type(e).__name__}: {e}\n\n{traceback_tail(e)}",
+                    exit_code=None,
                 )
-            except Exception:
-                pass
+            )
         finally:
             stage.exit()
             self.progress.revoke(nonce)
@@ -339,7 +344,7 @@ class Worker:
         paths: list[Path] = []
         async with self._download_sem:
             stage.enter(DOWNLOADING)
-            await self._report_state(gid, GranuleState.DOWNLOADING)
+            await self._emit_lease_event(DownloadStarted(granule_id=gid, worker_id=self.s.worker_id))
             log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
             for spec in item.inputs:
                 dst = safe_join(input_dir, spec.filename)
@@ -350,7 +355,7 @@ class Worker:
                     await downloader.verify_sha256(dst, spec.checksum)
                 paths.append(dst)
         stage.exit()
-        await self._report_state(gid, GranuleState.DOWNLOADED)
+        await self._emit_lease_event(DownloadFinished(granule_id=gid, worker_id=self.s.worker_id))
         return paths
 
     async def _process_inputs(
@@ -373,7 +378,7 @@ class Worker:
         stage.enter(PENDING_PROCESSING)
         async with self._process_sem:
             stage.enter(PROCESSING)
-            await self._report_state(gid, GranuleState.PROCESSING)
+            await self._emit_lease_event(ProcessStarted(granule_id=gid, worker_id=self.s.worker_id))
             result = await run_bundle(
                 handle,
                 gid,
@@ -395,35 +400,54 @@ class Worker:
         stage: StageTracker,
     ) -> None:
         gid = item.granule_id
-        await self._report_state(gid, GranuleState.PROCESSED)
+        await self._emit_lease_event(ProcessFinished(granule_id=gid, worker_id=self.s.worker_id))
         stage.enter(PENDING_UPLOAD)
         async with self._upload_sem:
             stage.enter(UPLOADING)
-            upload_started_at = datetime.now(UTC)
+            await self._emit_lease_event(UploadStarted(granule_id=gid, worker_id=self.s.worker_id))
             uploaded: list[UploadedObject] = []
             key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
             for out in outputs:
                 key = render_key(key_tpl, out, item.meta)
                 uploaded.append(await self.storage.put(out, key))
-            await self.client.report_upload(gid, self.s.worker_id, uploaded, upload_started_at)
+            await self._emit_lease_event(
+                UploadCompleted(
+                    granule_id=gid,
+                    worker_id=self.s.worker_id,
+                    objects=uploaded,
+                )
+            )
         stage.exit()
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
 
-    async def _report_state(self, gid: str, state: GranuleState) -> None:
+    async def _emit_lease_event(self, event: GranuleEvent) -> None:
+        """Emit an event whose 4xx means the lease no longer exists; the caller
+        aborts the handler via `LeaseRevoked` so we don't keep doing work for a
+        granule the orchestrator has reassigned. 5xx is logged and swallowed —
+        treat it as transient."""
         try:
-            await self.client.report_state(gid, self.s.worker_id, state)
+            await self.client.emit_event(event)
         except httpx.HTTPStatusError as e:
             if e.response.status_code in (404, 409):
                 log.warning(
-                    "[%s] lease revoked while reporting %s (HTTP %d) — aborting handler",
-                    gid,
-                    state.value,
+                    "[%s] lease revoked while emitting %s (HTTP %d) — aborting handler",
+                    event.granule_id,
+                    event.kind,
                     e.response.status_code,
                 )
                 raise LeaseRevoked from e
-            log.warning("[%s] state report %s failed: %s", gid, state.value, e)
+            log.warning("[%s] emit %s failed: %s", event.granule_id, event.kind, e)
         except Exception as e:
-            log.warning("[%s] state report %s failed: %s", gid, state.value, e)
+            log.warning("[%s] emit %s failed: %s", event.granule_id, event.kind, e)
+
+    async def _emit_best_effort(self, event: GranuleEvent) -> None:
+        """Emit an event whose failure must not loop us back into another
+        failure path (the failure-report itself, the janitor's delete-confirm).
+        Log and swallow."""
+        try:
+            await self.client.emit_event(event)
+        except Exception as e:
+            log.warning("[%s] emit %s failed: %s", event.granule_id, event.kind, e)
 
     def _make_download_progress_cb(self, gid: str, filename: str) -> downloader.ProgressCb:
         last_pct = -1.0
@@ -486,6 +510,12 @@ class Worker:
         for dg in to_delete:
             for key in dg.object_keys:
                 await self.storage.delete(key)
-            await self.client.confirm_deleted(dg)
+            await self._emit_best_effort(
+                DeleteConfirmed(
+                    granule_id=dg.granule_id,
+                    worker_id=self.s.worker_id,
+                    object_keys=list(dg.object_keys),
+                )
+            )
             if dg.object_keys:
                 log.info("[%s] deleted %d object(s) after ack", dg.granule_id, len(dg.object_keys))

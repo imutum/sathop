@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from sathop.shared.safe_path import is_safe_name
-from sathop.shared.state_machine import GranuleState
+from sathop.shared.state_machine import GranuleState  # noqa: F401  — re-export for callers
 
 BUNDLE_REF_PREFIX = "orch:"
 
@@ -260,51 +260,6 @@ class LeaseItem(BaseModel):
 class LeaseResponse(BaseModel):
     items: list[LeaseItem]
     lease_expires_at: datetime
-
-
-class UploadedObject(BaseModel):
-    object_key: str
-    presigned_url: str
-    sha256: str
-    size: int
-
-
-class UploadReport(BaseModel):
-    granule_id: str
-    worker_id: str
-    objects: list[UploadedObject]
-    # Wall-clock instant the worker actually started the upload work — i.e.
-    # right after acquiring the upload semaphore. Lets the orchestrator split
-    # the PROCESSED → UPLOADED window into `upload_wait` (sem queue) vs
-    # `upload` (storage write). Older workers without upload_sem omit this;
-    # the orchestrator records a single `upload` row in that case.
-    upload_started_at: datetime | None = None
-
-
-class ProcessFailure(BaseModel):
-    granule_id: str
-    worker_id: str
-    # Short summary used by the worker logger and the orchestrator events feed.
-    # Historically the only failure-context field; kept as-is for back-compat.
-    error: str
-    # Full(er) bundle subprocess output tails. None when the failure happened
-    # before the subprocess produced any output (e.g. worker-side exception).
-    # Capped at the worker side (~16 KB per stream) so a runaway log doesn't
-    # blow the request body; orchestrator caps again on persist.
-    stdout_tail: str | None = None
-    stderr_tail: str | None = None
-    exit_code: int | None = None
-
-
-class StateUpdate(BaseModel):
-    """Worker-reported phase boundary for a leased granule. The endpoint accepts
-    forward transitions through `downloading → downloaded → processing →
-    processed`; `queued` is written by lease and `uploaded` by the upload
-    endpoint."""
-
-    granule_id: str
-    worker_id: str
-    state: GranuleState
 
 
 class PullItem(BaseModel):

@@ -24,8 +24,8 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 from sathop.shared.hashing import sha256_file
-from sathop.shared.protocol import UploadedObject
 from sathop.shared.safe_path import safe_join
+from sathop.shared.state_machine import UploadedObject
 
 log = logging.getLogger("sathop.worker.storage")
 

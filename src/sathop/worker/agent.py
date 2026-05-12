@@ -8,24 +8,18 @@ client closes)."""
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from sathop.shared.orch_client import OrchClient
 from sathop.shared.protocol import (
     DeletableGranule,
-    GranuleState,
     LeaseRequest,
     LeaseResponse,
-    ProcessFailure,
     ProgressEvent,
-    StateUpdate,
-    UploadedObject,
-    UploadReport,
     WorkerHeartbeat,
     WorkerHeartbeatResponse,
     WorkerRegister,
     WorkerRegisterResponse,
 )
+from sathop.shared.state_machine import GranuleEvent
 
 
 class OrchestratorClient(OrchClient):
@@ -41,34 +35,14 @@ class OrchestratorClient(OrchClient):
         r = await self.post("/api/workers/lease", json=req.model_dump())
         return LeaseResponse.model_validate(r.json())
 
-    async def report_upload(
-        self,
-        granule_id: str,
-        worker_id: str,
-        objects: list[UploadedObject],
-        upload_started_at: datetime | None = None,
-    ) -> None:
-        req = UploadReport(
-            granule_id=granule_id,
-            worker_id=worker_id,
-            objects=objects,
-            upload_started_at=upload_started_at,
-        )
-        await self.post("/api/workers/upload", json=req.model_dump(mode="json"))
-
-    async def report_failure(self, req: ProcessFailure) -> None:
-        await self.post("/api/workers/failure", json=req.model_dump())
-
-    async def report_state(self, granule_id: str, worker_id: str, state: GranuleState) -> None:
-        req = StateUpdate(granule_id=granule_id, worker_id=worker_id, state=state)
-        await self.post("/api/workers/state", json=req.model_dump(mode="json"))
+    async def emit_event(self, event: GranuleEvent) -> None:
+        # `event` is a Pydantic model — the GranuleEvent alias only matters at
+        # type-check time; at runtime every member has `model_dump`.
+        await self.post("/api/workers/events", json=event.model_dump(mode="json"))
 
     async def get_deletable(self, worker_id: str) -> list[DeletableGranule]:
         r = await self.get(f"/api/workers/deletable/{worker_id}")
         return [DeletableGranule.model_validate(x) for x in r.json()]
-
-    async def confirm_deleted(self, granule: DeletableGranule) -> None:
-        await self.post("/api/workers/delete-confirmed", json=granule.model_dump())
 
     async def report_progress(self, granule_id: str, event: ProgressEvent) -> None:
         await self.post(

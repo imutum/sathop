@@ -10,10 +10,19 @@ from sqlalchemy import distinct, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import Credential, LeaseItem, LeaseRequest
-from sathop.shared.state_machine import LEASED_STATES, GranuleState
+from sathop.shared.state_machine import (
+    LEASED_STATES,
+    ClaimByLease,
+    GranuleState,
+    RevokedByOperator,
+)
+from sathop.shared.state_machine import (
+    apply as apply_event,
+)
 
 from ..config import settings
 from ..db import Batch, Granule, GranuleObject, Worker
+from ._runner import apply_to_session, snapshot_of
 
 log = logging.getLogger("sathop.orchestrator.worker_leases")
 
@@ -107,10 +116,17 @@ async def claim_pending_granules(
 
     items: list[LeaseItem] = []
     for granule in rows:
-        granule.state = GranuleState.QUEUED.value
-        granule.leased_by = worker_id
-        granule.lease_expires_at = expires
-        granule.updated_at = now
+        result = apply_event(
+            snapshot_of(granule),
+            ClaimByLease(
+                granule_id=granule.granule_id,
+                worker_id=worker_id,
+                lease_expires_at=expires,
+            ),
+            now=now,
+            max_retries=settings.max_retries,
+        )
+        await apply_to_session(s, granule, result)
         batch = await s.get(Batch, granule.batch_id)
         items.append(lease_item(granule, batch))
     return items
@@ -165,9 +181,11 @@ async def revoke_worker_leases(s: AsyncSession, worker_id: str, now) -> int:
         .all()
     )
     for granule in rows:
-        granule.state = GranuleState.PENDING.value
-        granule.leased_by = None
-        granule.lease_expires_at = None
-        granule.retry_count = (granule.retry_count or 0) + 1
-        granule.updated_at = now
+        result = apply_event(
+            snapshot_of(granule),
+            RevokedByOperator(granule_id=granule.granule_id),
+            now=now,
+            max_retries=settings.max_retries,
+        )
+        await apply_to_session(s, granule, result)
     return len(rows)

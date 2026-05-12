@@ -1,32 +1,40 @@
-"""Worker-facing endpoints: register, heartbeat, lease, upload, delete-confirm."""
+"""Worker-facing endpoints: register, heartbeat, lease, events, delete-poll."""
 
 from __future__ import annotations
 
 import asyncio
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
     DeletableGranule,
     LeaseRequest,
     LeaseResponse,
-    ProcessFailure,
-    StateUpdate,
-    UploadReport,
     WorkerHeartbeat,
     WorkerHeartbeatResponse,
     WorkerRegister,
     WorkerRegisterResponse,
 )
-from sathop.shared.state_machine import LEASED_STATES, STATE_PREDECESSOR, GranuleState
+from sathop.shared.state_machine import (
+    DeleteConfirmed,
+    GranuleEvent,
+    GranuleState,
+    ProcessingFailed,
+    StateConflict,
+    UploadCompleted,
+)
+from sathop.shared.state_machine import (
+    apply as apply_event,
+)
 
-from ..config import require_token
+from ..config import require_token, settings
 from ..db import Granule, GranuleObject, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import get_or_404
+from ._runner import apply_to_session, snapshot_of
 from .worker_heartbeat import (
     apply_worker_heartbeat,
     consume_gc_signal,
@@ -43,7 +51,6 @@ from .worker_leases import (
     renew_worker_leases,
     revoke_worker_leases,
 )
-from .worker_transitions import apply_state_report, mark_failed, mark_uploaded
 
 router = APIRouter(prefix="/workers", tags=["workers"], dependencies=[Depends(require_token)])
 
@@ -55,19 +62,12 @@ async def _enabled_worker_or_403(s: AsyncSession, worker_id: str) -> Worker:
     return worker
 
 
-async def _leased_granule_or_409(s: AsyncSession, granule_id: str, worker_id: str) -> Granule:
-    granule = await get_or_404(s, Granule, granule_id, "granule not found")
-    if granule.leased_by != worker_id:
-        raise HTTPException(409, "granule not leased by this worker")
-    return granule
-
-
 # Serialize lease claims process-wide so two concurrent /lease calls can't
 # both observe the same PENDING rows and overwrite each other's UPDATE. The
 # SELECT-then-UPDATE pattern in lease() is racy without this — SQLAlchemy's
 # attribute-based UPDATE issues a primary-key-only WHERE clause, so the
 # second writer wins blindly and the first worker ends up with a phantom
-# lease (its later report_state 409s, downloaded bytes wasted). SQLite
+# lease (its later /events emit 409s, downloaded bytes wasted). SQLite
 # already serializes writers at commit time, so the perf cost is negligible.
 _LEASE_LOCK = asyncio.Lock()
 
@@ -149,53 +149,43 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     return LeaseResponse(items=items, lease_expires_at=expires)
 
 
-@router.post("/state")
-async def report_state(req: StateUpdate, s: AsyncSession = Depends(session)) -> dict:
-    expected = STATE_PREDECESSOR.get(req.state.value)
-    if expected is None:
-        raise HTTPException(422, f"state {req.state.value!r} is not worker-reportable")
-    g = await _leased_granule_or_409(s, req.granule_id, req.worker_id)
-    if g.state != expected:
-        raise HTTPException(409, f"cannot transition {g.state!r} → {req.state.value!r}")
-    apply_state_report(s, g, req, utcnow())
-    await commit_and_publish(s, "batches")
-    return {"ok": True, "state": g.state}
-
-
-@router.post("/upload")
-async def upload(req: UploadReport, s: AsyncSession = Depends(session)) -> dict:
-    g = await _leased_granule_or_409(s, req.granule_id, req.worker_id)
-    # Worker must have already reported PROCESSED before uploading. A worker
-    # that skipped PROCESSED would muddle the upload-stage timing (it would
-    # absorb the entire process phase) and is a sign the worker code is out
-    # of sync with the protocol. 409 surfaces the contract clearly.
-    if g.state != GranuleState.PROCESSED.value:
-        raise HTTPException(409, f"upload requires state=processed; granule is in state {g.state!r}")
-
-    mark_uploaded(s, g, req, utcnow())
-    await log(s, req.worker_id, f"uploaded {len(req.objects)} objects", granule_id=g.granule_id)
-    await commit_and_publish(s, "batches")
-    return {"ok": True}
-
-
-@router.post("/failure")
-async def failure(req: ProcessFailure, s: AsyncSession = Depends(session)) -> dict:
-    g = await _leased_granule_or_409(s, req.granule_id, req.worker_id)
-    # The failure path can only fire while the worker still genuinely owns
-    # the granule. Anything outside the leased states means cancel/sweeper
-    # got there first; the worker should swallow the 409 and stop reporting.
-    if g.state not in LEASED_STATES:
-        raise HTTPException(409, f"failure not accepted in state {g.state!r} (lease was revoked)")
-
-    mark_failed(g, req, utcnow())
-    await log(
-        s,
-        req.worker_id,
-        f"processing failed (exit={req.exit_code}) retry={g.retry_count}",
-        level="error" if g.state == GranuleState.BLACKLISTED.value else "warn",
-        granule_id=g.granule_id,
-    )
-    await commit_and_publish(s, "batches")
+@router.post("/events")
+async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) -> dict:
+    """Single ingress for every worker-reported transition. Replaces the old
+    /state, /upload, /failure, /delete-confirmed quartet. The state machine
+    (`shared/state_machine.py::apply`) owns the transition rules; this handler
+    is the auth + persistence + log shell around it."""
+    g = await get_or_404(s, Granule, event.granule_id, "granule not found")
+    # DeleteConfirmed is gated by /deletable/{worker_id} (which filters by
+    # ownership and ack state); other events require an active lease.
+    if not isinstance(event, DeleteConfirmed) and g.leased_by != event.worker_id:
+        raise HTTPException(409, "granule not leased by this worker")
+    try:
+        result = apply_event(
+            snapshot_of(g),
+            event,
+            now=utcnow(),
+            max_retries=settings.max_retries,
+        )
+    except StateConflict as e:
+        raise HTTPException(409, str(e)) from e
+    await apply_to_session(s, g, result)
+    if isinstance(event, UploadCompleted):
+        await log(
+            s,
+            event.worker_id,
+            f"uploaded {len(event.objects)} objects",
+            granule_id=g.granule_id,
+        )
+    elif isinstance(event, ProcessingFailed):
+        await log(
+            s,
+            event.worker_id,
+            f"processing failed (exit={event.exit_code}) retry={g.retry_count}",
+            level="error" if g.state == GranuleState.BLACKLISTED.value else "warn",
+            granule_id=g.granule_id,
+        )
+    await commit_and_publish(s, result.publish_scope)
     return {"ok": True, "state": g.state}
 
 
@@ -344,18 +334,4 @@ async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> d
     await s.delete(w)
     await log(s, worker_id, "worker forgotten (row deleted)")
     await commit_and_publish(s, "workers")
-    return {"ok": True}
-
-
-@router.post("/delete-confirmed")
-async def delete_confirmed(req: DeletableGranule, s: AsyncSession = Depends(session)) -> dict:
-    now = utcnow()
-    await s.execute(
-        update(GranuleObject).where(GranuleObject.granule_id == req.granule_id).values(deleted_at=now)
-    )
-    g = await s.get(Granule, req.granule_id)
-    if g is not None:
-        g.state = GranuleState.DELETED.value
-        g.updated_at = now
-    await commit_and_publish(s, "batches")
     return {"ok": True}

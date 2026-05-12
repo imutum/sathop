@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
     AckReport,
-    GranuleState,
     PullItem,
     PullRequest,
     PullResponse,
@@ -17,12 +16,21 @@ from sathop.shared.protocol import (
     ReceiverHeartbeatResponse,
     ReceiverRegister,
 )
+from sathop.shared.state_machine import (
+    GranuleState,
+    ObjectAcked,
+    StateConflict,
+)
+from sathop.shared.state_machine import (
+    apply as apply_event,
+)
 
 from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, Receiver, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import get_or_404
+from ._runner import apply_to_session, snapshot_of
 from .one_shot import consume_one_shot_signal
 
 router = APIRouter(prefix="/receivers", tags=["receivers"], dependencies=[Depends(require_token)])
@@ -62,6 +70,7 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
     r.disk_free_gb = req.disk_free_gb
     r.queue_pulling = req.queue_pulling
     r.recent_pull_bps = req.recent_pull_bps
+
     def clear_restart() -> None:
         r.restart_requested_at = None
 
@@ -152,8 +161,20 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
     if all(o.acked_at is not None for o in siblings):
         g = await s.get(Granule, obj.granule_id)
         if g is not None:
-            g.state = GranuleState.ACKED.value
-            g.updated_at = now
+            try:
+                result = apply_event(
+                    snapshot_of(g),
+                    ObjectAcked(granule_id=g.granule_id),
+                    now=now,
+                    max_retries=settings.max_retries,
+                )
+            except StateConflict:
+                # Granule was cancelled / deleted between upload and final ack —
+                # the receiver's bookkeeping wins for the object itself, but the
+                # granule transition is dropped silently.
+                pass
+            else:
+                await apply_to_session(s, g, result)
     await log(s, req.receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id)
     await commit_and_publish(s, "batches")
     return {"ok": True}

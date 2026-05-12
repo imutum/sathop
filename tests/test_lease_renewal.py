@@ -4,10 +4,10 @@ Heartbeat doubles as a keep-alive: every check-in pushes the
 `lease_expires_at` of every granule the worker holds forward by
 LEASE_DURATION. Without this, a slow processor (e.g. a granule that takes
 >30 min) sees its lease swept while still running, the row flips back to
-PENDING, and subsequent state reports 409 — the worker's in-memory pipeline
-turns into wasted ghost work.
+PENDING, and subsequent events 409 — the worker's in-memory pipeline turns
+into wasted ghost work.
 
-The worker side of the contract: when /api/workers/state returns 404/409,
+The worker side of the contract: when /api/workers/events returns 404/409,
 the worker raises LeaseRevoked so the granule handler aborts immediately
 instead of continuing to download/process bytes whose upload will be
 rejected anyway."""
@@ -166,30 +166,30 @@ async def test_heartbeat_skips_pending_granules_for_renewal(client):
 
 
 def _http_error(status: int) -> httpx.HTTPStatusError:
-    request = httpx.Request("POST", "http://orch/api/workers/state")
+    request = httpx.Request("POST", "http://orch/api/workers/events")
     response = httpx.Response(status, request=request)
     return httpx.HTTPStatusError(f"HTTP {status}", request=request, response=response)
 
 
 class _StubAgent:
-    """Minimal stand-in for OrchestratorClient — only `report_state` matters
+    """Minimal stand-in for OrchestratorClient — only `emit_event` matters
     for the LeaseRevoked path. Each call dequeues from `responses`: a status
     code int ⇒ raise that 4xx/5xx, None ⇒ succeed silently."""
 
     def __init__(self, responses: list[int | None]) -> None:
         self.responses = list(responses)
-        self.calls: list[tuple[str, GranuleState]] = []
+        self.calls: list[str] = []
 
-    async def report_state(self, gid: str, worker_id: str, state: GranuleState) -> None:
-        self.calls.append((gid, state))
+    async def emit_event(self, event) -> None:
+        self.calls.append(event.kind)
         next_status = self.responses.pop(0) if self.responses else None
         if next_status is not None:
             raise _http_error(next_status)
 
 
 def _stub_worker(agent: _StubAgent):
-    """Build just enough of `Worker` to call `_report_state` — bypasses the
-    real __init__ which requires Settings, storage, semaphores, etc."""
+    """Build just enough of `Worker` to call `_emit_lease_event` — bypasses
+    the real __init__ which requires Settings, storage, semaphores, etc."""
     from types import SimpleNamespace
 
     from sathop.worker.runtime import Worker
@@ -200,36 +200,47 @@ def _stub_worker(agent: _StubAgent):
     return w
 
 
-async def test_report_state_409_raises_lease_revoked():
+def _download_started(gid: str = "g1"):
+    from sathop.shared.state_machine import DownloadStarted
+
+    return DownloadStarted(granule_id=gid, worker_id="w1")
+
+
+def _process_started(gid: str = "g1"):
+    from sathop.shared.state_machine import ProcessStarted
+
+    return ProcessStarted(granule_id=gid, worker_id="w1")
+
+
+async def test_emit_lease_event_409_raises_lease_revoked():
     from sathop.worker.runtime import LeaseRevoked
 
     w = _stub_worker(_StubAgent([409]))
     with pytest.raises(LeaseRevoked):
-        await w._report_state("g1", GranuleState.DOWNLOADING)
+        await w._emit_lease_event(_download_started())
 
 
-async def test_report_state_404_raises_lease_revoked():
+async def test_emit_lease_event_404_raises_lease_revoked():
     from sathop.worker.runtime import LeaseRevoked
 
     w = _stub_worker(_StubAgent([404]))
     with pytest.raises(LeaseRevoked):
-        await w._report_state("g1", GranuleState.PROCESSING)
+        await w._emit_lease_event(_process_started())
 
 
-async def test_report_state_500_swallowed_as_best_effort():
+async def test_emit_lease_event_500_swallowed_as_best_effort():
     """5xx and network errors stay best-effort — the next phase boundary
-    will retry the report. Raising would abort the whole granule on a
-    transient orchestrator hiccup."""
+    will retry. Raising would abort the whole granule on a transient
+    orchestrator hiccup."""
     w = _stub_worker(_StubAgent([500]))
-    # No exception — _report_state logs and returns.
-    await w._report_state("g1", GranuleState.DOWNLOADING)
+    await w._emit_lease_event(_download_started())
 
 
-async def test_report_state_success_returns_silently():
+async def test_emit_lease_event_success_returns_silently():
     agent = _StubAgent([None])
     w = _stub_worker(agent)
-    await w._report_state("g1", GranuleState.DOWNLOADING)
-    assert agent.calls == [("g1", GranuleState.DOWNLOADING)]
+    await w._emit_lease_event(_download_started())
+    assert agent.calls == ["download_started"]
 
 
 # ─── Bidirectional sync: heartbeat returns revoked granule IDs ────────────

@@ -1,11 +1,11 @@
-"""Endpoint contract for /api/workers/upload and /api/workers/failure.
+"""Endpoint contract for POST /api/workers/events (upload_completed and
+processing_failed payloads).
 
-These two endpoints are the worker's terminal state-write paths and must
-both:
+These two events are the worker's terminal state-write paths and must both:
 - Reject when the worker no longer owns the granule (lease revoked, cancel
   cleared leased_by).
-- Reject when the granule isn't in a state that justifies the call (upload
-  needs PROCESSED; failure needs LEASED_STATES).
+- Reject when the granule isn't in a state that justifies the event
+  (upload_completed needs UPLOADING; processing_failed needs LEASED_STATES).
 
 Covers the contract that lets the worker safely treat 4xx as "give up on
 this granule" without risking inconsistent stage timings."""
@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 from sathop.orchestrator import db as orch_db
 from sathop.orchestrator.db import Batch, Granule, Worker, utcnow
 from sathop.orchestrator.main import app
-from sathop.shared.protocol import GranuleState
+from sathop.shared.state_machine import GranuleState
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ async def client(tmp_path, patch_settings):
 
 async def _seed_granule(
     granule_id: str = "g1",
-    state: str = GranuleState.PROCESSED.value,
+    state: str = GranuleState.UPLOADING.value,
     leased_by: str | None = "w1",
 ) -> None:
     async with orch_db._session_maker() as s:
@@ -60,8 +60,9 @@ async def _seed_granule(
         await s.commit()
 
 
-def _upload_payload(granule_id: str = "g1", worker_id: str = "w1") -> dict:
+def _upload_completed_payload(granule_id: str = "g1", worker_id: str = "w1") -> dict:
     return {
+        "kind": "upload_completed",
         "granule_id": granule_id,
         "worker_id": worker_id,
         "objects": [
@@ -75,59 +76,61 @@ def _upload_payload(granule_id: str = "g1", worker_id: str = "w1") -> dict:
     }
 
 
-# ─── upload contract ───────────────────────────────────────────────────────
-
-
-async def test_upload_happy_path_processed_to_uploaded(client):
-    await _seed_granule(state=GranuleState.PROCESSED.value)
-    r = client.post("/api/workers/upload", json=_upload_payload())
-    assert r.status_code == 200, r.text
-
-
-async def test_upload_rejects_when_not_processed(client):
-    """Worker must report PROCESSED before upload — otherwise process timing
-    silently absorbs upload duration."""
-    await _seed_granule(state=GranuleState.PROCESSING.value)
-    r = client.post("/api/workers/upload", json=_upload_payload())
-    assert r.status_code == 409
-    assert "processed" in r.text.lower()
-
-
-async def test_upload_rejects_when_lease_revoked(client):
-    """leased_by=None ⇒ cancel/sweeper got there first ⇒ upload 409 so the
-    worker stops trying."""
-    await _seed_granule(state=GranuleState.BLACKLISTED.value, leased_by=None)
-    r = client.post("/api/workers/upload", json=_upload_payload())
-    assert r.status_code == 409
-
-
-async def test_upload_rejects_when_other_worker_owns_lease(client):
-    """w1 trying to upload a granule now owned by w2 ⇒ 409."""
-    await _seed_granule(state=GranuleState.PROCESSED.value, leased_by="w2")
-    r = client.post("/api/workers/upload", json=_upload_payload(worker_id="w1"))
-    assert r.status_code == 409
-
-
-async def test_upload_404_for_unknown_granule(client):
-    r = client.post("/api/workers/upload", json=_upload_payload(granule_id="ghost"))
-    assert r.status_code == 404
-
-
-# ─── failure contract ──────────────────────────────────────────────────────
-
-
-def _failure_payload(granule_id: str = "g1", worker_id: str = "w1") -> dict:
+def _failure_payload(granule_id: str = "g1", worker_id: str = "w1", **extra) -> dict:
     return {
+        "kind": "processing_failed",
         "granule_id": granule_id,
         "worker_id": worker_id,
         "error": "boom",
         "exit_code": 7,
+        **extra,
     }
+
+
+# ─── upload_completed contract ────────────────────────────────────────────
+
+
+async def test_upload_completed_happy_path_uploading_to_uploaded(client):
+    await _seed_granule(state=GranuleState.UPLOADING.value)
+    r = client.post("/api/workers/events", json=_upload_completed_payload())
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == GranuleState.UPLOADED.value
+
+
+async def test_upload_completed_rejects_when_not_uploading(client):
+    """Worker must emit UploadStarted before UploadCompleted — otherwise
+    upload timing silently absorbs the upload-wait phase."""
+    await _seed_granule(state=GranuleState.PROCESSING.value)
+    r = client.post("/api/workers/events", json=_upload_completed_payload())
+    assert r.status_code == 409
+
+
+async def test_upload_completed_rejects_when_lease_revoked(client):
+    """leased_by=None ⇒ cancel/sweeper got there first ⇒ upload 409 so the
+    worker stops trying."""
+    await _seed_granule(state=GranuleState.BLACKLISTED.value, leased_by=None)
+    r = client.post("/api/workers/events", json=_upload_completed_payload())
+    assert r.status_code == 409
+
+
+async def test_upload_completed_rejects_when_other_worker_owns_lease(client):
+    """w1 trying to upload a granule now owned by w2 ⇒ 409."""
+    await _seed_granule(state=GranuleState.UPLOADING.value, leased_by="w2")
+    r = client.post("/api/workers/events", json=_upload_completed_payload(worker_id="w1"))
+    assert r.status_code == 409
+
+
+async def test_upload_completed_404_for_unknown_granule(client):
+    r = client.post("/api/workers/events", json=_upload_completed_payload(granule_id="ghost"))
+    assert r.status_code == 404
+
+
+# ─── processing_failed contract ───────────────────────────────────────────
 
 
 async def test_failure_during_processing_marks_pending_for_retry(client):
     await _seed_granule(state=GranuleState.PROCESSING.value)
-    r = client.post("/api/workers/failure", json=_failure_payload())
+    r = client.post("/api/workers/events", json=_failure_payload())
     assert r.status_code == 200
     assert r.json()["state"] == GranuleState.PENDING.value
 
@@ -137,9 +140,8 @@ async def test_failure_rejects_after_cancel(client):
     the worker must 409 — the worker should drop the granule, not get the
     state to flip back to PENDING."""
     await _seed_granule(state=GranuleState.BLACKLISTED.value, leased_by=None)
-    r = client.post("/api/workers/failure", json=_failure_payload())
+    r = client.post("/api/workers/events", json=_failure_payload())
     assert r.status_code == 409
-    # State must remain BLACKLISTED — failure mustn't sneak it back to PENDING.
     async with orch_db._session_maker() as s:
         g = await s.get(Granule, "g1")
         assert g.state == GranuleState.BLACKLISTED.value
@@ -150,13 +152,13 @@ async def test_failure_rejects_when_state_uploaded(client):
     Catches the ordering bug where worker reports failure post-upload because
     of a bookkeeping issue downstream."""
     await _seed_granule(state=GranuleState.UPLOADED.value, leased_by=None)
-    r = client.post("/api/workers/failure", json=_failure_payload())
+    r = client.post("/api/workers/events", json=_failure_payload())
     assert r.status_code == 409
 
 
 async def test_failure_rejects_when_other_worker_owns(client):
     await _seed_granule(state=GranuleState.PROCESSING.value, leased_by="w2")
-    r = client.post("/api/workers/failure", json=_failure_payload(worker_id="w1"))
+    r = client.post("/api/workers/events", json=_failure_payload(worker_id="w1"))
     assert r.status_code == 409
 
 
@@ -164,12 +166,11 @@ async def test_failure_persists_stdout_stderr_tails(client):
     """Bundle subprocess output captured at failure time is persisted so the UI
     can show it without operators ssh'ing into a worker."""
     await _seed_granule(state=GranuleState.PROCESSING.value)
-    payload = {
-        **_failure_payload(),
-        "stdout_tail": "step 1: ok\nstep 2: ok\nstep 3: BOOM",
-        "stderr_tail": "Traceback (most recent call last):\n  ...\nValueError: bad",
-    }
-    r = client.post("/api/workers/failure", json=payload)
+    payload = _failure_payload(
+        stdout_tail="step 1: ok\nstep 2: ok\nstep 3: BOOM",
+        stderr_tail="Traceback (most recent call last):\n  ...\nValueError: bad",
+    )
+    r = client.post("/api/workers/events", json=payload)
     assert r.status_code == 200
     async with orch_db._session_maker() as s:
         g = await s.get(Granule, "g1")
@@ -183,8 +184,8 @@ async def test_failure_caps_oversized_tails(client):
     await _seed_granule(state=GranuleState.PROCESSING.value)
     huge = "x" * 50_000
     r = client.post(
-        "/api/workers/failure",
-        json={**_failure_payload(), "stdout_tail": huge, "stderr_tail": huge},
+        "/api/workers/events",
+        json=_failure_payload(stdout_tail=huge, stderr_tail=huge),
     )
     assert r.status_code == 200
     async with orch_db._session_maker() as s:
@@ -195,22 +196,22 @@ async def test_failure_caps_oversized_tails(client):
 
 async def test_upload_clears_previous_failure_tails(client):
     """A retried granule whose previous attempt failed (stdout_tail set) and
-    then succeeded (PROCESSED → UPLOADED) shouldn't keep the stale tails."""
+    then succeeded should drop the stale tails on UploadCompleted."""
     await _seed_granule(state=GranuleState.PROCESSING.value)
     # First attempt fails with tails.
     client.post(
-        "/api/workers/failure",
-        json={**_failure_payload(), "stdout_tail": "noisy", "stderr_tail": "broken"},
+        "/api/workers/events",
+        json=_failure_payload(stdout_tail="noisy", stderr_tail="broken"),
     )
     # Operator clicks retry → state back to PENDING; assume worker leases and
-    # marches all the way to PROCESSED. Simulate by directly setting state.
+    # marches all the way to UPLOADING. Simulate by direct state set.
     async with orch_db._session_maker() as s:
         g = await s.get(Granule, "g1")
-        g.state = GranuleState.PROCESSED.value
+        g.state = GranuleState.UPLOADING.value
         g.leased_by = "w1"
         g.lease_expires_at = utcnow() + timedelta(minutes=30)
         await s.commit()
-    r = client.post("/api/workers/upload", json=_upload_payload())
+    r = client.post("/api/workers/events", json=_upload_completed_payload())
     assert r.status_code == 200
     async with orch_db._session_maker() as s:
         g = await s.get(Granule, "g1")
