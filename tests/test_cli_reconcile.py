@@ -15,6 +15,7 @@ import httpx
 import pytest
 
 from sathop.cli import reconcile
+from sathop.shared import config as shared_config
 
 # ─── _fmt_age boundaries ────────────────────────────────────────────────────
 
@@ -206,7 +207,7 @@ def test_reconcile_missing_orch_url_exits_with_message(monkeypatch, capsys):
     monkeypatch.delenv("SATHOP_URL", raising=False)
     monkeypatch.delenv("SATHOP_ORCH_URL", raising=False)
     monkeypatch.setattr(
-        reconcile.os,
+        shared_config.os,
         "getenv",
         lambda k, default="": "" if k in {"SATHOP_URL", "SATHOP_ORCH_URL", "SATHOP_TOKEN"} else default,
     )

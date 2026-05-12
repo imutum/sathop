@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import socket
 import sys
 from pathlib import Path
@@ -18,7 +17,7 @@ from typing import Literal, cast
 
 from sathop.receiver.config import Settings
 from sathop.receiver.runtime import Receiver
-from sathop.shared.config import cli_resolve_orch
+from sathop.shared.config import add_orch_args, resolve_orch_or_exit
 
 
 def _parse(argv: list[str] | None = None) -> Settings:
@@ -26,13 +25,7 @@ def _parse(argv: list[str] | None = None) -> Settings:
         prog="sathop-pull",
         description="SatHop receiver (CLI form): pull processed objects into a local directory.",
     )
-    p.add_argument(
-        "--url",
-        default=os.getenv("SATHOP_URL", ""),
-        help="sathop://TOKEN@host:port (env SATHOP_URL); overrides --orch-url + --token",
-    )
-    p.add_argument("--orch-url", default=os.getenv("SATHOP_ORCH_URL", ""), help="env SATHOP_ORCH_URL")
-    p.add_argument("--token", default=os.getenv("SATHOP_TOKEN", ""), help="env SATHOP_TOKEN")
+    add_orch_args(p)
     p.add_argument("--dir", default="./downloads", help="local output directory (default: ./downloads)")
     p.add_argument(
         "--id",
@@ -54,10 +47,7 @@ def _parse(argv: list[str] | None = None) -> Settings:
     )
     args = p.parse_args(argv)
 
-    try:
-        orch_url, token = cli_resolve_orch(args.url, args.orch_url, args.token)
-    except ValueError as e:
-        sys.exit(f"error: {e}")
+    orch_url, token = resolve_orch_or_exit(args)
 
     return Settings(
         receiver_id=args.id,

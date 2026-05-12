@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import os
+import sys
 from urllib.parse import unquote, urlparse
 
 
@@ -68,3 +70,33 @@ def cli_resolve_orch(url: str, orch_url: str, token: str, *, require_token: bool
             "missing token: pass --token or set SATHOP_TOKEN (or use --url sathop://TOKEN@host:port)"
         )
     return orch_url.rstrip("/"), token
+
+
+def add_orch_args(parser: argparse.ArgumentParser, *, default_orch_url: str = "") -> None:
+    """Register the standard `--url` / `--orch-url` / `--token` triplet on a CLI
+    parser. Defaults read from `SATHOP_URL` / `SATHOP_ORCH_URL` / `SATHOP_TOKEN`."""
+    parser.add_argument(
+        "--url",
+        default=os.getenv("SATHOP_URL", ""),
+        help="sathop://TOKEN@host:port — overrides --orch-url/--token (reads SATHOP_URL env)",
+    )
+    parser.add_argument(
+        "--orch-url",
+        default=os.getenv("SATHOP_ORCH_URL", default_orch_url),
+        help="env SATHOP_ORCH_URL",
+    )
+    parser.add_argument(
+        "--token",
+        default=os.getenv("SATHOP_TOKEN", ""),
+        help="env SATHOP_TOKEN",
+    )
+
+
+def resolve_orch_or_exit(args: argparse.Namespace, *, require_token: bool = True) -> tuple[str, str]:
+    """Resolve (orch_url, token) from parsed args; on ValueError, `sys.exit` with
+    a stderr error line. Combines with `add_orch_args` to collapse the standard
+    CLI boilerplate to two calls."""
+    try:
+        return cli_resolve_orch(args.url, args.orch_url, args.token, require_token=require_token)
+    except ValueError as e:
+        sys.exit(f"error: {e}")

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import io
-import os
 import sys
 import zipfile
 from pathlib import Path
@@ -18,7 +17,7 @@ import httpx
 import yaml
 
 from sathop.cli.validate_bundle import validate as _validate
-from sathop.shared.config import cli_resolve_orch
+from sathop.shared.config import add_orch_args, resolve_orch_or_exit
 from sathop.shared.http import bearer_headers
 
 EXCLUDE_NAMES = {"__pycache__", ".git", ".venv", ".mypy_cache", ".pytest_cache"}
@@ -58,21 +57,12 @@ def _build_zip(bundle_dir: Path) -> bytes:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Zip and upload a bundle to orchestrator")
     ap.add_argument("bundle_dir", type=Path, help="path to directory containing manifest.yaml")
-    ap.add_argument(
-        "--url",
-        default=os.getenv("SATHOP_URL", ""),
-        help="sathop://TOKEN@host:port — overrides --orch-url/--token (reads SATHOP_URL env)",
-    )
-    ap.add_argument("--orch-url", default=os.getenv("SATHOP_ORCH_URL", ""))
-    ap.add_argument("--token", default=os.getenv("SATHOP_TOKEN", ""))
+    add_orch_args(ap)
     ap.add_argument("--description", default=None)
     ap.add_argument("--skip-validate", action="store_true", help="skip pre-flight bundle validation")
     args = ap.parse_args()
 
-    try:
-        orch_url, token = cli_resolve_orch(args.url, args.orch_url, args.token)
-    except ValueError as e:
-        sys.exit(f"error: {e}")
+    orch_url, token = resolve_orch_or_exit(args)
 
     bundle_dir: Path = args.bundle_dir.resolve()
     if not bundle_dir.is_dir():

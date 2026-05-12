@@ -8,13 +8,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import UTC, datetime
 
 import httpx
 
-from sathop.shared.config import cli_resolve_orch
+from sathop.shared.config import add_orch_args, resolve_orch_or_exit
 from sathop.shared.http import bearer_headers
 
 
@@ -34,20 +33,9 @@ def _fmt_age(iso: str) -> str:
 
 def main() -> int:
     p = argparse.ArgumentParser(description="SatHop operational status report")
-    p.add_argument(
-        "--url",
-        default=os.getenv("SATHOP_URL", ""),
-        help="sathop://TOKEN@host:port — overrides --orch-url/--token (reads SATHOP_URL env)",
-    )
-    p.add_argument(
-        "--orch-url", default=os.getenv("SATHOP_ORCH_URL", "http://127.0.0.1:8765"), help="env SATHOP_ORCH_URL"
-    )
-    p.add_argument("--token", default=os.getenv("SATHOP_TOKEN", ""), help="env SATHOP_TOKEN")
+    add_orch_args(p, default_orch_url="http://127.0.0.1:8765")
     args = p.parse_args()
-    try:
-        base, token = cli_resolve_orch(args.url, args.orch_url, args.token, require_token=False)
-    except ValueError as e:
-        sys.exit(f"error: {e}")
+    base, token = resolve_orch_or_exit(args, require_token=False)
     headers = bearer_headers(token) if token else {}
 
     issues: list[str] = []
