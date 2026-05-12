@@ -64,6 +64,10 @@ class LeaseRevoked(Exception):
 DOWNLOAD_PROGRESS_MIN_INTERVAL_SECONDS = 2.0
 DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT = 5.0
 LEASE_MAX_BACKOFF_FACTOR = 6
+# Matches deploy/worker/docker-compose.yml::stop_grace_period — drift between
+# the two means docker SIGKILLs us mid-drain (too low) or wastes restart time
+# (too high). Keep them in lockstep.
+DRAIN_WATCHDOG_TIMEOUT_SEC = 60
 
 
 class Worker:
@@ -132,6 +136,7 @@ class Worker:
             lambda: self._draining,
             self._handlers,
             log,
+            timeout_sec=DRAIN_WATCHDOG_TIMEOUT_SEC,
             active_noun="handler",
             reclaim_message="lease sweeper will reclaim",
         )
@@ -172,7 +177,7 @@ class Worker:
             "on" if self._ca_pem else "off",
         )
 
-        def create_tasks(tg: agent_lifecycle.AgentTaskGroup) -> None:
+        def create_tasks(tg: asyncio.TaskGroup) -> None:
             tg.create_task(self._heartbeat_loop())
             tg.create_task(self._pipeline_loop())
             tg.create_task(self._janitor_loop())

@@ -1,11 +1,11 @@
-"""Shared drain skeleton: signal install + watchdog SystemExit.
+"""Shared drain skeleton: signal install + watchdog GracefulAgentExit.
 
 The lifecycle module is the one place worker/receiver agents exit cleanly. We
 exercise both paths in the signal-handler installer (asyncio fast path +
 signal.signal fallback used on Windows) and assert the watchdog raises
-SystemExit on both "clean drain" and "timeout" branches, including a sanity
-check that `active_noun`/`reclaim_message` propagate into the log lines so
-worker and receiver can stay differentiated.
+GracefulAgentExit on both "clean drain" and "timeout" branches, including a
+sanity check that `active_noun`/`reclaim_message` propagate into the log lines
+so worker and receiver can stay differentiated.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ async def test_run_agent_raises_system_exit_for_auth_token_invalid(caplog):
     async def fail_auth() -> None:
         raise AuthTokenInvalid("bad token")
 
-    def create_tasks(tg: agent_lifecycle.AgentTaskGroup) -> None:
+    def create_tasks(tg: asyncio.TaskGroup) -> None:
         tg.create_task(fail_auth())
 
     caplog.set_level(logging.ERROR)
@@ -37,11 +37,11 @@ async def test_run_agent_raises_system_exit_for_auth_token_invalid(caplog):
     assert "orchestrator rejected token" in caplog.text
 
 
-async def test_run_agent_swallows_graceful_system_exit():
+async def test_run_agent_swallows_graceful_agent_exit():
     async def graceful_exit() -> None:
-        raise SystemExit(0)
+        raise agent_lifecycle.GracefulAgentExit
 
-    def create_tasks(tg: agent_lifecycle.AgentTaskGroup) -> None:
+    def create_tasks(tg: asyncio.TaskGroup) -> None:
         tg.create_task(graceful_exit())
 
     await agent_lifecycle.run_agent(create_tasks, log=logging.getLogger("t"))
@@ -83,25 +83,24 @@ async def test_install_signal_handlers_falls_back_when_loop_rejects(monkeypatch)
 
 
 async def test_watchdog_exits_immediately_when_active_empty(monkeypatch, caplog):
-    """draining=True + nothing in flight → SystemExit(0) on the very next tick."""
+    """draining=True + nothing in flight → GracefulAgentExit on next tick."""
     monkeypatch.setattr(agent_lifecycle, "DRAIN_POLL_INTERVAL_SEC", 0.01)
     caplog.set_level(logging.INFO)
 
     is_draining = True
     active: deque[int] = deque()
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(agent_lifecycle.GracefulAgentExit):
         await asyncio.wait_for(
             agent_lifecycle.drain_watchdog_loop(lambda: is_draining, active, logging.getLogger("t")),
             timeout=1.0,
         )
-    assert exc.value.code == 0
     assert "drain complete" in caplog.text
 
 
 async def test_watchdog_waits_for_handlers_then_exits(monkeypatch, caplog):
     """While the drain flag flips True, the loop should park on
-    poll-interval ticks until `active` empties, then SystemExit cleanly."""
+    poll-interval ticks until `active` empties, then exit cleanly."""
     monkeypatch.setattr(agent_lifecycle, "DRAIN_POLL_INTERVAL_SEC", 0.01)
     caplog.set_level(logging.INFO)
 
@@ -117,25 +116,24 @@ async def test_watchdog_waits_for_handlers_then_exits(monkeypatch, caplog):
         active.popleft()
 
     asyncio.create_task(driver())
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(agent_lifecycle.GracefulAgentExit):
         await asyncio.wait_for(
             agent_lifecycle.drain_watchdog_loop(lambda: state["draining"], active, logging.getLogger("t")),
             timeout=2.0,
         )
-    assert exc.value.code == 0
     assert "drain watchdog armed" in caplog.text
     assert "drain complete" in caplog.text
 
 
 async def test_watchdog_times_out_when_handlers_stuck(monkeypatch, caplog):
-    """Handlers never finish before the deadline → SystemExit(0) anyway with
-    the caller-supplied reclaim_message surfaced for ops debugging."""
+    """Handlers never finish before the deadline → GracefulAgentExit anyway
+    with the caller-supplied reclaim_message surfaced for ops debugging."""
     monkeypatch.setattr(agent_lifecycle, "DRAIN_POLL_INTERVAL_SEC", 0.01)
     caplog.set_level(logging.INFO)
 
     active: deque[int] = deque([1])  # never drains
 
-    with pytest.raises(SystemExit) as exc:
+    with pytest.raises(agent_lifecycle.GracefulAgentExit):
         await asyncio.wait_for(
             agent_lifecycle.drain_watchdog_loop(
                 lambda: True,
@@ -146,7 +144,6 @@ async def test_watchdog_times_out_when_handlers_stuck(monkeypatch, caplog):
             ),
             timeout=1.0,
         )
-    assert exc.value.code == 0
     assert "drain timeout" in caplog.text
     assert "orchestrator will re-offer un-acked objects" in caplog.text
 
@@ -158,7 +155,7 @@ async def test_watchdog_noun_propagates_to_log(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
 
     active: deque[int] = deque()
-    with pytest.raises(SystemExit):
+    with pytest.raises(agent_lifecycle.GracefulAgentExit):
         await asyncio.wait_for(
             agent_lifecycle.drain_watchdog_loop(
                 lambda: True, active, logging.getLogger("t"), active_noun="pull"

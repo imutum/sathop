@@ -14,7 +14,8 @@ export type GranuleState =
   | "blacklisted";
 
 // Worker pipeline still has work to do; mirrors `IN_FLIGHT_STATES` in
-// shared/protocol.py. Used for batch progress, ETA, and cancel/reset gates.
+// shared/state_machine.py. Hand-maintained — see docs/adr/0001-state-machine-language-boundary.md.
+// Used for batch progress, ETA, and cancel/reset gates.
 export const IN_FLIGHT_STATES: GranuleState[] = [
   "pending",
   "queued",

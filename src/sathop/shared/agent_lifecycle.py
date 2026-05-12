@@ -6,42 +6,24 @@ import asyncio
 import logging
 import signal
 import time
-from collections.abc import Callable, Coroutine, Sized
-from typing import Any, TypeVar
+from collections.abc import Callable, Sized
 
 from sathop.shared.orch_client import AuthTokenInvalid
 
 DEFAULT_TIMEOUT_SEC = 60
 DRAIN_POLL_INTERVAL_SEC = 1.0
 
-T = TypeVar("T")
-
 
 class GracefulAgentExit(Exception):
-    pass
+    """Raised by a task to tell run_agent the agent should shut down cleanly.
+    Only drain_watchdog_loop raises this today; new tasks that want to end the
+    process must raise it explicitly, not rely on `sys.exit(0)` being magic."""
 
 
-class AgentTaskGroup:
-    def __init__(self, tg: asyncio.TaskGroup) -> None:
-        self._tg = tg
-
-    def create_task(self, coro: Coroutine[Any, Any, T]) -> asyncio.Task[T]:
-        return self._tg.create_task(_run_agent_task(coro))
-
-
-async def _run_agent_task(coro: Coroutine[Any, Any, T]) -> T:
-    try:
-        return await coro
-    except SystemExit as e:
-        if e.code in (0, None):
-            raise GracefulAgentExit from None
-        raise
-
-
-async def run_agent(create_tasks: Callable[[AgentTaskGroup], None], *, log: logging.Logger) -> None:
+async def run_agent(create_tasks: Callable[[asyncio.TaskGroup], None], *, log: logging.Logger) -> None:
     try:
         async with asyncio.TaskGroup() as tg:
-            create_tasks(AgentTaskGroup(tg))
+            create_tasks(tg)
     except* AuthTokenInvalid:
         log.error("orchestrator rejected token (401) — exiting for container restart")
         raise SystemExit(1) from None
@@ -74,7 +56,7 @@ async def drain_watchdog_loop(
     while time.monotonic() < deadline:
         if not active:
             log.info("drain complete — all %ss finished", active_noun)
-            raise SystemExit(0)
+            raise GracefulAgentExit
         await asyncio.sleep(DRAIN_POLL_INTERVAL_SEC)
     log.warning(
         "drain timeout (%ds) reached with %d %s(s) still in flight — forcing exit; %s",
@@ -83,4 +65,4 @@ async def drain_watchdog_loop(
         active_noun,
         reclaim_message,
     )
-    raise SystemExit(0)
+    raise GracefulAgentExit

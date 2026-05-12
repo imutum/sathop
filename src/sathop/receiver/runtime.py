@@ -20,6 +20,9 @@ from .health import HealthServer
 
 log = logging.getLogger("sathop.receiver")
 
+# Matches deploy/receiver/docker-compose.yml::stop_grace_period — drift between
+# the two means docker SIGKILLs us mid-drain (too low) or wastes restart time
+# (too high). Keep them in lockstep.
 DRAIN_WATCHDOG_TIMEOUT_SEC = 30
 
 
@@ -113,7 +116,7 @@ class Receiver:
         )
         log.info("registered as %s v%s (%s)", self.s.receiver_id, __version__, self.s.platform)
 
-        def create_tasks(tg: agent_lifecycle.AgentTaskGroup) -> None:
+        def create_tasks(tg: asyncio.TaskGroup) -> None:
             tg.create_task(self._heartbeat_loop())
             tg.create_task(self._pull_loop())
             tg.create_task(self._drain_watchdog_loop())
