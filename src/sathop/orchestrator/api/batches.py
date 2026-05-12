@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sathop.shared.bundle_manifest import InputsSchema, parse_shared_files
 from sathop.shared.protocol import (
     BatchCreate,
     BatchSummary,
@@ -26,7 +26,7 @@ from sathop.shared.state_machine import (
     Scope,
 )
 
-from ..bundle_schema import InputsSchema, parse_shared_files, validate_granule
+from ..bundle_schema import validate_granule
 from ..config import require_token, settings
 from ..db import (
     Batch,
@@ -78,8 +78,8 @@ def _new_granule(batch_id: str, granule: GranuleCreate) -> Granule:
         granule_id=_compose_gid(batch_id, granule.granule_id),
         batch_id=batch_id,
         state=GranuleState.PENDING.value,
-        inputs_json=json.dumps([i.model_dump() for i in granule.inputs]),
-        meta_json=json.dumps(granule.meta, ensure_ascii=False),
+        inputs=[i.model_dump() for i in granule.inputs],
+        meta=granule.meta,
     )
 
 
@@ -96,8 +96,7 @@ async def _validate_granules_for_bundle(
     bundle = await s.get(Bundle, (name, version))
     if bundle is None:
         raise HTTPException(422, f"bundle {name}@{version} not registered")
-    manifest = json.loads(bundle.manifest_json)
-    schema = InputsSchema.parse(manifest)
+    schema = InputsSchema.parse(bundle.manifest)
     seen: set[str] = set()
     dups: set[str] = set()
     errors: list[str] = []
@@ -154,8 +153,7 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
     bundle = await s.get(Bundle, (name, version))
     if bundle is None:
         raise HTTPException(422, f"bundle {name}@{version} not registered — upload it to /api/bundles first")
-    manifest = json.loads(bundle.manifest_json)
-    missing_shared = [n for n in parse_shared_files(manifest) if await s.get(SharedFile, n) is None]
+    missing_shared = [n for n in parse_shared_files(bundle.manifest) if await s.get(SharedFile, n) is None]
     if missing_shared:
         raise HTTPException(
             422,
@@ -169,10 +167,8 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
         name=req.name,
         bundle_ref=req.bundle_ref,
         target_receiver_id=req.target_receiver_id,
-        execution_env_json=json.dumps(req.execution_env, ensure_ascii=False),
-        credentials_json=json.dumps(
-            {k: c.model_dump() for k, c in req.credentials.items()}, ensure_ascii=False
-        ),
+        execution_env=req.execution_env,
+        credentials={k: c.model_dump() for k, c in req.credentials.items()},
     )
     s.add(b)
 

@@ -1,4 +1,4 @@
-"""Per-stage timing recording + query endpoints."""
+﻿"""Per-stage timing recording + query endpoints."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ async def _seed_worker_batch_granule(gid: str = "g1") -> None:
                 granule_id=gid,
                 batch_id="b",
                 state=GranuleState.PENDING.value,
-                inputs_json="[]",
+                inputs=[],
             )
         )
         await s.commit()
@@ -198,7 +198,7 @@ async def _seed_timing_rows(rows: list[tuple[str, int]]) -> None:
     now = utcnow()
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id="b", name="t", bundle_ref="local:x"))
-        s.add(Granule(granule_id="g1", batch_id="b", state="acked", inputs_json="[]"))
+        s.add(Granule(granule_id="g1", batch_id="b", state="acked", inputs=[]))
         for stage, ms in rows:
             s.add(
                 GranuleStageTiming(
@@ -238,7 +238,7 @@ async def test_batch_timing_wall_clock_spans_all_rows(client):
     now = utcnow()
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id="b", name="t", bundle_ref="local:x"))
-        s.add(Granule(granule_id="g1", batch_id="b", state="acked", inputs_json="[]"))
+        s.add(Granule(granule_id="g1", batch_id="b", state="acked", inputs=[]))
         # Two overlapping download attempts on different workers; wall is the
         # outer envelope, not the sum.
         s.add(

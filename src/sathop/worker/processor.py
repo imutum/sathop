@@ -108,7 +108,7 @@ def _build_env(
     from being inherited by user bundle code. See _ENV_WHITELIST above."""
     python_bin = str(bundle.python.parent)
     env = {k: v for k, v in os.environ.items() if k in _ENV_WHITELIST}
-    env.update(bundle.manifest.execution.get("env", {}))
+    env.update(bundle.manifest.execution.env)
     if execution_env:
         env.update(execution_env)
     env.update(
@@ -207,7 +207,7 @@ async def run_bundle(
 ) -> ProcessResult:
     work_dir = Path(tempfile.mkdtemp(prefix=f"g-{safe_segment(granule_id)}-", dir=work_root))
     input_dir = work_dir / "input"
-    output_dir = work_dir / bundle.manifest.outputs.get("watch_dir", "output")
+    output_dir = work_dir / bundle.manifest.outputs.watch_dir
     input_dir.mkdir(parents=True)
     output_dir.mkdir(parents=True)
 
@@ -227,8 +227,8 @@ async def run_bundle(
             progress_url=progress_url,
         )
 
-        cmd = bundle.manifest.execution["entrypoint"]
-        timeout = int(bundle.manifest.execution.get("timeout_sec", 900))
+        cmd = bundle.manifest.execution.entrypoint
+        timeout = bundle.manifest.execution.timeout_sec
 
         proc = await asyncio.create_subprocess_shell(
             cmd,
@@ -258,7 +258,7 @@ async def run_bundle(
         if proc.returncode != 0:
             return ProcessResult(False, [], stdout, stderr, proc.returncode or -1)
 
-        exts = set(bundle.manifest.outputs.get("extensions", []))
+        exts = set(bundle.manifest.outputs.extensions)
         outputs = [p for p in output_dir.rglob("*") if p.is_file() and (not exts or p.suffix in exts)]
 
         if not outputs:

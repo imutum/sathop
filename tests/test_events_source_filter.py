@@ -1,4 +1,4 @@
-"""GET /api/events?source=<id> — exact-match filter on Event.source.
+﻿"""GET /api/events?source=<id> — exact-match filter on Event.source.
 
 Powers the "view events for this node" link on Worker / Receiver cards. Without
 it, operators had to type the worker_id into the global fuzzy search — which
@@ -91,7 +91,7 @@ async def test_source_filter_combines_with_batch(client):
                 granule_id="b:g1",
                 batch_id="b",
                 state=GranuleState.PENDING.value,
-                inputs_json="[]",
+                inputs=[],
             )
         )
         s.add(Event(level="info", source="worker-w1", granule_id="b:g1", message="ours"))

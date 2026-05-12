@@ -17,7 +17,7 @@ from pathlib import Path
 
 import yaml
 
-from sathop.orchestrator.bundle_schema import InputsSchema, parse_shared_files
+from sathop.shared.bundle_manifest import InputsSchema, RequirementsConfig, parse_shared_files
 from sathop.worker.bundle import python_deps_source
 
 REQUIRED_KEYS = {"name", "version", "execution", "outputs", "inputs"}
@@ -107,37 +107,28 @@ def _check_entrypoint_resolves(manifest: dict, bundle_dir: Path, r: Report) -> N
         r.passed.append(f"entrypoint script {script!r} resolves to {target.relative_to(bundle_dir)}")
 
 
-def _check_requirements(manifest: dict, bundle_dir: Path, r: Report) -> None:
-    raw_req = manifest.get("requirements")
-    if raw_req is None:
-        req = {}
-    elif not isinstance(raw_req, dict):
-        r.errors.append("manifest.requirements must be a mapping")
-        return
-    else:
-        req = raw_req
-    for key in ("pip", "apt", "credentials"):
-        v = req.get(key)
-        if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
-            r.errors.append(f"manifest.requirements.{key} must be a list of strings")
-    py = req.get("python")
-    if py is not None and not isinstance(py, str):
-        r.errors.append("manifest.requirements.python must be a string (PEP 440 specifier)")
-    n_pip = len(req.get("pip") or [])
-    n_apt = len(req.get("apt") or [])
-    n_creds = len(req.get("credentials") or [])
-    r.passed.append(f"requirements: python={py!r}, pip={n_pip}, apt={n_apt}, credentials={n_creds}")
+def _check_requirements(manifest: dict, bundle_dir: Path, r: Report) -> RequirementsConfig | None:
+    try:
+        req = RequirementsConfig.parse(manifest.get("requirements"))
+    except ValueError as e:
+        r.errors.append(str(e))
+        return None
+    r.passed.append(
+        f"requirements: python={req.python!r}, pip={len(req.pip)}, apt={len(req.apt)}, "
+        f"credentials={len(req.credentials)}"
+    )
 
     deps = python_deps_source(req, bundle_dir)
     if deps is None:
         r.passed.append("no Python requirements declared (bundle uses worker Python)")
     elif deps.kind == "requirements.txt":
         r.passed.append("requirements.txt found — worker will install from it")
-        if n_pip > 0:
+        if req.pip:
             r.warnings.append(
                 "both requirements.txt and manifest.requirements.pip declared — "
                 "worker uses requirements.txt and ignores manifest.pip"
             )
+    return req
 
 
 def _check_inputs_and_shared(manifest: dict, r: Report) -> None:
@@ -155,11 +146,10 @@ def _check_inputs_and_shared(manifest: dict, r: Report) -> None:
         r.errors.append(f"manifest.shared_files invalid: {e}")
     else:
         if names:
-            r.passed.append(f"shared_files: {names}")
+            r.passed.append(f"shared_files: {list(names)}")
 
 
-def _try_build_venv(manifest: dict, bundle_dir: Path, r: Report) -> None:
-    req = manifest.get("requirements") or {}
+def _try_build_venv(req: RequirementsConfig, bundle_dir: Path, r: Report) -> None:
     deps = python_deps_source(req, bundle_dir)
     if deps is None:
         r.passed.append("(skipped venv build — no pip deps declared)")
@@ -170,7 +160,7 @@ def _try_build_venv(manifest: dict, bundle_dir: Path, r: Report) -> None:
         r.warnings.append("(skipped venv build — `uv` not found on PATH)")
         return
 
-    py = req.get("python") or ">=3.11"
+    py = req.python or ">=3.11"
     py_minor = re.search(r"3\.\d+", py)
     py_arg = ["--python", py_minor.group()] if py_minor else []
 
@@ -218,9 +208,9 @@ def validate(bundle_dir: Path, build_venv: bool = False) -> Report:
     _check_manifest_shape(manifest, r)
     _check_inputs_and_shared(manifest, r)
     _check_entrypoint_resolves(manifest, bundle_dir, r)
-    _check_requirements(manifest, bundle_dir, r)
-    if build_venv:
-        _try_build_venv(manifest, bundle_dir, r)
+    req = _check_requirements(manifest, bundle_dir, r)
+    if build_venv and req is not None:
+        _try_build_venv(req, bundle_dir, r)
     return r
 
 

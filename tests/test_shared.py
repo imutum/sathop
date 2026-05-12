@@ -217,7 +217,7 @@ async def test_delete_refused_when_bundle_references_it(client):
     with _zf.ZipFile(buf, "w") as zf:
         zf.writestr(
             "manifest.yaml",
-            "name: demo\nversion: 0.1\n"
+            "name: demo\nversion: '0.1'\n"
             "inputs:\n  slots:\n    - name: p\n      product: any\n"
             "execution:\n  entrypoint: 'python run.py'\n"
             "outputs:\n  watch_dir: output\n"

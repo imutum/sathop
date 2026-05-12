@@ -1,4 +1,4 @@
-"""Receiver pull-failure throttling.
+﻿"""Receiver pull-failure throttling.
 
 Permanently broken presigned URLs used to spin every receiver forever — the
 pull endpoint had no notion of "give up". Now `failed_pulls` increments on
@@ -40,7 +40,7 @@ async def _seed(receiver_id: str = "r1") -> int:
                 granule_id="g1",
                 batch_id="b",
                 state=GranuleState.UPLOADED.value,
-                inputs_json="[]",
+                inputs=[],
             )
         )
         obj = GranuleObject(

@@ -12,16 +12,22 @@ from pathlib import Path
 import httpx
 import pytest
 
+from sathop.shared.bundle_manifest import BundleManifest
 from sathop.shared.protocol import parse_bundle_ref
 from sathop.worker import bundle
+
+_MANIFEST_TEMPLATE = (
+    "name: {name}\nversion: '{version}'\n"
+    "execution:\n  entrypoint: 'true'\n"
+    "outputs:\n  watch_dir: output\n"
+    "inputs:\n  slots:\n    - name: primary\n      product: any\n"
+)
 
 
 def _write_manifest(root: Path, name: str = "b", version: str = "0.1") -> None:
     root.mkdir(parents=True, exist_ok=True)
     (root / "manifest.yaml").write_text(
-        f"name: {name}\nversion: {version}\n"
-        "execution:\n  entrypoint: 'true'\n"
-        "outputs:\n  watch_dir: output\n",
+        _MANIFEST_TEMPLATE.format(name=name, version=version),
         encoding="utf-8",
     )
 
@@ -29,10 +35,7 @@ def _write_manifest(root: Path, name: str = "b", version: str = "0.1") -> None:
 def _make_zip(manifest_at: str = "manifest.yaml", extras: dict[str, str] | None = None) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr(
-            manifest_at,
-            "name: z\nversion: 0.1\nexecution:\n  entrypoint: 'true'\noutputs:\n  watch_dir: output\n",
-        )
+        zf.writestr(manifest_at, _MANIFEST_TEMPLATE.format(name="z", version="0.1"))
         for k, v in (extras or {}).items():
             zf.writestr(k, v)
     return buf.getvalue()
@@ -198,45 +201,40 @@ def test_bundle_manifest_load(tmp_path):
     p = tmp_path / "manifest.yaml"
     p.write_text(
         "name: demo\nversion: 1.2.3\n"
-        "inputs:\n  scheme: list\n"
+        "inputs:\n  slots:\n    - name: primary\n      product: any\n"
         "execution:\n  entrypoint: 'python x.py'\n  timeout_sec: 60\n"
         "outputs:\n  watch_dir: out\n  extensions: ['.txt']\n"
         "requirements:\n  credentials: ['nasa']\n",
         encoding="utf-8",
     )
-    m = bundle.BundleManifest.load(p)
+    m = BundleManifest.from_yaml(p)
     assert m.name == "demo"
     assert m.version == "1.2.3"
-    assert m.execution["entrypoint"] == "python x.py"
-    assert m.outputs["extensions"] == [".txt"]
-    assert m.requirements["credentials"] == ["nasa"]
-    assert m.shared_files == []
+    assert m.execution.entrypoint == "python x.py"
+    assert m.outputs.extensions == (".txt",)
+    assert m.requirements.credentials == ("nasa",)
+    assert m.shared_files == ()
 
 
 def test_bundle_manifest_load_shared_files(tmp_path):
     p = tmp_path / "manifest.yaml"
     p.write_text(
-        "name: demo\nversion: 1\n"
-        "execution:\n  entrypoint: 'true'\n"
-        "outputs:\n  watch_dir: out\n"
-        "shared_files:\n  - mask.tif\n  - dem.bin\n",
+        _MANIFEST_TEMPLATE.format(name="demo", version="1")
+        + "shared_files:\n  - mask.tif\n  - dem.bin\n",
         encoding="utf-8",
     )
-    m = bundle.BundleManifest.load(p)
-    assert m.shared_files == ["mask.tif", "dem.bin"]
+    m = BundleManifest.from_yaml(p)
+    assert m.shared_files == ("mask.tif", "dem.bin")
 
 
 def test_bundle_manifest_rejects_malformed_shared_files(tmp_path):
     p = tmp_path / "manifest.yaml"
     p.write_text(
-        "name: demo\nversion: 1\n"
-        "execution:\n  entrypoint: 'true'\n"
-        "outputs:\n  watch_dir: out\n"
-        "shared_files:\n  - ''\n",
+        _MANIFEST_TEMPLATE.format(name="demo", version="1") + "shared_files:\n  - ''\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="non-empty strings"):
-        bundle.BundleManifest.load(p)
+    with pytest.raises(ValueError, match="non-empty string"):
+        BundleManifest.from_yaml(p)
 
 
 # ─── runtime selection ───────────────────────────────────────────────────
@@ -283,6 +281,6 @@ def test_requirements_comments_only_do_not_force_venv(tmp_path):
     root = tmp_path / "b"
     _write_manifest(root)
     (root / "requirements.txt").write_text("\n# stdlib only\n", encoding="utf-8")
-    manifest = bundle.BundleManifest.load(root / "manifest.yaml")
+    manifest = BundleManifest.from_yaml(root / "manifest.yaml")
 
     assert bundle.python_deps_source(manifest.requirements, root) is None

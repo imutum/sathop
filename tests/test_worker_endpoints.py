@@ -1,4 +1,4 @@
-"""Endpoint contract for POST /api/workers/events (upload_completed and
+﻿"""Endpoint contract for POST /api/workers/events (upload_completed and
 processing_failed payloads).
 
 These two events are the worker's terminal state-write paths and must both:
@@ -52,7 +52,7 @@ async def _seed_granule(
                 granule_id=granule_id,
                 batch_id="b",
                 state=state,
-                inputs_json="[]",
+                inputs=[],
                 leased_by=leased_by,
                 lease_expires_at=(utcnow() + timedelta(minutes=30)) if leased_by else None,
             )

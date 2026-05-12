@@ -1,4 +1,4 @@
-"""Retention sweeper: old events + aged-out DELETED granules get pruned;
+﻿"""Retention sweeper: old events + aged-out DELETED granules get pruned;
 recent rows stay. Exercises the module against a real temp-file SQLite DB."""
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ async def test_prunes_aged_deleted_granules_and_objects(orch_session):
                 granule_id="g_old",
                 batch_id="b1",
                 state=GranuleState.DELETED.value,
-                inputs_json="[]",
+                inputs=[],
                 updated_at=old,
             )
         )
@@ -73,7 +73,7 @@ async def test_prunes_aged_deleted_granules_and_objects(orch_session):
                 granule_id="g_recent",
                 batch_id="b1",
                 state=GranuleState.DELETED.value,
-                inputs_json="[]",
+                inputs=[],
                 updated_at=recent,
             )
         )
@@ -83,7 +83,7 @@ async def test_prunes_aged_deleted_granules_and_objects(orch_session):
                 granule_id="g_acked",
                 batch_id="b1",
                 state=GranuleState.ACKED.value,
-                inputs_json="[]",
+                inputs=[],
                 updated_at=old,
             )
         )
@@ -114,7 +114,7 @@ async def test_prunes_stage_timing_with_granule(orch_session):
                 granule_id="g_old",
                 batch_id="b1",
                 state=GranuleState.DELETED.value,
-                inputs_json="[]",
+                inputs=[],
                 updated_at=old,
             )
         )
@@ -123,7 +123,7 @@ async def test_prunes_stage_timing_with_granule(orch_session):
                 granule_id="g_recent",
                 batch_id="b1",
                 state=GranuleState.DELETED.value,
-                inputs_json="[]",
+                inputs=[],
                 updated_at=now - timedelta(days=1),
             )
         )

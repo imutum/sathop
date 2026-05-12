@@ -1,4 +1,4 @@
-"""Worker / receiver enable + forget endpoints — runtime kill-switch and
+﻿"""Worker / receiver enable + forget endpoints — runtime kill-switch and
 permanent removal, with safety guards so an operator can't drop a busy node."""
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ async def _seed_granule(
                 granule_id=granule_id or f"g-{state}",
                 batch_id="b",
                 state=state,
-                inputs_json="[]",
+                inputs=[],
                 leased_by=worker_id,
             )
         )

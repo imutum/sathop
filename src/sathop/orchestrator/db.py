@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, TypeDecorator
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, TypeDecorator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -116,13 +116,15 @@ class Batch(Base):
     target_receiver_id: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="running")
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
-    # JSON-encoded dict of env overrides. Merged into the bundle's execution.env
-    # at lease time (batch env > bundle env > worker os env).
-    execution_env_json: Mapped[str] = mapped_column(Text, default="{}")
-    # JSON-encoded {name: Credential} map. Included verbatim in every lease
-    # item so workers can authenticate downloads without any orchestrator-side
-    # credential registry.
-    credentials_json: Mapped[str] = mapped_column(Text, default="{}")
+    # Dict of env overrides. Merged into the bundle's execution.env at lease
+    # time (batch env > bundle env > worker os env). Column kept as
+    # `execution_env_json` for back-compat with existing DBs; Python attr drops
+    # the suffix because the value is a dict, not a JSON string.
+    execution_env: Mapped[dict] = mapped_column("execution_env_json", JSON, default=dict)
+    # {name: Credential.model_dump()} map. Included verbatim in every lease item
+    # so workers can authenticate downloads without any orchestrator-side
+    # credential registry. Column kept as `credentials_json` for back-compat.
+    credentials: Mapped[dict] = mapped_column("credentials_json", JSON, default=dict)
 
 
 class Granule(Base):
@@ -130,8 +132,11 @@ class Granule(Base):
     granule_id: Mapped[str] = mapped_column(String, primary_key=True)
     batch_id: Mapped[str] = mapped_column(String, ForeignKey("batches.batch_id"), index=True)
     state: Mapped[str] = mapped_column(String, index=True)
-    inputs_json: Mapped[str] = mapped_column(Text)
-    meta_json: Mapped[str] = mapped_column(Text, default="{}")
+    # List of InputSpec.model_dump() dicts; dict of per-granule meta key/values.
+    # Columns kept as `inputs_json` / `meta_json` for back-compat with existing
+    # DBs; Python attrs drop the suffix because the values are list/dict.
+    inputs: Mapped[list] = mapped_column("inputs_json", JSON)
+    meta: Mapped[dict] = mapped_column("meta_json", JSON, default=dict)
     leased_by: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -189,7 +194,9 @@ class Bundle(Base):
     version: Mapped[str] = mapped_column(String, primary_key=True)
     sha256: Mapped[str] = mapped_column(String, index=True)
     size: Mapped[int] = mapped_column(Integer)
-    manifest_json: Mapped[str] = mapped_column(Text)
+    # Full parsed manifest dict (the same shape `shared/bundle_manifest.py`
+    # produces). Column kept as `manifest_json` for back-compat.
+    manifest: Mapped[dict] = mapped_column("manifest_json", JSON)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
 

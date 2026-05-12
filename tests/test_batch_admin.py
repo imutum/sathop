@@ -1,4 +1,4 @@
-"""Cancel / retry endpoints on batches + individual granules."""
+﻿"""Cancel / retry endpoints on batches + individual granules."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ async def _seed(batch_id: str, granules: list[tuple[str, str]]):
                     granule_id=gid,
                     batch_id=batch_id,
                     state=state,
-                    inputs_json="[]",
+                    inputs=[],
                     leased_by="w1" if state == GranuleState.DOWNLOADING.value else None,
                     lease_expires_at=utcnow() if state == GranuleState.DOWNLOADING.value else None,
                 )

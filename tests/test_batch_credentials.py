@@ -11,11 +11,13 @@ from sathop.orchestrator.db import Batch, Bundle, Granule, Worker, utcnow
 from sathop.orchestrator.main import app
 from sathop.shared.protocol import GranuleState
 
-_MINIMAL_MANIFEST = (
-    '{"name":"b","version":"1.0","execution":{"entrypoint":"true"},'
-    '"outputs":{"watch_dir":"output"},'
-    '"inputs":{"slots":[{"name":"primary","product":"any"}]}}'
-)
+_MINIMAL_MANIFEST = {
+    "name": "b",
+    "version": "1.0",
+    "execution": {"entrypoint": "true"},
+    "outputs": {"watch_dir": "output"},
+    "inputs": {"slots": [{"name": "primary", "product": "any"}]},
+}
 
 
 async def _register_bundle(name: str, version: str) -> None:
@@ -26,7 +28,7 @@ async def _register_bundle(name: str, version: str) -> None:
                 version=version,
                 sha256="x" * 64,
                 size=1,
-                manifest_json=_MINIMAL_MANIFEST,
+                manifest=_MINIMAL_MANIFEST,
                 uploaded_at=utcnow(),
             )
         )
@@ -68,8 +70,15 @@ async def test_batch_create_persists_credentials(client):
     async with orch_db._session_maker() as s:
         b = await s.get(Batch, "b1")
         assert b is not None
-        assert '"nasa-edl"' in b.credentials_json
-        assert '"tok-123"' in b.credentials_json
+        assert b.credentials == {
+            "nasa-edl": {
+                "name": "nasa-edl",
+                "scheme": "bearer",
+                "token": "tok-123",
+                "username": None,
+                "password": None,
+            }
+        }
 
 
 async def test_lease_includes_credentials_from_batch(client):
@@ -80,11 +89,15 @@ async def test_lease_includes_credentials_from_batch(client):
                 batch_id="b1",
                 name="t",
                 bundle_ref="local:/x",
-                credentials_json=(
-                    '{"nasa-edl": {"name": "nasa-edl", "scheme": "bearer", "token": "t-1"},'
-                    ' "esa-basic": {"name": "esa-basic", "scheme": "basic",'
-                    ' "username": "u", "password": "p"}}'
-                ),
+                credentials={
+                    "nasa-edl": {"name": "nasa-edl", "scheme": "bearer", "token": "t-1"},
+                    "esa-basic": {
+                        "name": "esa-basic",
+                        "scheme": "basic",
+                        "username": "u",
+                        "password": "p",
+                    },
+                },
             )
         )
         s.add(
@@ -92,7 +105,7 @@ async def test_lease_includes_credentials_from_batch(client):
                 granule_id="g1",
                 batch_id="b1",
                 state=GranuleState.PENDING.value,
-                inputs_json="[]",
+                inputs=[],
             )
         )
         await s.commit()
@@ -112,45 +125,18 @@ async def test_lease_includes_credentials_from_batch(client):
 async def test_lease_empty_credentials_when_batch_has_none(client):
     async with orch_db._session_maker() as s:
         s.add(Worker(worker_id="w1", version="", capacity=10, public_url=None))
-        s.add(Batch(batch_id="b1", name="t", bundle_ref="local:/x"))  # default "{}"
+        s.add(Batch(batch_id="b1", name="t", bundle_ref="local:/x"))  # default {}
         s.add(
             Granule(
                 granule_id="g1",
                 batch_id="b1",
                 state=GranuleState.PENDING.value,
-                inputs_json="[]",
+                inputs=[],
             )
         )
         await s.commit()
 
     r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 1})
-    assert r.json()["items"][0]["credentials"] == {}
-
-
-async def test_lease_handles_malformed_credentials_json(client):
-    """Garbled credentials_json shouldn't break leasing — fall back to empty."""
-    async with orch_db._session_maker() as s:
-        s.add(Worker(worker_id="w1", version="", capacity=10, public_url=None))
-        s.add(
-            Batch(
-                batch_id="b1",
-                name="t",
-                bundle_ref="local:/x",
-                credentials_json="not-json",
-            )
-        )
-        s.add(
-            Granule(
-                granule_id="g1",
-                batch_id="b1",
-                state=GranuleState.PENDING.value,
-                inputs_json="[]",
-            )
-        )
-        await s.commit()
-
-    r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 1})
-    assert r.status_code == 200
     assert r.json()["items"][0]["credentials"] == {}
 
 

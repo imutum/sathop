@@ -1,4 +1,4 @@
-"""Prometheus /api/metrics endpoint: seeds DB with a few rows, hits the endpoint
+﻿"""Prometheus /api/metrics endpoint: seeds DB with a few rows, hits the endpoint
 via FastAPI TestClient, asserts expected metric names and values appear."""
 
 from __future__ import annotations
@@ -29,14 +29,14 @@ async def test_metrics_exposes_expected_series(client):
     now = utcnow()
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id="b1", name="n", bundle_ref="local:x", status="running"))
-        s.add(Granule(granule_id="g1", batch_id="b1", state=GranuleState.PENDING.value, inputs_json="[]"))
-        s.add(Granule(granule_id="g2", batch_id="b1", state=GranuleState.PROCESSING.value, inputs_json="[]"))
+        s.add(Granule(granule_id="g1", batch_id="b1", state=GranuleState.PENDING.value, inputs=[]))
+        s.add(Granule(granule_id="g2", batch_id="b1", state=GranuleState.PROCESSING.value, inputs=[]))
         s.add(
             Granule(
                 granule_id="g_stuck",
                 batch_id="b1",
                 state=GranuleState.PROCESSING.value,
-                inputs_json="[]",
+                inputs=[],
                 updated_at=now - timedelta(hours=12),
             )
         )

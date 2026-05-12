@@ -1,4 +1,4 @@
-"""Worker /events endpoint + lease-sweeper coverage of the in-flight states
+﻿"""Worker /events endpoint + lease-sweeper coverage of the in-flight states
 (queued/downloading/downloaded/processing/processed/uploading)."""
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ async def _seed(
                 granule_id=granule_id,
                 batch_id="b",
                 state=state,
-                inputs_json="[]",
+                inputs=[],
                 leased_by=leased_by,
                 lease_expires_at=(utcnow() + expires_in) if leased_by else None,
             )

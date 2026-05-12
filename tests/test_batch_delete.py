@@ -1,4 +1,4 @@
-"""Hard-delete batch endpoint.
+﻿"""Hard-delete batch endpoint.
 
 Cancel-then-delete is the supported workflow. The endpoint refuses by default
 when any granule is still mid-flight on a worker (downloading / downloaded /
@@ -46,8 +46,8 @@ async def _seed_full_batch(batch_id: str = "b") -> None:
     g1, g2 = f"{batch_id}:g1", f"{batch_id}:g2"
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id=batch_id, name="t", bundle_ref="orch:x@1"))
-        s.add(Granule(granule_id=g1, batch_id=batch_id, state=GranuleState.UPLOADED.value, inputs_json="[]"))
-        s.add(Granule(granule_id=g2, batch_id=batch_id, state=GranuleState.ACKED.value, inputs_json="[]"))
+        s.add(Granule(granule_id=g1, batch_id=batch_id, state=GranuleState.UPLOADED.value, inputs=[]))
+        s.add(Granule(granule_id=g2, batch_id=batch_id, state=GranuleState.ACKED.value, inputs=[]))
         s.add(
             GranuleObject(
                 granule_id=g1,
@@ -127,7 +127,7 @@ async def test_delete_inflight_batch_refused_without_force(client):
                 granule_id="g1",
                 batch_id="b",
                 state=GranuleState.PROCESSING.value,
-                inputs_json="[]",
+                inputs=[],
                 leased_by="w1",
                 lease_expires_at=utcnow(),
             )
@@ -149,7 +149,7 @@ async def test_delete_inflight_batch_with_force_succeeds(client):
                 granule_id="g1",
                 batch_id="b",
                 state=GranuleState.PROCESSING.value,
-                inputs_json="[]",
+                inputs=[],
                 leased_by="w1",
                 lease_expires_at=utcnow(),
             )
@@ -171,7 +171,7 @@ async def test_delete_pending_batch_succeeds_without_force(client):
                 granule_id="g1",
                 batch_id="b",
                 state=GranuleState.PENDING.value,
-                inputs_json="[]",
+                inputs=[],
             )
         )
         await s.commit()

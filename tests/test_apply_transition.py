@@ -1,4 +1,4 @@
-"""Unit tests for the handler-layer Transition applier."""
+﻿"""Unit tests for the handler-layer Transition applier."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ async def session(tmp_path, patch_settings):
                     granule_id="g1",
                     batch_id="b",
                     state=GranuleState.QUEUED.value,
-                    inputs_json="[]",
+                    inputs=[],
                     leased_by="w1",
                     lease_expires_at=utcnow(),
                 )

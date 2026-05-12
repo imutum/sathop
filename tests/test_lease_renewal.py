@@ -1,4 +1,4 @@
-"""Lease auto-renewal on heartbeat + worker-side LeaseRevoked handling.
+﻿"""Lease auto-renewal on heartbeat + worker-side LeaseRevoked handling.
 
 Heartbeat doubles as a keep-alive: every check-in pushes the
 `lease_expires_at` of every granule the worker holds forward by
@@ -61,7 +61,7 @@ async def _seed_worker_with_leased_granules(
                     granule_id=gid,
                     batch_id="b",
                     state=st,
-                    inputs_json="[]",
+                    inputs=[],
                     leased_by=worker_id,
                     lease_expires_at=expires_at,
                 )
@@ -122,7 +122,7 @@ async def test_heartbeat_does_not_renew_other_workers_leases(client):
                 granule_id="g-w2",
                 batch_id="b",
                 state=GranuleState.DOWNLOADING.value,
-                inputs_json="[]",
+                inputs=[],
                 leased_by="w2",
                 lease_expires_at=other_expiry,
             )
@@ -149,7 +149,7 @@ async def test_heartbeat_skips_pending_granules_for_renewal(client):
                 granule_id="g-pending",
                 batch_id="b",
                 state=GranuleState.PENDING.value,
-                inputs_json="[]",
+                inputs=[],
                 leased_by=None,
                 lease_expires_at=None,
             )
@@ -259,7 +259,7 @@ async def test_heartbeat_returns_revoked_for_unleased_active_granule(client):
                 granule_id="g-cancelled",
                 batch_id="b",
                 state=GranuleState.BLACKLISTED.value,
-                inputs_json="[]",
+                inputs=[],
                 leased_by=None,
                 lease_expires_at=None,
             )
@@ -292,7 +292,7 @@ async def test_heartbeat_returns_revoked_for_other_workers_lease(client):
                 granule_id="g-w2",
                 batch_id="b",
                 state=GranuleState.DOWNLOADING.value,
-                inputs_json="[]",
+                inputs=[],
                 leased_by="w2",
                 lease_expires_at=utcnow() + timedelta(minutes=30),
             )

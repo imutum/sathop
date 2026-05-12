@@ -1,4 +1,4 @@
-"""Coverage for the per-batch ETA helper that powers BatchSummary.eta_seconds."""
+﻿"""Coverage for the per-batch ETA helper that powers BatchSummary.eta_seconds."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ async def _seed_batch(batch_id: str, *, in_flight: int, uploads: int, span_sec: 
                     granule_id=f"{batch_id}:g{i}",
                     batch_id=batch_id,
                     state=GranuleState.PENDING.value,
-                    inputs_json="[]",
+                    inputs=[],
                 )
             )
         if uploads > 0:
@@ -46,7 +46,7 @@ async def _seed_batch(batch_id: str, *, in_flight: int, uploads: int, span_sec: 
                         granule_id=gid,
                         batch_id=batch_id,
                         state=GranuleState.ACKED.value,
-                        inputs_json="[]",
+                        inputs=[],
                     )
                 )
                 started = t0 + timedelta(seconds=span_sec * i / max(uploads - 1, 1))
@@ -116,7 +116,7 @@ async def test_uploaded_state_not_in_remaining(db):
                 granule_id="b-up:upl",
                 batch_id="b-up",
                 state=GranuleState.UPLOADED.value,
-                inputs_json="[]",
+                inputs=[],
             )
         )
         await s.commit()

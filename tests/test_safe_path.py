@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from sathop.orchestrator.bundle_schema import parse_shared_files
+from sathop.shared.bundle_manifest import parse_shared_files
 from sathop.shared.protocol import InputSpec
 from sathop.shared.safe_path import is_safe_name, safe_join
 

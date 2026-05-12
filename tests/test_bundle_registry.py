@@ -40,7 +40,9 @@ def _make_zip(
     inputs_yaml: str = "inputs:\n  slots:\n    - name: primary\n      product: any\n",
 ) -> bytes:
     body = (
-        f"name: {name}\nversion: {version}\n" + inputs_yaml + "execution:\n  entrypoint: 'python run.py'\n"
+        f"name: {name}\nversion: '{version}'\n"
+        + inputs_yaml
+        + "execution:\n  entrypoint: 'python run.py'\n"
         "outputs:\n  watch_dir: output\n"
         f"{manifest_extra_yaml}"
     )
@@ -104,7 +106,7 @@ async def test_upload_rejects_zip_without_manifest(client):
 async def test_upload_rejects_missing_manifest_keys(client):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("manifest.yaml", "name: x\nversion: 0.1\n")  # missing execution, outputs
+        zf.writestr("manifest.yaml", "name: x\nversion: '0.1'\n")  # missing execution, outputs
     r = client.post("/api/bundles", files={"file": ("b.zip", buf.getvalue(), "application/zip")})
     assert r.status_code == 422
 
@@ -114,7 +116,7 @@ async def test_upload_rejects_missing_entrypoint(client):
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr(
             "manifest.yaml",
-            "name: x\nversion: 0.1\nexecution:\n  timeout_sec: 60\noutputs:\n  watch_dir: out\n",
+            "name: x\nversion: '0.1'\nexecution:\n  timeout_sec: 60\noutputs:\n  watch_dir: out\n",
         )
     r = client.post("/api/bundles", files={"file": ("b.zip", buf.getvalue(), "application/zip")})
     assert r.status_code == 422
@@ -168,7 +170,7 @@ async def test_upload_rejects_missing_inputs_slots(client):
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr(
             "manifest.yaml",
-            "name: x\nversion: 0.1\nexecution:\n  entrypoint: 'true'\n"
+            "name: x\nversion: '0.1'\nexecution:\n  entrypoint: 'true'\n"
             "outputs:\n  watch_dir: out\n",  # no inputs
         )
     r = client.post("/api/bundles", files={"file": ("b.zip", buf.getvalue(), "application/zip")})
@@ -349,7 +351,7 @@ async def test_read_file_binary_returns_empty_content_flag(client):
     with zipfile.ZipFile(out, "w") as zf:
         zf.writestr(
             "manifest.yaml",
-            "name: demo\nversion: 5.3\n"
+            "name: demo\nversion: '5.3'\n"
             "inputs:\n  slots:\n    - name: p\n      product: any\n"
             "execution:\n  entrypoint: 'true'\n"
             "outputs:\n  watch_dir: output\n",
@@ -400,7 +402,7 @@ async def test_delete_preserves_shared_blob_when_other_rows_use_it(client):
                 version="1.0",
                 sha256=sha,
                 size=len(blob),
-                manifest_json="{}",
+                manifest={},
                 uploaded_at=utcnow(),
             )
         )
@@ -410,7 +412,7 @@ async def test_delete_preserves_shared_blob_when_other_rows_use_it(client):
                 version="1.0",
                 sha256=sha,
                 size=len(blob),
-                manifest_json="{}",
+                manifest={},
                 uploaded_at=utcnow(),
             )
         )

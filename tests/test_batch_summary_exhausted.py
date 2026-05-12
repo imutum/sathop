@@ -1,4 +1,4 @@
-"""BatchSummary now carries an authoritative `objects_exhausted` count so the
+﻿"""BatchSummary now carries an authoritative `objects_exhausted` count so the
 batches list / detail can flag stuck-delivery batches without paging through
 the granules endpoint (which caps at 200 rows).
 """
@@ -38,7 +38,7 @@ async def _seed_batch(batch_id: str, *, exhausted: int = 0, healthy: int = 0, ac
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id=batch_id, name="t", bundle_ref="orch:x@1"))
         gid = f"{batch_id}:g"
-        s.add(Granule(granule_id=gid, batch_id=batch_id, state=GranuleState.UPLOADED.value, inputs_json="[]"))
+        s.add(Granule(granule_id=gid, batch_id=batch_id, state=GranuleState.UPLOADED.value, inputs=[]))
         for i in range(exhausted):
             s.add(
                 GranuleObject(
@@ -111,7 +111,7 @@ async def test_summary_field_present_even_with_no_objects(client):
     not missing — the UI's badge logic relies on `> 0` to render."""
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id="b", name="t", bundle_ref="orch:x@1"))
-        s.add(Granule(granule_id="b:g", batch_id="b", state=GranuleState.PENDING.value, inputs_json="[]"))
+        s.add(Granule(granule_id="b:g", batch_id="b", state=GranuleState.PENDING.value, inputs=[]))
         await s.commit()
 
     body = client.get("/api/batches/b").json()

@@ -1,4 +1,4 @@
-"""/api/events: verify the batch_id join — events tied to a granule carry the
+﻿"""/api/events: verify the batch_id join — events tied to a granule carry the
 parent batch_id so the UI can deep-link straight to the batch-detail page."""
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ async def client(tmp_path, patch_settings):
 async def test_event_with_granule_carries_batch_id(client):
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id="b1", name="n", bundle_ref="local:x"))
-        s.add(Granule(granule_id="g1", batch_id="b1", state=GranuleState.FAILED.value, inputs_json="[]"))
+        s.add(Granule(granule_id="g1", batch_id="b1", state=GranuleState.FAILED.value, inputs=[]))
         s.add(Event(source="worker-a", level="error", granule_id="g1", message="oops"))
         s.add(Event(source="orchestrator", level="info", granule_id=None, message="started"))
         await s.commit()
@@ -79,8 +79,8 @@ async def test_granule_id_filter_isolates_one_granule(client):
     """BatchDetail's expanded-row events panel relies on granule_id= filter."""
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id="b1", name="n", bundle_ref="local:x"))
-        s.add(Granule(granule_id="b1:g-a", batch_id="b1", state=GranuleState.FAILED.value, inputs_json="[]"))
-        s.add(Granule(granule_id="b1:g-b", batch_id="b1", state=GranuleState.ACKED.value, inputs_json="[]"))
+        s.add(Granule(granule_id="b1:g-a", batch_id="b1", state=GranuleState.FAILED.value, inputs=[]))
+        s.add(Granule(granule_id="b1:g-b", batch_id="b1", state=GranuleState.ACKED.value, inputs=[]))
         for i in range(3):
             s.add(Event(source="w", level="error", granule_id="b1:g-a", message=f"a-err-{i}"))
         s.add(Event(source="w", level="info", granule_id="b1:g-b", message="b-ok"))

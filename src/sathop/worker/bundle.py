@@ -21,9 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-import yaml
-
 from sathop.shared.bundle_archive import detect_wrapper_dir
+from sathop.shared.bundle_manifest import BundleManifest, RequirementsConfig
 from sathop.shared.http import make_sync_orch_client
 from sathop.shared.locks import NamedLockRegistry
 from sathop.shared.protocol import BUNDLE_REF_PREFIX, parse_bundle_ref
@@ -36,33 +35,6 @@ log = logging.getLogger("sathop.worker.bundle")
 _LAST_USED_DIR = ".last_used"
 
 _ref_locks = NamedLockRegistry()
-
-
-@dataclass(frozen=True)
-class BundleManifest:
-    name: str
-    version: str
-    inputs: dict
-    execution: dict
-    outputs: dict
-    requirements: dict
-    shared_files: list[str]
-
-    @classmethod
-    def load(cls, path: Path) -> BundleManifest:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        raw_shared = data.get("shared_files") or []
-        if not isinstance(raw_shared, list) or not all(isinstance(x, str) and x for x in raw_shared):
-            raise ValueError("manifest.shared_files must be a list of non-empty strings")
-        return cls(
-            name=data["name"],
-            version=data["version"],
-            inputs=data.get("inputs", {}),
-            execution=data["execution"],
-            outputs=data["outputs"],
-            requirements=data.get("requirements", {}),
-            shared_files=list(raw_shared),
-        )
 
 
 @dataclass(frozen=True)
@@ -100,9 +72,9 @@ def ensure(
             _fetch_from_orch(orchestrator_url, token, name, version, bundle_dir)
 
         _touch_last_used(venv_root, name, version)
-        manifest = BundleManifest.load(bundle_dir / "manifest.yaml")
+        manifest = BundleManifest.from_yaml(bundle_dir / "manifest.yaml")
         python = _ensure_runtime(manifest, bundle_dir, venv_root)
-        shared_sync.sync(manifest.shared_files, shared_root, orchestrator_url, token)
+        shared_sync.sync(list(manifest.shared_files), shared_root, orchestrator_url, token)
         return BundleHandle(manifest=manifest, root=bundle_dir, python=python, shared_dir=shared_root)
 
 
@@ -222,14 +194,13 @@ def _ensure_runtime(manifest: BundleManifest, bundle_dir: Path, venv_root: Path)
     return _ensure_venv(manifest, bundle_dir, venv_root)
 
 
-def python_deps_source(requirements: dict, bundle_dir: Path) -> PythonDepsSource | None:
+def python_deps_source(requirements: RequirementsConfig, bundle_dir: Path) -> PythonDepsSource | None:
     req_file = bundle_dir / "requirements.txt"
     if req_file.exists():
         lines = req_file.read_text(encoding="utf-8").splitlines()
         values = tuple(line.strip() for line in lines if _meaningful_requirement(line))
         return PythonDepsSource("requirements.txt", values, req_file) if values else None
-    pip_deps = tuple(requirements.get("pip", []) or [])
-    return PythonDepsSource("manifest.pip", pip_deps) if pip_deps else None
+    return PythonDepsSource("manifest.pip", requirements.pip) if requirements.pip else None
 
 
 _PIP_OPTION_PREFIXES = (

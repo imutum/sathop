@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import json
 import os
 import secrets
 import zipfile
@@ -24,7 +23,7 @@ from sathop.shared.bundle_archive import detect_wrapper_dir
 from sathop.shared.protocol import BundleDetail, BundleSummary, format_bundle_ref
 from sathop.shared.state_machine import Scope
 
-from ..bundle_schema import InputsSchema, parse_shared_files
+from sathop.shared.bundle_manifest import BundleManifest, parse_shared_files
 from ..config import require_token, settings
 from ..db import Batch, Bundle, SharedFile, session, utcnow
 from ..pubsub import commit_and_publish
@@ -34,11 +33,13 @@ from ._helpers import get_or_404
 router = APIRouter(prefix="/bundles", tags=["bundles"], dependencies=[Depends(require_token)])
 
 
-REQUIRED_MANIFEST_KEYS = {"name", "version", "execution", "outputs"}
-
-
 def _parse_zip(data: bytes) -> dict:
-    """Return the parsed manifest. Raises HTTPException on any shape problem."""
+    """Return the parsed manifest dict. Raises HTTPException on any shape problem.
+
+    Strict-parsed through `BundleManifest.parse` so every field declared in
+    `shared/bundle_manifest.py` is validated; the dict (not the typed value) is
+    returned because the orchestrator stores it verbatim as the `Bundle.manifest`
+    JSON column for the UI to consume."""
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
@@ -64,23 +65,10 @@ def _parse_zip(data: bytes) -> dict:
         manifest = yaml.safe_load(raw)
     except yaml.YAMLError as e:
         raise HTTPException(422, f"manifest.yaml is not valid YAML: {e}")
-    if not isinstance(manifest, dict):
-        raise HTTPException(422, "manifest.yaml must be a mapping at the top level")
-    missing = REQUIRED_MANIFEST_KEYS - manifest.keys()
-    if missing:
-        raise HTTPException(422, f"manifest missing required keys: {sorted(missing)}")
-    if "entrypoint" not in manifest.get("execution", {}):
-        raise HTTPException(422, "manifest.execution.entrypoint is required")
-    if "inputs" not in manifest:
-        raise HTTPException(422, "manifest.inputs is required")
     try:
-        InputsSchema.parse(manifest)
+        BundleManifest.parse(manifest)
     except ValueError as e:
-        raise HTTPException(422, f"manifest.inputs invalid: {e}")
-    try:
-        parse_shared_files(manifest)
-    except ValueError as e:
-        raise HTTPException(422, f"manifest.shared_files invalid: {e}")
+        raise HTTPException(422, str(e))
     return manifest
 
 
@@ -92,7 +80,7 @@ def _detail(b: Bundle, in_use_count: int = 0) -> BundleDetail:
         size=b.size,
         description=b.description,
         uploaded_at=b.uploaded_at,
-        manifest=json.loads(b.manifest_json),
+        manifest=b.manifest,
         in_use_count=in_use_count,
     )
 
@@ -155,7 +143,7 @@ async def upload(
         version=version,
         sha256=sha,
         size=len(data),
-        manifest_json=json.dumps(manifest, ensure_ascii=False),
+        manifest=manifest,
         description=description,
         uploaded_at=utcnow(),
     )

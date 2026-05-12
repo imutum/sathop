@@ -1,4 +1,4 @@
-"""GET /api/batches/{bid}/granules: listing, state filter, pagination."""
+﻿"""GET /api/batches/{bid}/granules: listing, state filter, pagination."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ async def _seed(rows: list[tuple[str, str, int]]):
                     granule_id=gid,
                     batch_id="b",
                     state=state,
-                    inputs_json="[]",
+                    inputs=[],
                     updated_at=now - timedelta(minutes=ago),
                 )
             )

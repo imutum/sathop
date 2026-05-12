@@ -1,4 +1,4 @@
-"""Granule-id auto-prefixing in POST /api/batches and POST /api/batches/{id}/granules.
+﻿"""Granule-id auto-prefixing in POST /api/batches and POST /api/batches/{id}/granules.
 
 Keeps the global single-column PK on `granules.granule_id` while letting users
 pick short IDs that only need to be unique inside their batch."""
@@ -13,11 +13,13 @@ from sathop.orchestrator import db as orch_db
 from sathop.orchestrator.db import Bundle, Granule, utcnow
 from sathop.orchestrator.main import app
 
-_MINIMAL_MANIFEST = (
-    '{"name":"b","version":"1.0","execution":{"entrypoint":"true"},'
-    '"outputs":{"watch_dir":"output"},'
-    '"inputs":{"slots":[{"name":"primary","product":"any"}]}}'
-)
+_MINIMAL_MANIFEST = {
+    "name": "b",
+    "version": "1.0",
+    "execution": {"entrypoint": "true"},
+    "outputs": {"watch_dir": "output"},
+    "inputs": {"slots": [{"name": "primary", "product": "any"}]},
+}
 
 
 async def _register_bundle(name: str = "b", version: str = "1.0") -> None:
@@ -28,7 +30,7 @@ async def _register_bundle(name: str = "b", version: str = "1.0") -> None:
                 version=version,
                 sha256="x" * 64,
                 size=1,
-                manifest_json=_MINIMAL_MANIFEST,
+                manifest=_MINIMAL_MANIFEST,
                 uploaded_at=utcnow(),
             )
         )

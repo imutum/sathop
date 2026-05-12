@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from sathop.orchestrator.bundle_schema import InputsSchema, validate_granule
+from sathop.orchestrator.bundle_schema import validate_granule
+from sathop.shared.bundle_manifest import InputsSchema
 
 
 def _manifest(slots: list[dict], meta: list[dict] | None = None) -> dict:

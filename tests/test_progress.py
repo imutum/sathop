@@ -1,4 +1,4 @@
-"""Granule progress ingress + timeline query on the orchestrator side."""
+﻿"""Granule progress ingress + timeline query on the orchestrator side."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ async def _seed_batch_and_granule(batch_id: str, granule_id: str) -> None:
                 granule_id=granule_id,
                 batch_id=batch_id,
                 state=GranuleState.PROCESSING.value,
-                inputs_json="[]",
+                inputs=[],
             )
         )
         await s.commit()
@@ -90,7 +90,7 @@ async def test_batch_latest_returns_last_row_per_granule(client):
                     granule_id=gid,
                     batch_id="b1",
                     state=GranuleState.PROCESSING.value,
-                    inputs_json="[]",
+                    inputs=[],
                 )
             )
         await s.commit()

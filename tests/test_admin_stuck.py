@@ -1,4 +1,4 @@
-"""GET /api/admin/stuck — top-N stuck granules across every non-terminal state.
+﻿"""GET /api/admin/stuck — top-N stuck granules across every non-terminal state.
 Powers the Dashboard's stuck-granule drill-down so operators can actually see
 which granules to investigate, instead of just the count."""
 
@@ -41,7 +41,7 @@ async def _seed(rows: list[tuple[str, str, float]]) -> None:
                     granule_id=gid,
                     batch_id="b",
                     state=state,
-                    inputs_json="[]",
+                    inputs=[],
                     updated_at=now - timedelta(hours=age_h),
                 )
             )

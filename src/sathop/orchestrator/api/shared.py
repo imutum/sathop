@@ -11,7 +11,6 @@ sha256 via `/meta` and refetch on next lease."""
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import tempfile
 from datetime import datetime
@@ -23,9 +22,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sathop.shared.bundle_manifest import parse_shared_files
 from sathop.shared.state_machine import Scope
 
-from ..bundle_schema import parse_shared_files
 from ..config import require_token, require_token_or_query, settings
 from ..db import Bundle, SharedFile, session, utcnow
 from ..pubsub import commit_and_publish, publish_scopes
@@ -186,7 +185,7 @@ async def delete(name: str, s: AsyncSession = Depends(session)) -> dict:
     # rather than let a lease crash on a silently-missing shared file.
     bundles = (await s.execute(select(Bundle))).scalars().all()
     referrers = [
-        f"{b.name}@{b.version}" for b in bundles if name in parse_shared_files(json.loads(b.manifest_json))
+        f"{b.name}@{b.version}" for b in bundles if name in parse_shared_files(b.manifest)
     ]
     if referrers:
         sample = ", ".join(referrers[:5])

@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from sathop.worker.bundle import BundleHandle, BundleManifest
+from sathop.shared.bundle_manifest import BundleManifest
+from sathop.worker.bundle import BundleHandle
 from sathop.worker.processor import run_bundle
 
 
@@ -32,10 +33,11 @@ def _make_bundle(
         "version": "0.0.1",
         "execution": {"entrypoint": entrypoint, "timeout_sec": timeout_sec},
         "outputs": {"watch_dir": watch_dir, **({"extensions": extensions} if extensions else {})},
+        "inputs": {"slots": [{"name": "primary", "product": "any"}]},
     }
     (root / "manifest.yaml").write_text(yaml.safe_dump(manifest_data), encoding="utf-8")
     (root / "run.py").write_text(script, encoding="utf-8")
-    manifest = BundleManifest.load(root / "manifest.yaml")
+    manifest = BundleManifest.from_yaml(root / "manifest.yaml")
     shared = tmp_path / "shared"
     shared.mkdir(exist_ok=True)
     # Point runtime python at the test interpreter; processor PATH-prepends its parent.
@@ -165,13 +167,14 @@ async def test_custom_env_in_manifest_merged(tmp_path, work_root):
                     "timeout_sec": 30,
                 },
                 "outputs": {"watch_dir": "output"},
+                "inputs": {"slots": [{"name": "primary", "product": "any"}]},
             }
         ),
         encoding="utf-8",
     )
     (root / "run.py").write_text(script, encoding="utf-8")
     h = BundleHandle(
-        manifest=BundleManifest.load(root / "manifest.yaml"),
+        manifest=BundleManifest.from_yaml(root / "manifest.yaml"),
         root=root,
         python=Path(sys.executable),
         shared_dir=tmp_path / "shared",
@@ -202,13 +205,14 @@ async def test_batch_env_overrides_bundle_env(tmp_path, work_root):
                     "timeout_sec": 30,
                 },
                 "outputs": {"watch_dir": "output"},
+                "inputs": {"slots": [{"name": "primary", "product": "any"}]},
             }
         ),
         encoding="utf-8",
     )
     (root / "run.py").write_text(script, encoding="utf-8")
     h = BundleHandle(
-        manifest=BundleManifest.load(root / "manifest.yaml"),
+        manifest=BundleManifest.from_yaml(root / "manifest.yaml"),
         root=root,
         python=Path(sys.executable),
         shared_dir=tmp_path / "shared",

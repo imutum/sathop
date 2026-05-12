@@ -1,4 +1,4 @@
-"""Per-worker max-inflight cap on /api/workers/lease.
+﻿"""Per-worker max-inflight cap on /api/workers/lease.
 
 Covers:
   • cap=0 (default) leaves behavior unchanged
@@ -53,7 +53,7 @@ async def _seed_granule(
                 granule_id=gid,
                 batch_id=batch_id,
                 state=state,
-                inputs_json="[]",
+                inputs=[],
                 leased_by=leased_by,
                 lease_expires_at=utcnow() if leased_by else None,
             )
