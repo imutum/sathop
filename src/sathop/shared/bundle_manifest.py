@@ -38,6 +38,32 @@ import yaml
 
 from sathop.shared.safe_path import is_safe_name
 
+RE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+RE_VERSION = re.compile(r"^[A-Za-z0-9._+-]+$")
+
+
+def parse_meta(data: dict) -> tuple[str, str, str | None]:
+    """Strict parse of top-level `name` / `version` / `description`.
+
+    Authoritative regex constraints live here so every entry point
+    (HTTP upload, CLI validate, batch create) agrees on what a legal
+    Bundle identifier looks like. Returns the tuple; raises ValueError
+    on the first shape problem."""
+    name = data.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError("manifest.name must be a non-empty string")
+    if not RE_NAME.fullmatch(name):
+        raise ValueError(f"manifest.name must match {RE_NAME.pattern}, got {name!r}")
+    version = data.get("version")
+    if not isinstance(version, str) or not version:
+        raise ValueError("manifest.version must be a non-empty string")
+    if not RE_VERSION.fullmatch(version):
+        raise ValueError(f"manifest.version must match {RE_VERSION.pattern}, got {version!r}")
+    description = data.get("description")
+    if description is not None and not isinstance(description, str):
+        raise ValueError("manifest.description must be a string if present")
+    return name, version, description
+
 
 @dataclass(frozen=True)
 class ExecutionConfig:
@@ -249,19 +275,11 @@ class BundleManifest:
         """Strict parse from a dict. Raises ValueError on the first shape problem.
 
         For the CLI's "show all errors at once" UX, call individual section parsers
-        (`ExecutionConfig.parse`, `OutputsConfig.parse`, etc.) instead of this entry
-        point — each one raises only on its own section."""
+        (`parse_meta`, `ExecutionConfig.parse`, `OutputsConfig.parse`, etc.) directly
+        — each one raises only on its own section."""
         if not isinstance(data, dict):
             raise ValueError("manifest top level must be a mapping")
-        name = data.get("name")
-        if not isinstance(name, str) or not name:
-            raise ValueError("manifest.name must be a non-empty string")
-        version = data.get("version")
-        if not isinstance(version, str) or not version:
-            raise ValueError("manifest.version must be a non-empty string")
-        description = data.get("description")
-        if description is not None and not isinstance(description, str):
-            raise ValueError("manifest.description must be a string if present")
+        name, version, description = parse_meta(data)
         return cls(
             name=name,
             version=version,

@@ -19,10 +19,10 @@ import threading
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from sathop.shared.bundle_archive import detect_wrapper_dir
-from sathop.shared.bundle_manifest import BundleManifest, RequirementsConfig
+from sathop.shared.bundle_manifest import BundleManifest
+from sathop.shared.bundle_python_deps import python_deps_source
 from sathop.shared.http import make_sync_orch_client
 from sathop.shared.locks import NamedLockRegistry
 from sathop.shared.protocol import BUNDLE_REF_PREFIX, parse_bundle_ref
@@ -43,18 +43,6 @@ class BundleHandle:
     root: Path
     python: Path
     shared_dir: Path
-
-
-@dataclass(frozen=True)
-class PythonDepsSource:
-    kind: Literal["requirements.txt", "manifest.pip"]
-    values: tuple[str, ...]
-    requirements_file: Path | None = None
-
-    def pip_install_args(self) -> list[str]:
-        if self.requirements_file is not None:
-            return ["-r", str(self.requirements_file)]
-        return list(self.values)
 
 
 def ensure(
@@ -192,32 +180,6 @@ def _ensure_runtime(manifest: BundleManifest, bundle_dir: Path, venv_root: Path)
     if python_deps_source(manifest.requirements, bundle_dir) is None:
         return Path(sys.executable)
     return _ensure_venv(manifest, bundle_dir, venv_root)
-
-
-def python_deps_source(requirements: RequirementsConfig, bundle_dir: Path) -> PythonDepsSource | None:
-    req_file = bundle_dir / "requirements.txt"
-    if req_file.exists():
-        lines = req_file.read_text(encoding="utf-8").splitlines()
-        values = tuple(line.strip() for line in lines if _meaningful_requirement(line))
-        return PythonDepsSource("requirements.txt", values, req_file) if values else None
-    return PythonDepsSource("manifest.pip", requirements.pip) if requirements.pip else None
-
-
-_PIP_OPTION_PREFIXES = (
-    "--extra-index-url",
-    "--find-links",
-    "--index-url",
-    "--no-index",
-    "--require-hashes",
-    "--trusted-host",
-    "-f",
-    "-i",
-)
-
-
-def _meaningful_requirement(line: str) -> bool:
-    stripped = line.strip()
-    return bool(stripped and not stripped.startswith("#") and not stripped.startswith(_PIP_OPTION_PREFIXES))
 
 
 def _ensure_venv(manifest: BundleManifest, bundle_dir: Path, venv_root: Path) -> Path:

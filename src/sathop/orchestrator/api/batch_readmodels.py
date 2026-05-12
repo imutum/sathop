@@ -1,4 +1,16 @@
-"""Batch API read-model helpers."""
+"""Batch view: the canonical read-model for `BatchSummary` and `GranuleRow`.
+
+Two layers of public entry:
+
+- **High-level** (`summary`, `summaries`, `granule_rows`) — what handlers reach
+  for. Each one returns a fully composed DTO; callers never need to know
+  about the underlying aggregate queries or their composition order.
+
+- **Primitive** (`state_counts`, `eta_seconds`) — the bulk aggregates the
+  high-level entries compose internally. Kept public because the ETA
+  extrapolation is non-trivial and deserves direct test coverage; reach
+  for these only when a caller genuinely wants raw counts, not a view.
+"""
 
 from __future__ import annotations
 
@@ -12,46 +24,53 @@ from ..config import settings
 from ..db import Batch, Granule, GranuleObject, GranuleStageTiming
 
 
-def batch_summary(
-    batch: Batch,
-    *,
-    counts: dict[str, int],
-    objects_exhausted: int = 0,
-    eta_seconds: int | None = None,
-) -> BatchSummary:
-    return BatchSummary(
-        batch_id=batch.batch_id,
-        name=batch.name,
-        bundle_ref=batch.bundle_ref,
-        target_receiver_id=batch.target_receiver_id,
-        status=batch.status,
-        created_at=batch.created_at,
-        counts=counts,
-        objects_exhausted=objects_exhausted,
-        eta_seconds=eta_seconds,
-    )
+async def summaries(s: AsyncSession, batches: list[Batch]) -> list[BatchSummary]:
+    """Compose `BatchSummary` for each given Batch in one bulk pass.
+
+    Three aggregates run once each (state counts, exhausted-pull objects,
+    ETA extrapolation) and are zipped onto the input order. Empty input
+    returns []."""
+    if not batches:
+        return []
+    ids = [b.batch_id for b in batches]
+    counts_map = await state_counts(s, ids)
+    exh_map = await _exhausted_by_batch(s, ids)
+    eta_map = await eta_seconds(s, counts_map)
+    return [
+        _build_summary(
+            b,
+            counts=counts_map.get(b.batch_id, {}),
+            objects_exhausted=exh_map.get(b.batch_id, 0),
+            eta_seconds=eta_map.get(b.batch_id),
+        )
+        for b in batches
+    ]
 
 
-def granule_row(granule: Granule, *, objects_exhausted: int = 0) -> GranuleRow:
-    return GranuleRow(
-        granule_id=granule.granule_id,
-        batch_id=granule.batch_id,
-        state=granule.state,
-        retry_count=granule.retry_count,
-        leased_by=granule.leased_by,
-        error=granule.error,
-        stdout_tail=granule.stdout_tail,
-        stderr_tail=granule.stderr_tail,
-        updated_at=granule.updated_at,
-        objects_exhausted=objects_exhausted,
-    )
+async def summary(s: AsyncSession, batch: Batch) -> BatchSummary:
+    """Single-Batch convenience: delegates to `summaries([batch])`."""
+    return (await summaries(s, [batch]))[0]
 
 
-async def batch_state_counts(s: AsyncSession, batch_id: str) -> dict[str, int]:
-    return (await batch_state_counts_bulk(s, [batch_id]))[batch_id]
+def summary_just_created(batch: Batch, *, counts: dict[str, int]) -> BatchSummary:
+    """Fresh-from-create view: skips the exhausted/ETA queries because a
+    just-committed Batch has neither. Caller supplies the counts (typically
+    `await state_counts(s, [batch.batch_id])[batch.batch_id]`)."""
+    return _build_summary(batch, counts=counts, objects_exhausted=0, eta_seconds=None)
 
 
-async def batch_state_counts_bulk(s: AsyncSession, batch_ids: list[str]) -> dict[str, dict[str, int]]:
+async def granule_rows(s: AsyncSession, granules: list[Granule]) -> list[GranuleRow]:
+    """Compose `GranuleRow` for each Granule, joining the per-Granule
+    exhausted-pull-object count in one bulk query."""
+    if not granules:
+        return []
+    exh_map = await _exhausted_by_granule(s, [g.granule_id for g in granules])
+    return [_build_granule_row(g, objects_exhausted=exh_map.get(g.granule_id, 0)) for g in granules]
+
+
+async def state_counts(s: AsyncSession, batch_ids: list[str]) -> dict[str, dict[str, int]]:
+    """Per-Batch state-bucket counts. Returns {} for empty input; for each
+    requested batch_id, returns its (possibly empty) state→count mapping."""
     if not batch_ids:
         return {}
     stmt = (
@@ -65,24 +84,16 @@ async def batch_state_counts_bulk(s: AsyncSession, batch_ids: list[str]) -> dict
     return out
 
 
-async def batch_exhausted_objects(s: AsyncSession, batch_id: str) -> int:
-    return int(
-        await s.scalar(
-            select(func.count(GranuleObject.id))
-            .join(Granule, GranuleObject.granule_id == Granule.granule_id)
-            .where(Granule.batch_id == batch_id)
-            .where(GranuleObject.acked_at.is_(None))
-            .where(GranuleObject.deleted_at.is_(None))
-            .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
-        )
-        or 0
-    )
-
-
-async def batch_eta_seconds_bulk(
+async def eta_seconds(
     s: AsyncSession,
     counts_map: dict[str, dict[str, int]],
 ) -> dict[str, int | None]:
+    """Extrapolate remaining-seconds per Batch from closed upload-stage timings.
+
+    Heuristic: take the wall-time span between the earliest and latest stage
+    rows for the Batch, divide by the count of closed upload stages, then
+    multiply by the in-flight Granule count. Returns None when there's not
+    enough timing data (<3 closed uploads) or nothing left in flight."""
     if not counts_map:
         return {}
     batch_ids = list(counts_map)
@@ -114,7 +125,42 @@ async def batch_eta_seconds_bulk(
     return out
 
 
-async def batch_exhausted_objects_bulk(s: AsyncSession, batch_ids: list[str]) -> dict[str, int]:
+def _build_summary(
+    batch: Batch,
+    *,
+    counts: dict[str, int],
+    objects_exhausted: int,
+    eta_seconds: int | None,
+) -> BatchSummary:
+    return BatchSummary(
+        batch_id=batch.batch_id,
+        name=batch.name,
+        bundle_ref=batch.bundle_ref,
+        target_receiver_id=batch.target_receiver_id,
+        status=batch.status,
+        created_at=batch.created_at,
+        counts=counts,
+        objects_exhausted=objects_exhausted,
+        eta_seconds=eta_seconds,
+    )
+
+
+def _build_granule_row(granule: Granule, *, objects_exhausted: int) -> GranuleRow:
+    return GranuleRow(
+        granule_id=granule.granule_id,
+        batch_id=granule.batch_id,
+        state=granule.state,
+        retry_count=granule.retry_count,
+        leased_by=granule.leased_by,
+        error=granule.error,
+        stdout_tail=granule.stdout_tail,
+        stderr_tail=granule.stderr_tail,
+        updated_at=granule.updated_at,
+        objects_exhausted=objects_exhausted,
+    )
+
+
+async def _exhausted_by_batch(s: AsyncSession, batch_ids: list[str]) -> dict[str, int]:
     if not batch_ids:
         return {}
     stmt = (
@@ -129,7 +175,7 @@ async def batch_exhausted_objects_bulk(s: AsyncSession, batch_ids: list[str]) ->
     return {bid: n for bid, n in (await s.execute(stmt)).all()}
 
 
-async def exhausted_objects_by_granule(s: AsyncSession, granule_ids: list[str]) -> dict[str, int]:
+async def _exhausted_by_granule(s: AsyncSession, granule_ids: list[str]) -> dict[str, int]:
     if not granule_ids:
         return {}
     stmt = (

@@ -73,7 +73,11 @@ def test_missing_required_keys(tmp_path: Path):
     bundle = _write(tmp_path / "b", "name: demo\nversion: '0.1'\n")
     r = validator.validate(bundle)
     assert not r.ok
-    assert any("missing required keys" in e for e in r.errors)
+    # Section parsers each surface their own absence — no top-level "missing
+    # required keys" join, but the user sees every missing section at once.
+    joined = "\n".join(r.errors)
+    assert "manifest.execution" in joined
+    assert "manifest.inputs" in joined
 
 
 def test_bad_name_pattern(tmp_path: Path):

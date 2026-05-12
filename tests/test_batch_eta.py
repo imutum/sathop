@@ -7,7 +7,7 @@ from datetime import timedelta
 import pytest
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.api.batch_readmodels import batch_eta_seconds_bulk, batch_state_counts
+from sathop.orchestrator.api.batch_readmodels import eta_seconds, state_counts
 from sathop.orchestrator.db import Batch, Granule, GranuleStageTiming, utcnow
 from sathop.shared.protocol import GranuleState
 
@@ -66,12 +66,12 @@ async def _seed_batch(batch_id: str, *, in_flight: int, uploads: int, span_sec: 
 
 async def _counts(batch_id: str) -> dict[str, int]:
     async with orch_db._session_maker() as s:
-        return await batch_state_counts(s, batch_id)
+        return (await state_counts(s, [batch_id])).get(batch_id, {})
 
 
 async def test_empty_returns_empty(db):
     async with orch_db._session_maker() as s:
-        assert await batch_eta_seconds_bulk(s, {}) == {}
+        assert await eta_seconds(s, {}) == {}
 
 
 async def test_thin_data_returns_none(db):
@@ -79,7 +79,7 @@ async def test_thin_data_returns_none(db):
     await _seed_batch("b-thin", in_flight=10, uploads=2, span_sec=60.0)
     counts = {"b-thin": await _counts("b-thin")}
     async with orch_db._session_maker() as s:
-        assert await batch_eta_seconds_bulk(s, counts) == {"b-thin": None}
+        assert await eta_seconds(s, counts) == {"b-thin": None}
 
 
 async def test_no_in_flight_returns_none(db):
@@ -87,7 +87,7 @@ async def test_no_in_flight_returns_none(db):
     await _seed_batch("b-done", in_flight=0, uploads=5, span_sec=50.0)
     counts = {"b-done": await _counts("b-done")}
     async with orch_db._session_maker() as s:
-        assert await batch_eta_seconds_bulk(s, counts) == {"b-done": None}
+        assert await eta_seconds(s, counts) == {"b-done": None}
 
 
 async def test_healthy_extrapolation(db):
@@ -95,14 +95,14 @@ async def test_healthy_extrapolation(db):
     await _seed_batch("b-ok", in_flight=10, uploads=5, span_sec=40.0)
     counts = {"b-ok": await _counts("b-ok")}
     async with orch_db._session_maker() as s:
-        out = await batch_eta_seconds_bulk(s, counts)
+        out = await eta_seconds(s, counts)
     assert out["b-ok"] == 80
 
 
 async def test_missing_batch_id_returns_none(db):
     """A batch_id not found in timing rows still appears in the output map."""
     async with orch_db._session_maker() as s:
-        out = await batch_eta_seconds_bulk(s, {"does-not-exist": {}})
+        out = await eta_seconds(s, {"does-not-exist": {}})
     assert out == {"does-not-exist": None}
 
 
@@ -122,7 +122,7 @@ async def test_uploaded_state_not_in_remaining(db):
         await s.commit()
     counts = {"b-up": await _counts("b-up")}
     async with orch_db._session_maker() as s:
-        out = await batch_eta_seconds_bulk(s, counts)
+        out = await eta_seconds(s, counts)
     assert out["b-up"] is None
 
 
@@ -137,7 +137,7 @@ async def test_bulk_independence(db):
         "b-done": await _counts("b-done"),
     }
     async with orch_db._session_maker() as s:
-        out = await batch_eta_seconds_bulk(s, counts)
+        out = await eta_seconds(s, counts)
     assert out["b-ok"] == 80
     assert out["b-thin"] is None
     assert out["b-done"] is None

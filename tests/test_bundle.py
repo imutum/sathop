@@ -13,6 +13,7 @@ import httpx
 import pytest
 
 from sathop.shared.bundle_manifest import BundleManifest
+from sathop.shared.bundle_python_deps import python_deps_source
 from sathop.shared.protocol import parse_bundle_ref
 from sathop.worker import bundle
 
@@ -283,4 +284,4 @@ def test_requirements_comments_only_do_not_force_venv(tmp_path):
     (root / "requirements.txt").write_text("\n# stdlib only\n", encoding="utf-8")
     manifest = BundleManifest.from_yaml(root / "manifest.yaml")
 
-    assert bundle.python_deps_source(manifest.requirements, root) is None
+    assert python_deps_source(manifest.requirements, root) is None

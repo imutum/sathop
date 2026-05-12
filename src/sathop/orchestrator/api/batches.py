@@ -45,14 +45,11 @@ from ..pubsub import log_event as log
 from ._helpers import get_or_404
 from ._transition import apply_transition
 from .batch_readmodels import (
-    batch_eta_seconds_bulk,
-    batch_exhausted_objects,
-    batch_exhausted_objects_bulk,
-    batch_state_counts,
-    batch_state_counts_bulk,
-    batch_summary,
-    exhausted_objects_by_granule,
-    granule_row,
+    granule_rows,
+    state_counts,
+    summaries,
+    summary,
+    summary_just_created,
 )
 
 router = APIRouter(prefix="/batches", tags=["batches"], dependencies=[Depends(require_token)])
@@ -179,38 +176,20 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
         await log(s, "orchestrator", w, level="warn")
     await commit_and_publish(s, Scope.BATCHES)
 
-    return batch_summary(b, counts=await batch_state_counts(s, b.batch_id))
+    counts = (await state_counts(s, [b.batch_id])).get(b.batch_id, {})
+    return summary_just_created(b, counts=counts)
 
 
 @router.get("", response_model=list[BatchSummary])
 async def list_batches(s: AsyncSession = Depends(session)) -> list[BatchSummary]:
     rows = (await s.execute(select(Batch).order_by(Batch.created_at.desc()))).scalars().all()
-    ids = [b.batch_id for b in rows]
-    counts_map = await batch_state_counts_bulk(s, ids)
-    exh_map = await batch_exhausted_objects_bulk(s, ids)
-    eta_map = await batch_eta_seconds_bulk(s, counts_map)
-    return [
-        batch_summary(
-            b,
-            counts=counts_map[b.batch_id],
-            objects_exhausted=exh_map.get(b.batch_id, 0),
-            eta_seconds=eta_map.get(b.batch_id),
-        )
-        for b in rows
-    ]
+    return await summaries(s, list(rows))
 
 
 @router.get("/{batch_id}", response_model=BatchSummary)
 async def detail(batch_id: str, s: AsyncSession = Depends(session)) -> BatchSummary:
     b = await get_or_404(s, Batch, batch_id, "batch not found")
-    counts = await batch_state_counts(s, batch_id)
-    eta_map = await batch_eta_seconds_bulk(s, {batch_id: counts})
-    return batch_summary(
-        b,
-        counts=counts,
-        objects_exhausted=await batch_exhausted_objects(s, batch_id),
-        eta_seconds=eta_map.get(batch_id),
-    )
+    return await summary(s, b)
 
 
 @router.post("/{batch_id}/granules")
@@ -252,10 +231,7 @@ async def list_granules(
         stmt = stmt.where(Granule.state.in_(wanted))
     stmt = stmt.order_by(Granule.updated_at.desc()).limit(limit).offset(offset)
     rows = (await s.execute(stmt)).scalars().all()
-
-    gids = [g.granule_id for g in rows]
-    exh_map = await exhausted_objects_by_granule(s, gids)
-    return [granule_row(g, objects_exhausted=exh_map.get(g.granule_id, 0)) for g in rows]
+    return await granule_rows(s, list(rows))
 
 
 @router.post("/{batch_id}/reset-exhausted-objects")

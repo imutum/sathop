@@ -17,12 +17,15 @@ from pathlib import Path
 
 import yaml
 
-from sathop.shared.bundle_manifest import InputsSchema, RequirementsConfig, parse_shared_files
-from sathop.worker.bundle import python_deps_source
-
-REQUIRED_KEYS = {"name", "version", "execution", "outputs", "inputs"}
-RE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
-RE_VERSION = re.compile(r"^[A-Za-z0-9._+-]+$")
+from sathop.shared.bundle_manifest import (
+    ExecutionConfig,
+    InputsSchema,
+    OutputsConfig,
+    RequirementsConfig,
+    parse_meta,
+    parse_shared_files,
+)
+from sathop.shared.bundle_python_deps import python_deps_source
 
 
 @dataclass
@@ -37,40 +40,26 @@ class Report:
 
 
 def _check_manifest_shape(manifest: dict, r: Report) -> None:
-    missing = REQUIRED_KEYS - manifest.keys()
-    if missing:
-        r.errors.append(f"manifest missing required keys: {sorted(missing)}")
-        return
+    """Run each canonical section parser independently so the Report
+    can surface every section's error in one pass — fail-fast inside a
+    section, accumulate across sections."""
+    try:
+        name, version, _ = parse_meta(manifest)
+        r.passed.append(f"name = {name!r}, version = {version!r}")
+    except ValueError as e:
+        r.errors.append(str(e))
 
-    name = manifest.get("name")
-    version = manifest.get("version")
-    if not isinstance(name, str) or not RE_NAME.fullmatch(name):
-        r.errors.append(f"manifest.name must match {RE_NAME.pattern}, got {name!r}")
-    if not isinstance(version, str) or not RE_VERSION.fullmatch(version):
-        r.errors.append(f"manifest.version must match {RE_VERSION.pattern}, got {version!r}")
+    try:
+        exe = ExecutionConfig.parse(manifest.get("execution"))
+        r.passed.append(f"execution.entrypoint = {exe.entrypoint!r}, timeout_sec = {exe.timeout_sec}")
+    except ValueError as e:
+        r.errors.append(str(e))
 
-    exe = manifest.get("execution")
-    if not isinstance(exe, dict) or not exe.get("entrypoint"):
-        r.errors.append("manifest.execution.entrypoint is required")
-    else:
-        timeout = exe.get("timeout_sec")
-        if timeout is not None and not (isinstance(timeout, int) and timeout > 0):
-            r.errors.append(f"manifest.execution.timeout_sec must be a positive int, got {timeout!r}")
-        r.passed.append(f"execution.entrypoint = {exe.get('entrypoint')!r}")
-
-    outs = manifest.get("outputs")
-    if not isinstance(outs, dict):
-        r.errors.append("manifest.outputs must be a mapping")
-    else:
-        wd = outs.get("watch_dir")
-        if not isinstance(wd, str) or not wd:
-            r.errors.append("manifest.outputs.watch_dir must be a non-empty string")
-        exts = outs.get("extensions")
-        if exts is not None:
-            if not isinstance(exts, list) or not all(isinstance(e, str) and e.startswith(".") for e in exts):
-                r.errors.append("manifest.outputs.extensions must be a list of dot-prefixed strings")
-        if not r.errors:
-            r.passed.append(f"outputs.watch_dir = {wd!r}, extensions = {exts}")
+    try:
+        outs = OutputsConfig.parse(manifest.get("outputs", {}))
+        r.passed.append(f"outputs.watch_dir = {outs.watch_dir!r}, extensions = {list(outs.extensions)}")
+    except ValueError as e:
+        r.errors.append(str(e))
 
 
 def _check_entrypoint_resolves(manifest: dict, bundle_dir: Path, r: Report) -> None:
