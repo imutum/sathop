@@ -5,10 +5,12 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import LEASED_STATES, WorkerHeartbeat
+from sathop.shared.protocol import WorkerHeartbeat
+from sathop.shared.state_machine import LEASED_STATES
 
 from ..db import Granule, Worker
 from ..pubsub import log_event as log
+from .one_shot import consume_one_shot_signal
 
 
 async def record_worker_version(s: AsyncSession, worker: Worker, req: WorkerHeartbeat) -> None:
@@ -60,16 +62,26 @@ async def revoked_active_granules(s: AsyncSession, req: WorkerHeartbeat) -> list
 
 
 async def consume_restart_signal(s: AsyncSession, worker: Worker) -> bool:
-    requested = worker.restart_requested_at is not None
-    if requested:
+    def clear() -> None:
         worker.restart_requested_at = None
-        await log(s, worker.worker_id, "restart signal delivered to worker")
-    return requested
+
+    return await consume_one_shot_signal(
+        s,
+        worker.restart_requested_at is not None,
+        clear,
+        source=worker.worker_id,
+        message="restart signal delivered to worker",
+    )
 
 
 async def consume_gc_signal(s: AsyncSession, worker: Worker) -> bool:
-    requested = worker.gc_requested_at is not None
-    if requested:
+    def clear() -> None:
         worker.gc_requested_at = None
-        await log(s, worker.worker_id, "cache GC signal delivered to worker")
-    return requested
+
+    return await consume_one_shot_signal(
+        s,
+        worker.gc_requested_at is not None,
+        clear,
+        source=worker.worker_id,
+        message="cache GC signal delivered to worker",
+    )

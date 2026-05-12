@@ -28,6 +28,7 @@ from ..config import require_token, require_token_or_query, settings
 from ..db import Bundle, SharedFile, session, utcnow
 from ..pubsub import commit_and_publish, publish_scopes
 from ..pubsub import log_event as log
+from ._helpers import get_or_404
 
 router = APIRouter(prefix="/shared", tags=["shared"])
 
@@ -151,9 +152,7 @@ async def upload(
 )
 async def meta(name: str, s: AsyncSession = Depends(session)) -> SharedFileMeta:
     _validate_name(name)
-    f = await s.get(SharedFile, name)
-    if f is None:
-        raise HTTPException(404, f"shared file {name!r} not found")
+    f = await get_or_404(s, SharedFile, name, f"shared file {name!r} not found")
     return SharedFileMeta(name=f.name, sha256=f.sha256, size=f.size)
 
 
@@ -164,9 +163,7 @@ async def meta(name: str, s: AsyncSession = Depends(session)) -> SharedFileMeta:
 async def download(name: str, s: AsyncSession = Depends(session)) -> FileResponse:
     """Accepts `?token=` for clients that can't set the Authorization header."""
     _validate_name(name)
-    f = await s.get(SharedFile, name)
-    if f is None:
-        raise HTTPException(404, f"shared file {name!r} not found")
+    f = await get_or_404(s, SharedFile, name, f"shared file {name!r} not found")
     blob = settings.shared_storage / f.name
     if not blob.is_file():
         raise HTTPException(500, "shared-file bytes missing on orchestrator disk")
@@ -181,9 +178,7 @@ async def download(name: str, s: AsyncSession = Depends(session)) -> FileRespons
 @router.delete("/{name}", dependencies=[Depends(require_token)])
 async def delete(name: str, s: AsyncSession = Depends(session)) -> dict:
     _validate_name(name)
-    f = await s.get(SharedFile, name)
-    if f is None:
-        raise HTTPException(404, f"shared file {name!r} not found")
+    f = await get_or_404(s, SharedFile, name, f"shared file {name!r} not found")
 
     # Refuse if any registered bundle still references this name — fail fast
     # rather than let a lease crash on a silently-missing shared file.

@@ -2,9 +2,9 @@
 `sathop.shared.orch_client.OrchClient`; each method just serialises a DTO,
 hits the matching endpoint, and parses the response back into a model.
 
-The shared base raises `AuthTokenInvalid` on HTTP 401; the worker runtime's
-top-level `except* AuthTokenInvalid` turns that into a clean process exit
-(no `os._exit`, finally blocks run, httpx client closes)."""
+The shared base raises `AuthTokenInvalid` on HTTP 401; `agent_lifecycle.run_agent()`
+turns that into a clean process exit (no `os._exit`, finally blocks run, httpx
+client closes)."""
 
 from __future__ import annotations
 

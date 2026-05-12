@@ -5,7 +5,8 @@ from __future__ import annotations
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import IN_FLIGHT_STATES, BatchSummary, GranuleRow
+from sathop.shared.protocol import BatchSummary, GranuleRow
+from sathop.shared.state_machine import IN_FLIGHT_STATES
 
 from ..config import settings
 from ..db import Batch, Granule, GranuleObject, GranuleStageTiming

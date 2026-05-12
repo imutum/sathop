@@ -10,15 +10,14 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
-    LEASED_STATES,
     BatchCreate,
     BatchSummary,
     GranuleBulkAdd,
     GranuleCreate,
     GranuleRow,
-    GranuleState,
     parse_bundle_ref,
 )
+from sathop.shared.state_machine import LEASED_STATES, GranuleState
 
 from ..bundle_schema import InputsSchema, parse_shared_files, validate_granule
 from ..config import require_token, settings
@@ -36,6 +35,7 @@ from ..db import (
 )
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from ._helpers import get_or_404
 from .batch_readmodels import (
     batch_eta_seconds_bulk,
     batch_exhausted_objects,
@@ -59,16 +59,9 @@ def _compose_gid(batch_id: str, user_gid: str) -> str:
     return f"{batch_id}:{user_gid}"
 
 
-async def _get_batch_or_404(s: AsyncSession, batch_id: str) -> Batch:
-    batch = await s.get(Batch, batch_id)
-    if batch is None:
-        raise HTTPException(404, "batch not found")
-    return batch
-
-
 async def _granule_in_batch_or_404(s: AsyncSession, batch_id: str, granule_id: str) -> Granule:
-    granule = await s.get(Granule, granule_id)
-    if granule is None or granule.batch_id != batch_id:
+    granule = await get_or_404(s, Granule, granule_id, "granule not found in batch")
+    if granule.batch_id != batch_id:
         raise HTTPException(404, "granule not found in batch")
     return granule
 
@@ -206,7 +199,7 @@ async def list_batches(s: AsyncSession = Depends(session)) -> list[BatchSummary]
 
 @router.get("/{batch_id}", response_model=BatchSummary)
 async def detail(batch_id: str, s: AsyncSession = Depends(session)) -> BatchSummary:
-    b = await _get_batch_or_404(s, batch_id)
+    b = await get_or_404(s, Batch, batch_id, "batch not found")
     counts = await batch_state_counts(s, batch_id)
     eta_map = await batch_eta_seconds_bulk(s, {batch_id: counts})
     return batch_summary(
@@ -219,7 +212,7 @@ async def detail(batch_id: str, s: AsyncSession = Depends(session)) -> BatchSumm
 
 @router.post("/{batch_id}/granules")
 async def add_granules(batch_id: str, req: GranuleBulkAdd, s: AsyncSession = Depends(session)) -> dict:
-    batch = await _get_batch_or_404(s, batch_id)
+    batch = await get_or_404(s, Batch, batch_id, "batch not found")
     warnings = await _validate_granules_for_bundle(s, batch.bundle_ref, req.granules)
 
     existing = set(
@@ -249,7 +242,7 @@ async def list_granules(
     offset: int = Query(default=0, ge=0),
     s: AsyncSession = Depends(session),
 ) -> list[GranuleRow]:
-    await _get_batch_or_404(s, batch_id)
+    await get_or_404(s, Batch, batch_id, "batch not found")
     stmt = select(Granule).where(Granule.batch_id == batch_id)
     if state:
         wanted = [x.strip() for x in state.split(",") if x.strip()]
@@ -268,7 +261,7 @@ async def reset_exhausted_objects(batch_id: str, s: AsyncSession = Depends(sessi
     hit the pull-failure cap. Use after fixing the upstream cause (worker
     restored, network healed). Already-acked or already-deleted objects are
     untouched."""
-    await _get_batch_or_404(s, batch_id)
+    await get_or_404(s, Batch, batch_id, "batch not found")
     granule_ids_subq = select(Granule.granule_id).where(Granule.batch_id == batch_id).scalar_subquery()
     result = await s.execute(
         update(GranuleObject)
@@ -323,7 +316,7 @@ async def retry_granule(batch_id: str, granule_id: str, s: AsyncSession = Depend
 @router.post("/{batch_id}/cancel")
 async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dict:
     """Bulk cancel: every granule in a cancellable state → blacklisted."""
-    await _get_batch_or_404(s, batch_id)
+    await get_or_404(s, Batch, batch_id, "batch not found")
     now = utcnow()
     rows = (
         (
@@ -360,7 +353,7 @@ async def delete_batch(
     Already-uploaded objects on worker storage are not cleaned up here; the
     operator drops them via the worker's own retention or by hand. This
     endpoint only removes orchestrator state."""
-    b = await _get_batch_or_404(s, batch_id)
+    b = await get_or_404(s, Batch, batch_id, "batch not found")
 
     if not force:
         active = (

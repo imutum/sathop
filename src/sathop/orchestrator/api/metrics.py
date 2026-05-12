@@ -25,7 +25,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Gauge, gen
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import NON_TERMINAL_STATES, GranuleState
+from sathop.shared.state_machine import NON_TERMINAL_STATES, GranuleState
 
 from ..config import require_token_or_query
 from ..db import Batch, Event, Granule, Receiver, Worker, session

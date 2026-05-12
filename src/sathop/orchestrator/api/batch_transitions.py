@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-from sathop.shared.protocol import IN_FLIGHT_STATES, GranuleState
+from sathop.shared.state_machine import CANCELLABLE_STATES, RETRYABLE_STATES, GranuleState
 
 from ..db import Granule
-
-CANCELLABLE_STATES = set(IN_FLIGHT_STATES)
-RETRYABLE_STATES = {
-    GranuleState.FAILED.value,
-    GranuleState.BLACKLISTED.value,
-}
 
 
 def cancel_granule_state(granule: Granule, now) -> bool:

@@ -10,9 +10,9 @@ from sathop.shared.http import make_orch_client
 class AuthTokenInvalid(BaseException):
     """Orchestrator rejected the bearer token with HTTP 401. Inherits from
     BaseException — like CancelledError — so the typical `except Exception`
-    in heartbeat / lease loops doesn't accidentally swallow it. Callers wrap
-    the top-level TaskGroup with `except* AuthTokenInvalid` to log fatally
-    and propagate `SystemExit` instead of retrying with a known-bad token.
+    in heartbeat / lease loops doesn't accidentally swallow it. `run_agent()`
+    logs fatally and propagates `SystemExit` instead of retrying with a
+    known-bad token.
     """
 
 

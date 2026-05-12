@@ -13,7 +13,8 @@ import httpx
 import psutil
 
 from sathop import __version__
-from sathop.shared.orch_client import AuthTokenInvalid
+from sathop.shared import agent_lifecycle
+from sathop.shared.periodic import run_periodic
 from sathop.shared.protocol import (
     GranuleState,
     LeaseItem,
@@ -26,7 +27,7 @@ from sathop.shared.protocol import (
 )
 from sathop.shared.safe_path import safe_join
 
-from . import bundle, downloader, drain, storage, tls
+from . import bundle, downloader, storage, tls
 from ._paths import work_dir_path
 from .agent import OrchestratorClient
 from .cleanup import CacheCleaner
@@ -124,10 +125,16 @@ class Worker:
         task.add_done_callback(lambda _task, _gid=gid: self._handlers.pop(_gid, None))
 
     def _install_signal_handlers(self) -> None:
-        drain.install_signal_handlers(self._start_drain)
+        agent_lifecycle.install_signal_handlers(self._start_drain)
 
     async def _drain_watchdog_loop(self) -> None:
-        await drain.drain_watchdog_loop(lambda: self._draining, self._handlers, log)
+        await agent_lifecycle.drain_watchdog_loop(
+            lambda: self._draining,
+            self._handlers,
+            log,
+            active_noun="handler",
+            reclaim_message="lease sweeper will reclaim",
+        )
 
     def _ensure_tls(self) -> str | None:
         if not self.s.public_url.lower().startswith("https://"):
@@ -165,90 +172,88 @@ class Worker:
             "on" if self._ca_pem else "off",
         )
 
-        try:
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(self._heartbeat_loop())
-                tg.create_task(self._pipeline_loop())
-                tg.create_task(self._janitor_loop())
-                tg.create_task(self._backpressure_loop())
-                tg.create_task(self.cleaner.loop(self._gc_event))
-                tg.create_task(self._drain_watchdog_loop())
-                tg.create_task(self.progress.serve())
-                if getattr(self.storage, "needs_static_server", False):
-                    tg.create_task(
-                        storage.serve_static(
-                            self.s.storage_root,
-                            self.s.storage_port,
-                            tls_cert=self.s.tls_cert_path if self._ca_pem else None,
-                            tls_key=self.s.tls_key_path if self._ca_pem else None,
-                        )
-                    )
-        except* AuthTokenInvalid:
-            # Bad SATHOP_TOKEN — let docker restart make the flap visible
-            # rather than silently retrying with the same dead token.
-            log.error("orchestrator rejected token (401) — exiting for container restart")
-            raise SystemExit(1) from None
-        except* SystemExit:
-            # Graceful drain raised SystemExit(0); swallow the group so the
-            # caller's `finally` (httpx client aclose) runs before exit.
-            pass
-
-    async def _heartbeat_loop(self) -> None:
-        while True:
-            try:
-                du = psutil.disk_usage(str(self.s.storage_root))
-                vm = psutil.virtual_memory()
-                stage_snapshot = self.stages.snapshot()
-                resp = await self.client.heartbeat(
-                    WorkerHeartbeat(
-                        worker_id=self.s.worker_id,
-                        version=__version__,
-                        disk_used_gb=(du.total - du.free) / 1024**3,
-                        disk_total_gb=du.total / 1024**3,
-                        cpu_percent=psutil.cpu_percent(interval=None),
-                        mem_percent=vm.percent,
-                        paused=self._pause_lease or self._remote_pause,
-                        active_granule_ids=list(self._handlers.keys()),
-                        **stage_snapshot.heartbeat_fields(),
+        def create_tasks(tg: agent_lifecycle.AgentTaskGroup) -> None:
+            tg.create_task(self._heartbeat_loop())
+            tg.create_task(self._pipeline_loop())
+            tg.create_task(self._janitor_loop())
+            tg.create_task(self._backpressure_loop())
+            tg.create_task(self.cleaner.loop(self._gc_event))
+            tg.create_task(self._drain_watchdog_loop())
+            tg.create_task(self.progress.serve())
+            if getattr(self.storage, "needs_static_server", False):
+                tg.create_task(
+                    storage.serve_static(
+                        self.s.storage_root,
+                        self.s.storage_port,
+                        tls_cert=self.s.tls_cert_path if self._ca_pem else None,
+                        tls_key=self.s.tls_key_path if self._ca_pem else None,
                     )
                 )
-                if resp.restart_requested:
-                    self._start_drain("restart_requested via orchestrator")
-                if self._remote_pause != resp.operator_paused:
-                    log.info("remote pause %s", "engaged" if resp.operator_paused else "released")
-                    self._remote_pause = resp.operator_paused
-                if resp.gc_requested:
-                    log.info("orchestrator requested cache GC — waking gc loop")
-                    self._gc_event.set()
-                for gid in resp.revoked_granule_ids:
-                    task = self._handlers.get(gid)
-                    if task is not None and not task.done():
-                        log.info("[%s] cancelling handler — orchestrator revoked lease", gid)
-                        task.cancel()
-                desired = resp.desired_capacity
-                new_eff = min(self.s.capacity, max(0, desired)) if desired is not None else self.s.capacity
-                if new_eff != self._effective_capacity:
-                    log.info(
-                        "effective capacity %d → %d (env=%d, override=%s)",
-                        self._effective_capacity,
-                        new_eff,
-                        self.s.capacity,
-                        desired,
-                    )
-                    self._effective_capacity = new_eff
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 404:
-                    log.warning("heartbeat 404 — worker row missing, re-registering")
-                    try:
-                        await self._register()
-                        log.info("re-registered after 404")
-                    except Exception as reg_e:
-                        log.warning("re-register failed (will retry next beat): %s", reg_e)
-                else:
-                    log.warning("heartbeat failed: %s", e)
-            except Exception as e:
-                log.warning("heartbeat failed: %s", e)
-            await asyncio.sleep(self.s.heartbeat_interval)
+
+        await agent_lifecycle.run_agent(create_tasks, log=log)
+
+    async def _heartbeat_loop(self) -> None:
+        await run_periodic(
+            self._heartbeat_once,
+            interval=self.s.heartbeat_interval,
+            log=log,
+            name="heartbeat",
+        )
+
+    async def _heartbeat_once(self) -> None:
+        try:
+            du = psutil.disk_usage(str(self.s.storage_root))
+            vm = psutil.virtual_memory()
+            stage_snapshot = self.stages.snapshot()
+            resp = await self.client.heartbeat(
+                WorkerHeartbeat(
+                    worker_id=self.s.worker_id,
+                    version=__version__,
+                    disk_used_gb=(du.total - du.free) / 1024**3,
+                    disk_total_gb=du.total / 1024**3,
+                    cpu_percent=psutil.cpu_percent(interval=None),
+                    mem_percent=vm.percent,
+                    paused=self._pause_lease or self._remote_pause,
+                    active_granule_ids=list(self._handlers.keys()),
+                    **stage_snapshot.heartbeat_fields(),
+                )
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                raise
+            # Worker row missing — orchestrator was wiped, race with /forget, etc.
+            # Re-register and let the next beat carry real telemetry.
+            log.warning("heartbeat 404 — worker row missing, re-registering")
+            try:
+                await self._register()
+                log.info("re-registered after 404")
+            except Exception as reg_e:
+                log.warning("re-register failed (will retry next beat): %s", reg_e)
+            return
+        if resp.restart_requested:
+            self._start_drain("restart_requested via orchestrator")
+        if self._remote_pause != resp.operator_paused:
+            log.info("remote pause %s", "engaged" if resp.operator_paused else "released")
+            self._remote_pause = resp.operator_paused
+        if resp.gc_requested:
+            log.info("orchestrator requested cache GC — waking gc loop")
+            self._gc_event.set()
+        for gid in resp.revoked_granule_ids:
+            task = self._handlers.get(gid)
+            if task is not None and not task.done():
+                log.info("[%s] cancelling handler — orchestrator revoked lease", gid)
+                task.cancel()
+        desired = resp.desired_capacity
+        new_eff = min(self.s.capacity, max(0, desired)) if desired is not None else self.s.capacity
+        if new_eff != self._effective_capacity:
+            log.info(
+                "effective capacity %d → %d (env=%d, override=%s)",
+                self._effective_capacity,
+                new_eff,
+                self.s.capacity,
+                desired,
+            )
+            self._effective_capacity = new_eff
 
     async def _pipeline_loop(self) -> None:
         while True:
@@ -450,31 +455,32 @@ class Worker:
         return cb
 
     async def _backpressure_loop(self) -> None:
-        while True:
-            try:
-                du = psutil.disk_usage(str(self.s.storage_root))
-                used = (du.total - du.free) / du.total
-                was = self._pause_lease
-                if was and used < self.s.disk_resume_pct:
-                    self._pause_lease = False
-                elif not was and used > self.s.disk_pause_pct:
-                    self._pause_lease = True
-                if self._pause_lease != was:
-                    log.warning("backpressure: disk=%.1f%% pause_lease=%s", used * 100, self._pause_lease)
-            except Exception as e:
-                log.warning("backpressure check failed: %s", e)
-            await asyncio.sleep(self.s.backpressure_interval)
+        await run_periodic(
+            self._backpressure_once,
+            interval=self.s.backpressure_interval,
+            log=log,
+            name="backpressure check",
+        )
+
+    async def _backpressure_once(self) -> None:
+        du = psutil.disk_usage(str(self.s.storage_root))
+        used = (du.total - du.free) / du.total
+        was = self._pause_lease
+        if was and used < self.s.disk_resume_pct:
+            self._pause_lease = False
+        elif not was and used > self.s.disk_pause_pct:
+            self._pause_lease = True
+        if self._pause_lease != was:
+            log.warning("backpressure: disk=%.1f%% pause_lease=%s", used * 100, self._pause_lease)
 
     async def _janitor_loop(self) -> None:
-        while True:
-            try:
-                to_delete = await self.client.get_deletable(self.s.worker_id)
-                for dg in to_delete:
-                    for key in dg.object_keys:
-                        await self.storage.delete(key)
-                    await self.client.confirm_deleted(dg)
-                    if dg.object_keys:
-                        log.info("[%s] deleted %d object(s) after ack", dg.granule_id, len(dg.object_keys))
-            except Exception as e:
-                log.warning("janitor failed: %s", e)
-            await asyncio.sleep(30)
+        await run_periodic(self._janitor_once, interval=30, log=log, name="janitor")
+
+    async def _janitor_once(self) -> None:
+        to_delete = await self.client.get_deletable(self.s.worker_id)
+        for dg in to_delete:
+            for key in dg.object_keys:
+                await self.storage.delete(key)
+            await self.client.confirm_deleted(dg)
+            if dg.object_keys:
+                log.info("[%s] deleted %d object(s) after ack", dg.granule_id, len(dg.object_keys))

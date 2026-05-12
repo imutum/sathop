@@ -4,24 +4,11 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import GranuleState, ProcessFailure, StateUpdate, UploadReport
+from sathop.shared.protocol import ProcessFailure, StateUpdate, UploadReport
+from sathop.shared.state_machine import STAGE_BY_CLOSER, GranuleState
 
 from ..config import settings
 from ..db import Granule, GranuleObject, GranuleStageTiming
-
-STATE_PREDECESSOR = {
-    GranuleState.DOWNLOADING.value: GranuleState.QUEUED.value,
-    GranuleState.DOWNLOADED.value: GranuleState.DOWNLOADING.value,
-    GranuleState.PROCESSING.value: GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSED.value: GranuleState.PROCESSING.value,
-}
-
-STAGE_BY_CLOSER = {
-    GranuleState.DOWNLOADING.value: "download_wait",
-    GranuleState.DOWNLOADED.value: "download",
-    GranuleState.PROCESSING.value: "process_wait",
-    GranuleState.PROCESSED.value: "process",
-}
 
 
 def record_stage(s: AsyncSession, granule: Granule, stage: str, started_at, finished_at) -> None:

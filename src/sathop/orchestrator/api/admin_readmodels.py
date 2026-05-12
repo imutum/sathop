@@ -8,18 +8,12 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import NON_TERMINAL_STATES, GranuleState
+from sathop.shared.state_machine import ACTIVE_STATES, NON_TERMINAL_STATES
 
 from ..db import Event, Granule
 
 NON_TERMINAL = set(NON_TERMINAL_STATES)
-ACTIVE = {
-    GranuleState.DOWNLOADING.value,
-    GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSING.value,
-    GranuleState.PROCESSED.value,
-    GranuleState.UPLOADED.value,
-}
+ACTIVE = set(ACTIVE_STATES)
 STUCK_AGE_HOURS = 6
 
 

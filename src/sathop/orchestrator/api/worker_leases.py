@@ -9,7 +9,8 @@ from datetime import timedelta
 from sqlalchemy import distinct, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.protocol import LEASED_STATES, Credential, GranuleState, LeaseItem, LeaseRequest
+from sathop.shared.protocol import Credential, LeaseItem, LeaseRequest
+from sathop.shared.state_machine import LEASED_STATES, GranuleState
 
 from ..config import settings
 from ..db import Batch, Granule, GranuleObject, Worker

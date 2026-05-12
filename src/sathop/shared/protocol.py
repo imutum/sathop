@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from sathop.shared.safe_path import is_safe_name
+from sathop.shared.state_machine import GranuleState
 
 BUNDLE_REF_PREFIX = "orch:"
 
@@ -27,47 +27,6 @@ def parse_bundle_ref(ref: str) -> tuple[str, str]:
     if not name or not version:
         raise ValueError(f"bundle ref name/version both required: {ref!r}")
     return name, version
-
-
-class GranuleState(str, Enum):
-    PENDING = "pending"
-    # Lease succeeded but the worker is still waiting on its local download
-    # semaphore (SATHOP_DOWNLOAD_CONCURRENCY). Distinct from DOWNLOADING so the
-    # UI doesn't show 40 "downloading" rows when only 1 byte is actually moving.
-    QUEUED = "queued"
-    DOWNLOADING = "downloading"
-    DOWNLOADED = "downloaded"
-    PROCESSING = "processing"
-    PROCESSED = "processed"
-    UPLOADED = "uploaded"
-    ACKED = "acked"
-    DELETED = "deleted"
-    FAILED = "failed"
-    BLACKLISTED = "blacklisted"
-
-
-# Worker holds an active lease in any of these — the row will be reclaimed by
-# the lease sweeper if the lease expires.
-LEASED_STATES: tuple[str, ...] = (
-    GranuleState.QUEUED.value,
-    GranuleState.DOWNLOADING.value,
-    GranuleState.DOWNLOADED.value,
-    GranuleState.PROCESSING.value,
-    GranuleState.PROCESSED.value,
-)
-
-# Worker pipeline still has work to do (LEASED_STATES + PENDING). Excludes
-# UPLOADED (worker done, waiting on receiver) and terminal/error states.
-# Frontend mirrors this in `frontend/src/api.ts` (IN_FLIGHT_STATES).
-IN_FLIGHT_STATES: tuple[str, ...] = (GranuleState.PENDING.value, *LEASED_STATES)
-
-# Everything that isn't terminal (DELETED) or errored (FAILED, BLACKLISTED).
-# Used for stuck-granule queries and Prometheus non-terminal counts.
-NON_TERMINAL_STATES: tuple[str, ...] = (
-    *IN_FLIGHT_STATES,
-    GranuleState.UPLOADED.value,
-    GranuleState.ACKED.value,
-)
 
 
 class WorkerRegister(BaseModel):

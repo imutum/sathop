@@ -9,9 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
-    LEASED_STATES,
     DeletableGranule,
-    GranuleState,
     LeaseRequest,
     LeaseResponse,
     ProcessFailure,
@@ -22,11 +20,13 @@ from sathop.shared.protocol import (
     WorkerRegister,
     WorkerRegisterResponse,
 )
+from sathop.shared.state_machine import LEASED_STATES, STATE_PREDECESSOR, GranuleState
 
 from ..config import require_token
 from ..db import Granule, GranuleObject, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from ._helpers import get_or_404
 from .worker_heartbeat import (
     apply_worker_heartbeat,
     consume_gc_signal,
@@ -43,16 +43,9 @@ from .worker_leases import (
     renew_worker_leases,
     revoke_worker_leases,
 )
-from .worker_transitions import STATE_PREDECESSOR, apply_state_report, mark_failed, mark_uploaded
+from .worker_transitions import apply_state_report, mark_failed, mark_uploaded
 
 router = APIRouter(prefix="/workers", tags=["workers"], dependencies=[Depends(require_token)])
-
-
-async def _worker_or_404(s: AsyncSession, worker_id: str, detail: str = "worker not found") -> Worker:
-    worker = await s.get(Worker, worker_id)
-    if worker is None:
-        raise HTTPException(404, detail)
-    return worker
 
 
 async def _enabled_worker_or_403(s: AsyncSession, worker_id: str) -> Worker:
@@ -63,9 +56,7 @@ async def _enabled_worker_or_403(s: AsyncSession, worker_id: str) -> Worker:
 
 
 async def _leased_granule_or_409(s: AsyncSession, granule_id: str, worker_id: str) -> Granule:
-    granule = await s.get(Granule, granule_id)
-    if granule is None:
-        raise HTTPException(404, "granule not found")
+    granule = await get_or_404(s, Granule, granule_id, "granule not found")
     if granule.leased_by != worker_id:
         raise HTTPException(409, "granule not leased by this worker")
     return granule
@@ -110,7 +101,7 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
 
 @router.post("/heartbeat", response_model=WorkerHeartbeatResponse)
 async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) -> WorkerHeartbeatResponse:
-    w = await _worker_or_404(s, req.worker_id, "worker not registered")
+    w = await get_or_404(s, Worker, req.worker_id, "worker not registered")
     now = utcnow()
     await record_worker_version(s, w, req)
     apply_worker_heartbeat(w, req, now)
@@ -252,7 +243,7 @@ async def set_capacity(
     Positive int clamps lease size + propagates to worker via heartbeat reply."""
     if desired_capacity is not None and desired_capacity < 1:
         raise HTTPException(422, "desired_capacity must be a positive int or null")
-    w = await _worker_or_404(s, worker_id)
+    w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.desired_capacity = desired_capacity
     await log(s, worker_id, f"capacity override → {desired_capacity} (env cap {w.capacity})")
     await commit_and_publish(s, "workers")
@@ -264,7 +255,7 @@ async def request_restart(worker_id: str, s: AsyncSession = Depends(session)) ->
     """Operator-triggered restart. Sets a one-shot flag the worker picks up on
     its next heartbeat and exits 0 on. Idempotent — re-clicks while a previous
     request hasn't been consumed just refresh the timestamp."""
-    w = await _worker_or_404(s, worker_id)
+    w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.restart_requested_at = utcnow()
     await log(s, worker_id, "restart requested via UI")
     await commit_and_publish(s, "workers")
@@ -279,7 +270,7 @@ async def set_enabled(
 ) -> dict:
     """Runtime kill-switch. Disabled workers receive 403 on next lease call,
     so in-flight work drains naturally before the worker goes idle."""
-    w = await _worker_or_404(s, worker_id)
+    w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.enabled = enabled
     await log(s, worker_id, f"worker {'enabled' if enabled else 'disabled'}")
     await commit_and_publish(s, "workers")
@@ -296,7 +287,7 @@ async def set_paused(
       - paused: keep the worker registered + drain in-flight; resume any time
       - disabled: prelude to forgetting the row entirely
     Heartbeat reply propagates the flag; worker stops new leases until cleared."""
-    w = await _worker_or_404(s, worker_id)
+    w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.operator_paused = operator_paused
     await log(s, worker_id, f"worker {'paused' if operator_paused else 'resumed'} via UI")
     await commit_and_publish(s, "workers")
@@ -314,7 +305,7 @@ async def revoke_all_leases(worker_id: str, s: AsyncSession = Depends(session)) 
 
     In-flight progress on these granules is discarded; retry_count bumps so
     the orchestrator's max_retries cap still applies."""
-    await _worker_or_404(s, worker_id)
+    await get_or_404(s, Worker, worker_id, "worker not found")
     revoked = await revoke_worker_leases(s, worker_id, utcnow())
     if revoked:
         await log(s, worker_id, f"force-revoked {revoked} lease(s) via UI")
@@ -327,7 +318,7 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
     """Operator-triggered remote GC. Same one-shot pattern as restart: orch
     sets a timestamp, next heartbeat reply forwards it, worker runs prune_caches
     out-of-band of its periodic loop."""
-    w = await _worker_or_404(s, worker_id)
+    w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.gc_requested_at = utcnow()
     await log(s, worker_id, "cache GC requested via UI")
     await commit_and_publish(s, "workers")
@@ -339,7 +330,7 @@ async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> d
     """Permanently remove a decommissioned worker row. Refuses if the worker is
     still enabled or still holding any granule storage — operator must disable
     and let it drain first."""
-    w = await _worker_or_404(s, worker_id)
+    w = await get_or_404(s, Worker, worker_id, "worker not found")
     if w.enabled:
         raise HTTPException(409, "worker is still enabled — disable it first")
     inflight = await count_worker_inflight(s, worker_id)

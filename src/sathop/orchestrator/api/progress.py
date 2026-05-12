@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,15 +11,14 @@ from sathop.shared.protocol import ProgressEvent
 from ..config import require_token
 from ..db import Batch, Granule, GranuleProgress, session, utcnow
 from ..pubsub import publish
+from ._helpers import get_or_404
 
 router = APIRouter(tags=["progress"], dependencies=[Depends(require_token)])
 
 
 @router.post("/granules/{granule_id}/progress")
 async def ingress(granule_id: str, event: ProgressEvent, s: AsyncSession = Depends(session)) -> dict:
-    g = await s.get(Granule, granule_id)
-    if g is None:
-        raise HTTPException(404, "granule not found")
+    g = await get_or_404(s, Granule, granule_id, "granule not found")
     s.add(
         GranuleProgress(
             granule_id=granule_id,
@@ -60,9 +59,7 @@ async def granule_timeline(
 async def batch_latest(batch_id: str, s: AsyncSession = Depends(session)) -> dict[str, dict]:
     """Latest checkpoint per granule in this batch — powers the batch-level
     "每个数据粒最近在做什么" view without pulling every row."""
-    b = await s.get(Batch, batch_id)
-    if b is None:
-        raise HTTPException(404, "batch not found")
+    await get_or_404(s, Batch, batch_id, "batch not found")
     sub = (
         select(func.max(GranuleProgress.id).label("mid"))
         .where(GranuleProgress.batch_id == batch_id)

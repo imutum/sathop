@@ -28,6 +28,7 @@ from ..config import require_token, settings
 from ..db import Batch, Bundle, SharedFile, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from ._helpers import get_or_404
 
 router = APIRouter(prefix="/bundles", tags=["bundles"], dependencies=[Depends(require_token)])
 
@@ -174,9 +175,7 @@ async def list_bundles(s: AsyncSession = Depends(session)) -> list[BundleSummary
 
 @router.get("/{name}/{version}", response_model=BundleDetail)
 async def detail(name: str, version: str, s: AsyncSession = Depends(session)) -> BundleDetail:
-    b = await s.get(Bundle, (name, version))
-    if b is None:
-        raise HTTPException(404, f"bundle {name}@{version} not found")
+    b = await get_or_404(s, Bundle, (name, version), f"bundle {name}@{version} not found")
     in_use = await s.scalar(
         select(func.count(Batch.batch_id)).where(Batch.bundle_ref == format_bundle_ref(name, version))
     )
@@ -224,9 +223,7 @@ def _open_zip(b: Bundle) -> zipfile.ZipFile:
 async def list_files(name: str, version: str, s: AsyncSession = Depends(session)) -> list[BundleFileEntry]:
     """Enumerate files inside the bundle zip, mirroring the worker's unpack
     layout (wrapper dir stripped)."""
-    b = await s.get(Bundle, (name, version))
-    if b is None:
-        raise HTTPException(404, f"bundle {name}@{version} not found")
+    b = await get_or_404(s, Bundle, (name, version), f"bundle {name}@{version} not found")
     with _open_zip(b) as zf:
         prefix = _strip_wrapper(zf.namelist())
         out: list[BundleFileEntry] = []
@@ -253,9 +250,7 @@ async def read_file(
 ) -> BundleFileContent:
     """Return one file's content as text. 404 if path is not in the zip,
     400 if content doesn't decode as utf-8, truncated at _MAX_TEXT_BYTES."""
-    b = await s.get(Bundle, (name, version))
-    if b is None:
-        raise HTTPException(404, f"bundle {name}@{version} not found")
+    b = await get_or_404(s, Bundle, (name, version), f"bundle {name}@{version} not found")
     with _open_zip(b) as zf:
         prefix = _strip_wrapper(zf.namelist())
         internal = f"{prefix}{file_path}"
@@ -282,9 +277,7 @@ async def read_file(
 
 @router.get("/{name}/{version}/download")
 async def download(name: str, version: str, s: AsyncSession = Depends(session)) -> Response:
-    b = await s.get(Bundle, (name, version))
-    if b is None:
-        raise HTTPException(404, f"bundle {name}@{version} not found")
+    b = await get_or_404(s, Bundle, (name, version), f"bundle {name}@{version} not found")
     blob = settings.bundle_storage / f"{b.sha256}.zip"
     if not blob.is_file():
         # Index has drifted from disk — treat as unrecoverable.
@@ -299,9 +292,7 @@ async def download(name: str, version: str, s: AsyncSession = Depends(session)) 
 
 @router.delete("/{name}/{version}")
 async def delete(name: str, version: str, s: AsyncSession = Depends(session)) -> dict:
-    b = await s.get(Bundle, (name, version))
-    if b is None:
-        raise HTTPException(404, f"bundle {name}@{version} not found")
+    b = await get_or_404(s, Bundle, (name, version), f"bundle {name}@{version} not found")
 
     ref = format_bundle_ref(name, version)
     total = await s.scalar(select(func.count(Batch.batch_id)).where(Batch.bundle_ref == ref))

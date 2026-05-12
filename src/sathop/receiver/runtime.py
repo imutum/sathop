@@ -3,15 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-import signal
 import ssl
-import time
 from pathlib import Path
 
 import httpx
 
 from sathop import __version__
-from sathop.shared.orch_client import AuthTokenInvalid
+from sathop.shared import agent_lifecycle
+from sathop.shared.periodic import run_periodic
 from sathop.shared.protocol import AckReport, PullItem, PullRequest, ReceiverHeartbeat, ReceiverRegister
 
 from . import puller
@@ -22,7 +21,6 @@ from .health import HealthServer
 log = logging.getLogger("sathop.receiver")
 
 DRAIN_WATCHDOG_TIMEOUT_SEC = 30
-DRAIN_POLL_INTERVAL_SEC = 1.0
 
 
 def is_cert_error(e: BaseException) -> bool:
@@ -55,30 +53,17 @@ class Receiver:
         log.warning("entering graceful drain (%s) — will exit after in-flight pulls complete", reason)
 
     def _install_signal_handlers(self) -> None:
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            try:
-                loop.add_signal_handler(sig, self._start_drain, f"signal {sig.name}")
-            except NotImplementedError:
-                signal.signal(sig, lambda _s, _f, name=sig.name: self._start_drain(f"signal {name}"))
+        agent_lifecycle.install_signal_handlers(self._start_drain)
 
     async def _drain_watchdog_loop(self) -> None:
-        while not self._draining:
-            await asyncio.sleep(DRAIN_POLL_INTERVAL_SEC)
-        deadline = time.monotonic() + DRAIN_WATCHDOG_TIMEOUT_SEC
-        log.info("drain watchdog armed; %d pull(s) in flight", len(self._inflight))
-        while time.monotonic() < deadline:
-            if not self._inflight:
-                log.info("drain complete — all pulls finished")
-                raise SystemExit(0)
-            await asyncio.sleep(DRAIN_POLL_INTERVAL_SEC)
-        log.warning(
-            "drain timeout (%ds) reached with %d pull(s) still in flight — forcing exit; "
-            "orchestrator will re-offer un-acked objects",
-            DRAIN_WATCHDOG_TIMEOUT_SEC,
-            len(self._inflight),
+        await agent_lifecycle.drain_watchdog_loop(
+            lambda: self._draining,
+            self._inflight,
+            log,
+            timeout_sec=DRAIN_WATCHDOG_TIMEOUT_SEC,
+            active_noun="pull",
+            reclaim_message="orchestrator will re-offer un-acked objects",
         )
-        raise SystemExit(0)
 
     def _build_pull_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -128,36 +113,35 @@ class Receiver:
         )
         log.info("registered as %s v%s (%s)", self.s.receiver_id, __version__, self.s.platform)
 
-        try:
-            async with asyncio.TaskGroup() as tg:
-                tg.create_task(self._heartbeat_loop())
-                tg.create_task(self._pull_loop())
-                tg.create_task(self._drain_watchdog_loop())
-                tg.create_task(self._health.serve())
-        except* AuthTokenInvalid:
-            log.error("orchestrator rejected token (401) — exiting for container restart")
-            raise SystemExit(1) from None
-        except* SystemExit:
-            pass
+        def create_tasks(tg: agent_lifecycle.AgentTaskGroup) -> None:
+            tg.create_task(self._heartbeat_loop())
+            tg.create_task(self._pull_loop())
+            tg.create_task(self._drain_watchdog_loop())
+            tg.create_task(self._health.serve())
+
+        await agent_lifecycle.run_agent(create_tasks, log=log)
 
     async def _heartbeat_loop(self) -> None:
-        while True:
-            try:
-                free = shutil.disk_usage(str(self.s.storage_dir)).free / 1024**3
-                resp = await self.client.heartbeat(
-                    ReceiverHeartbeat(
-                        receiver_id=self.s.receiver_id,
-                        version=__version__,
-                        disk_free_gb=free,
-                        queue_pulling=self.stats.in_flight,
-                        recent_pull_bps=self.stats.recent_bps(),
-                    )
-                )
-                if resp.restart_requested:
-                    self._start_drain("restart_requested via orchestrator")
-            except Exception as e:
-                log.warning("heartbeat failed: %s", e)
-            await asyncio.sleep(self.s.poll_interval)
+        await run_periodic(
+            self._heartbeat_once,
+            interval=self.s.poll_interval,
+            log=log,
+            name="heartbeat",
+        )
+
+    async def _heartbeat_once(self) -> None:
+        free = shutil.disk_usage(str(self.s.storage_dir)).free / 1024**3
+        resp = await self.client.heartbeat(
+            ReceiverHeartbeat(
+                receiver_id=self.s.receiver_id,
+                version=__version__,
+                disk_free_gb=free,
+                queue_pulling=self.stats.in_flight,
+                recent_pull_bps=self.stats.recent_bps(),
+            )
+        )
+        if resp.restart_requested:
+            self._start_drain("restart_requested via orchestrator")
 
     async def _pull_loop(self) -> None:
         queue: asyncio.Queue[PullItem] = asyncio.Queue(maxsize=self.s.concurrent_pulls * 2)
@@ -169,7 +153,7 @@ class Receiver:
     async def _pull_producer(self, queue: asyncio.Queue[PullItem]) -> None:
         while True:
             if self._draining:
-                await asyncio.sleep(DRAIN_POLL_INTERVAL_SEC)
+                await asyncio.sleep(agent_lifecycle.DRAIN_POLL_INTERVAL_SEC)
                 continue
             try:
                 resp = await self.client.pull(

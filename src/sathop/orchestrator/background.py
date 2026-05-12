@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import timedelta
 
 from sqlalchemy import delete, select, update
 
-from sathop.shared.protocol import LEASED_STATES, GranuleState
+from sathop.shared.periodic import run_periodic
+from sathop.shared.state_machine import LEASED_STATES, GranuleState
 
 from .config import settings
 from .db import Event, Granule, GranuleObject, GranuleStageTiming, get_session_maker, utcnow
@@ -52,14 +52,12 @@ async def sweep_expired_leases() -> int:
 
 
 async def run_lease_sweeper() -> None:
-    while True:
-        try:
-            n = await sweep_expired_leases()
-            if n:
-                _log.warning("reclaimed %d expired leases", n)
-        except Exception as e:
-            _log.warning("sweep failed: %s", e)
-        await asyncio.sleep(SWEEP_INTERVAL_SEC)
+    async def body() -> None:
+        n = await sweep_expired_leases()
+        if n:
+            _log.warning("reclaimed %d expired leases", n)
+
+    await run_periodic(body, interval=SWEEP_INTERVAL_SEC, log=_log, name="lease sweep")
 
 
 async def sweep_retention(
@@ -118,15 +116,17 @@ async def sweep_retention(
 
 
 async def run_retention() -> None:
+    async def body() -> None:
+        counts = await sweep_retention()
+        if any(counts.values()):
+            _log.info("retention pruned %s", counts)
+
     interval = settings.retention_sweep_sec
-    if interval <= 0:
-        _log.info("retention sweeper disabled (SATHOP_RETENTION_SWEEP_SEC=%d)", interval)
-        return
-    while True:
-        await asyncio.sleep(interval)
-        try:
-            counts = await sweep_retention()
-            if any(counts.values()):
-                _log.info("retention pruned %s", counts)
-        except Exception as e:
-            _log.warning("retention sweep failed: %s", e)
+    await run_periodic(
+        body,
+        interval=interval,
+        log=_log,
+        name="retention sweep",
+        initial_delay=interval,
+        disabled_when_non_positive=True,
+    )

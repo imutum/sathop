@@ -22,6 +22,8 @@ from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, Receiver, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from ._helpers import get_or_404
+from .one_shot import consume_one_shot_signal
 
 router = APIRouter(prefix="/receivers", tags=["receivers"], dependencies=[Depends(require_token)])
 
@@ -43,9 +45,7 @@ async def register(req: ReceiverRegister, s: AsyncSession = Depends(session)) ->
 
 @router.post("/heartbeat", response_model=ReceiverHeartbeatResponse)
 async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) -> ReceiverHeartbeatResponse:
-    r = await s.get(Receiver, req.receiver_id)
-    if r is None:
-        raise HTTPException(404, "receiver not registered")
+    r = await get_or_404(s, Receiver, req.receiver_id, "receiver not registered")
     # Version flap detection — see workers.heartbeat for the rationale. Same
     # orphan-container symptom on the receiver side: pulls split between two
     # processes, half failing on stale TLS trust / fixed `.part` filename.
@@ -62,11 +62,16 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
     r.disk_free_gb = req.disk_free_gb
     r.queue_pulling = req.queue_pulling
     r.recent_pull_bps = req.recent_pull_bps
-    # See workers.heartbeat for the one-shot restart-flag pattern.
-    restart_requested = r.restart_requested_at is not None
-    if restart_requested:
+    def clear_restart() -> None:
         r.restart_requested_at = None
-        await log(s, req.receiver_id, "restart signal delivered to receiver")
+
+    restart_requested = await consume_one_shot_signal(
+        s,
+        r.restart_requested_at is not None,
+        clear_restart,
+        source=req.receiver_id,
+        message="restart signal delivered to receiver",
+    )
     await commit_and_publish(s, "receivers")
     return ReceiverHeartbeatResponse(restart_requested=restart_requested)
 
@@ -108,9 +113,7 @@ async def pull(req: PullRequest, s: AsyncSession = Depends(session)) -> PullResp
 
 @router.post("/ack")
 async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
-    obj = await s.get(GranuleObject, req.object_id)
-    if obj is None:
-        raise HTTPException(404, "object not found")
+    obj = await get_or_404(s, GranuleObject, req.object_id, "object not found")
 
     if not req.success:
         new_failed = (obj.failed_pulls or 0) + 1
@@ -159,9 +162,7 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
 @router.post("/{receiver_id}/restart")
 async def request_restart(receiver_id: str, s: AsyncSession = Depends(session)) -> dict:
     """Operator-triggered restart — see workers.request_restart."""
-    r = await s.get(Receiver, receiver_id)
-    if r is None:
-        raise HTTPException(404, "receiver not found")
+    r = await get_or_404(s, Receiver, receiver_id, "receiver not found")
     r.restart_requested_at = utcnow()
     await log(s, receiver_id, "restart requested via UI")
     await commit_and_publish(s, "receivers")
@@ -176,9 +177,7 @@ async def set_enabled(
 ) -> dict:
     """Runtime kill-switch. Disabled receivers receive 403 on next pull,
     so already-pulled objects can still be acked but no new ones flow."""
-    r = await s.get(Receiver, receiver_id)
-    if r is None:
-        raise HTTPException(404, "receiver not found")
+    r = await get_or_404(s, Receiver, receiver_id, "receiver not found")
     r.enabled = enabled
     await log(s, receiver_id, f"receiver {'enabled' if enabled else 'disabled'}")
     await commit_and_publish(s, "receivers")
@@ -204,9 +203,7 @@ async def ca_bundle(s: AsyncSession = Depends(session)) -> Response:
 async def forget_receiver(receiver_id: str, s: AsyncSession = Depends(session)) -> dict:
     """Permanently remove a decommissioned receiver row. Refuses if it's still
     enabled — operator must disable first to stop in-flight ack races."""
-    r = await s.get(Receiver, receiver_id)
-    if r is None:
-        raise HTTPException(404, "receiver not found")
+    r = await get_or_404(s, Receiver, receiver_id, "receiver not found")
     if r.enabled:
         raise HTTPException(409, "receiver is still enabled — disable it first")
     await s.delete(r)

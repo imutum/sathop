@@ -7,12 +7,13 @@ would warrant materialization but we're nowhere close."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import require_token
 from ..db import Batch, Granule, GranuleStageTiming, session
+from ._helpers import get_or_404
 
 router = APIRouter(tags=["timing"], dependencies=[Depends(require_token)])
 
@@ -49,8 +50,7 @@ def _stats(durations: list[int]) -> dict:
 
 @router.get("/granules/{granule_id}/timing")
 async def granule_timing(granule_id: str, s: AsyncSession = Depends(session)) -> list[dict]:
-    if await s.get(Granule, granule_id) is None:
-        raise HTTPException(404, "granule not found")
+    await get_or_404(s, Granule, granule_id, "granule not found")
     rows = (
         (
             await s.execute(
@@ -76,8 +76,7 @@ async def granule_timing(granule_id: str, s: AsyncSession = Depends(session)) ->
 
 @router.get("/batches/{batch_id}/timing")
 async def batch_timing(batch_id: str, s: AsyncSession = Depends(session)) -> dict:
-    if await s.get(Batch, batch_id) is None:
-        raise HTTPException(404, "batch not found")
+    await get_or_404(s, Batch, batch_id, "batch not found")
     rows = (
         await s.execute(
             select(
