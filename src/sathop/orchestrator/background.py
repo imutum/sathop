@@ -6,7 +6,7 @@ from datetime import timedelta
 from sqlalchemy import delete, select, update
 
 from sathop.shared.periodic import run_periodic
-from sathop.shared.state_machine import LEASED_STATES, GranuleState
+from sathop.shared.state_machine import LEASED_STATES, GranuleState, Scope
 
 from .config import settings
 from .db import Event, Granule, GranuleObject, GranuleStageTiming, get_session_maker, utcnow
@@ -50,7 +50,7 @@ async def sweep_expired_leases() -> int:
         if actually_reclaimed == 0:
             return 0
         await log_event(s, "scheduler", f"reclaimed {actually_reclaimed} expired leases", level="warn")
-        await commit_and_publish(s, "batches")
+        await commit_and_publish(s, Scope.BATCHES)
         return actually_reclaimed
 
 

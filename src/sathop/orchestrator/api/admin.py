@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop import __version__
 from sathop.shared.protocol import format_bundle_ref
+from sathop.shared.state_machine import Scope
 
 from ..config import require_token, settings
 from ..db import Batch, Bundle, session, utcnow
@@ -146,7 +147,7 @@ async def gc_bundles(
 
     if deleted_meta:
         await log(s, "bundles", f"GC deleted {len(deleted_meta)} bundle(s) ({freed} bytes)")
-    await commit_and_publish(s, "bundles" if deleted_meta else None)
+    await commit_and_publish(s, Scope.BUNDLES if deleted_meta else None)
 
     unlinked: list[str] = []
     for sha in orphan_shas:

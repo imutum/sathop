@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.bundle_archive import detect_wrapper_dir
 from sathop.shared.protocol import BundleDetail, BundleSummary, format_bundle_ref
+from sathop.shared.state_machine import Scope
 
 from ..bundle_schema import InputsSchema, parse_shared_files
 from ..config import require_token, settings
@@ -160,7 +161,7 @@ async def upload(
     )
     s.add(b)
     await log(s, "bundles", f"uploaded {name}@{version} ({len(data)} bytes, sha={sha[:12]})")
-    await commit_and_publish(s, "bundles")
+    await commit_and_publish(s, Scope.BUNDLES)
     return _detail(b)
 
 
@@ -314,5 +315,5 @@ async def delete(name: str, version: str, s: AsyncSession = Depends(session)) ->
         blob = settings.bundle_storage / f"{sha}.zip"
         blob.unlink(missing_ok=True)
     await log(s, "bundles", f"deleted {name}@{version}")
-    await commit_and_publish(s, "bundles")
+    await commit_and_publish(s, Scope.BUNDLES)
     return {"ok": True}

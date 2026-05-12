@@ -23,6 +23,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sathop.shared.state_machine import Scope
+
 from ..bundle_schema import parse_shared_files
 from ..config import require_token, require_token_or_query, settings
 from ..db import Bundle, SharedFile, session, utcnow
@@ -141,7 +143,7 @@ async def upload(
         verb = "replaced"
 
     await log(s, "shared", f"{verb} {name} ({size} bytes, sha={digest[:12]})")
-    await commit_and_publish(s, "shared")
+    await commit_and_publish(s, Scope.SHARED)
     return _info(row)
 
 
@@ -199,5 +201,5 @@ async def delete(name: str, s: AsyncSession = Depends(session)) -> dict:
     await log(s, "shared", f"deleted {name}")
     await s.commit()
     blob.unlink(missing_ok=True)
-    publish_scopes(s, "shared")
+    publish_scopes(s, Scope.SHARED)
     return {"ok": True}

@@ -19,6 +19,7 @@ from sathop.shared.protocol import (
 from sathop.shared.state_machine import (
     GranuleState,
     ObjectAcked,
+    Scope,
 )
 
 from ..config import require_token, settings
@@ -43,7 +44,7 @@ async def register(req: ReceiverRegister, s: AsyncSession = Depends(session)) ->
         r.version = req.version
         r.platform = req.platform
         r.last_seen = utcnow()
-    await commit_and_publish(s, "receivers")
+    await commit_and_publish(s, Scope.RECEIVERS)
     return {"ok": True}
 
 
@@ -77,7 +78,7 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
         source=req.receiver_id,
         message="restart signal delivered to receiver",
     )
-    await commit_and_publish(s, "receivers")
+    await commit_and_publish(s, Scope.RECEIVERS)
     return ReceiverHeartbeatResponse(restart_requested=restart_requested)
 
 
@@ -168,7 +169,7 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
                 on_conflict="skip",
             )
     await log(s, req.receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id)
-    await commit_and_publish(s, "batches")
+    await commit_and_publish(s, Scope.BATCHES)
     return {"ok": True}
 
 
@@ -178,7 +179,7 @@ async def request_restart(receiver_id: str, s: AsyncSession = Depends(session)) 
     r = await get_or_404(s, Receiver, receiver_id, "receiver not found")
     r.restart_requested_at = utcnow()
     await log(s, receiver_id, "restart requested via UI")
-    await commit_and_publish(s, "receivers")
+    await commit_and_publish(s, Scope.RECEIVERS)
     return {"ok": True}
 
 
@@ -193,7 +194,7 @@ async def set_enabled(
     r = await get_or_404(s, Receiver, receiver_id, "receiver not found")
     r.enabled = enabled
     await log(s, receiver_id, f"receiver {'enabled' if enabled else 'disabled'}")
-    await commit_and_publish(s, "receivers")
+    await commit_and_publish(s, Scope.RECEIVERS)
     return {"ok": True, "enabled": enabled}
 
 
@@ -221,5 +222,5 @@ async def forget_receiver(receiver_id: str, s: AsyncSession = Depends(session)) 
         raise HTTPException(409, "receiver is still enabled — disable it first")
     await s.delete(r)
     await log(s, receiver_id, "receiver forgotten (row deleted)")
-    await commit_and_publish(s, "receivers")
+    await commit_and_publish(s, Scope.RECEIVERS)
     return {"ok": True}

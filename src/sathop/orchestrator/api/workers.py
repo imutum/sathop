@@ -22,6 +22,7 @@ from sathop.shared.state_machine import (
     GranuleEvent,
     GranuleState,
     ProcessingFailed,
+    Scope,
     UploadCompleted,
 )
 
@@ -91,7 +92,7 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
         if req.ca_pem is not None:
             w.ca_pem = req.ca_pem
         w.last_seen = utcnow()
-    await commit_and_publish(s, "workers")
+    await commit_and_publish(s, Scope.WORKERS)
     return WorkerRegisterResponse()
 
 
@@ -110,7 +111,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     restart_requested = await consume_restart_signal(s, w)
     gc_requested = await consume_gc_signal(s, w)
 
-    await commit_and_publish(s, "workers")
+    await commit_and_publish(s, Scope.WORKERS)
     return WorkerHeartbeatResponse(
         desired_capacity=w.desired_capacity,
         revoked_granule_ids=revoked,
@@ -141,7 +142,7 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     items = await claim_pending_granules(s, req.worker_id, limit, now, expires)
     if items:
         await log(s, req.worker_id, f"leased {len(items)} granules")
-    await commit_and_publish(s, "batches" if items else None)
+    await commit_and_publish(s, Scope.BATCHES if items else None)
     return LeaseResponse(items=items, lease_expires_at=expires)
 
 
@@ -223,7 +224,7 @@ async def set_capacity(
     w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.desired_capacity = desired_capacity
     await log(s, worker_id, f"capacity override → {desired_capacity} (env cap {w.capacity})")
-    await commit_and_publish(s, "workers")
+    await commit_and_publish(s, Scope.WORKERS)
     return {"ok": True, "desired_capacity": desired_capacity}
 
 
@@ -235,7 +236,7 @@ async def request_restart(worker_id: str, s: AsyncSession = Depends(session)) ->
     w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.restart_requested_at = utcnow()
     await log(s, worker_id, "restart requested via UI")
-    await commit_and_publish(s, "workers")
+    await commit_and_publish(s, Scope.WORKERS)
     return {"ok": True}
 
 
@@ -250,7 +251,7 @@ async def set_enabled(
     w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.enabled = enabled
     await log(s, worker_id, f"worker {'enabled' if enabled else 'disabled'}")
-    await commit_and_publish(s, "workers")
+    await commit_and_publish(s, Scope.WORKERS)
     return {"ok": True, "enabled": enabled}
 
 
@@ -267,7 +268,7 @@ async def set_paused(
     w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.operator_paused = operator_paused
     await log(s, worker_id, f"worker {'paused' if operator_paused else 'resumed'} via UI")
-    await commit_and_publish(s, "workers")
+    await commit_and_publish(s, Scope.WORKERS)
     return {"ok": True, "operator_paused": operator_paused}
 
 
@@ -286,7 +287,7 @@ async def revoke_all_leases(worker_id: str, s: AsyncSession = Depends(session)) 
     revoked = await revoke_worker_leases(s, worker_id, utcnow())
     if revoked:
         await log(s, worker_id, f"force-revoked {revoked} lease(s) via UI")
-    await commit_and_publish(s, "workers", "batches" if revoked else None)
+    await commit_and_publish(s, Scope.WORKERS, Scope.BATCHES if revoked else None)
     return {"ok": True, "revoked": revoked}
 
 
@@ -298,7 +299,7 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
     w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.gc_requested_at = utcnow()
     await log(s, worker_id, "cache GC requested via UI")
-    await commit_and_publish(s, "workers")
+    await commit_and_publish(s, Scope.WORKERS)
     return {"ok": True}
 
 
@@ -320,5 +321,5 @@ async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> d
         )
     await s.delete(w)
     await log(s, worker_id, "worker forgotten (row deleted)")
-    await commit_and_publish(s, "workers")
+    await commit_and_publish(s, Scope.WORKERS)
     return {"ok": True}

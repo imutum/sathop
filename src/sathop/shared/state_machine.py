@@ -287,6 +287,21 @@ class GranuleSnapshot:
     retry_count: int = 0
 
 
+class Scope(str, Enum):
+    """SSE channel taxonomy. Every state-changing handler picks one (or several)
+    when it commits; the frontend's TanStack-Query invalidator subscribes to
+    matching scopes. Declared next to `TransitionResult` because that's where
+    the state machine names its UI consequence; orchestrator handlers import
+    from here too."""
+
+    BATCHES = "batches"
+    WORKERS = "workers"
+    RECEIVERS = "receivers"
+    BUNDLES = "bundles"
+    SHARED = "shared"
+    EVENTS = "events"
+
+
 @dataclass(frozen=True)
 class TransitionResult:
     """What one applied event produces. Scope is strict: DB state mutations
@@ -299,7 +314,7 @@ class TransitionResult:
     # When set, the runner marks every GranuleObject for this granule with
     # deleted_at=<this datetime>. Only emitted by DeleteConfirmed.
     objects_deleted_at: datetime | None = None
-    publish_scope: str | None = "batches"
+    publish_scope: Scope | None = Scope.BATCHES
 
 
 class StateConflict(Exception):

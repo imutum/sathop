@@ -7,6 +7,8 @@ from contextlib import contextmanager
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sathop.shared.state_machine import Scope
+
 from .db import Event
 
 log = logging.getLogger("sathop.pubsub")
@@ -45,18 +47,18 @@ def subscriber_count() -> int:
     return len(_subscribers)
 
 
-def publish_scopes(s: AsyncSession, *scopes: str | None) -> None:
-    """Emit deduplicated SSE nudges, folding in any 'events' scope that prior
+def publish_scopes(s: AsyncSession, *scopes: Scope | None) -> None:
+    """Emit deduplicated SSE nudges, folding in any ``Scope.EVENTS`` that prior
     ``log_event()`` calls on this session deferred. ``commit_and_publish()``
     wraps ``s.commit()`` + this; reach for this directly only when something
     must run between commit and publish (e.g. shared-file delete: commit →
     unlink blob → publish)."""
-    extra = ("events",) if s.info.pop(_LOG_EVENT_PENDING, False) else ()
+    extra: tuple[Scope, ...] = (Scope.EVENTS,) if s.info.pop(_LOG_EVENT_PENDING, False) else ()
     for scope in dict.fromkeys(filter(None, (*scopes, *extra))):
-        publish({"scope": scope})
+        publish({"scope": scope.value})
 
 
-async def commit_and_publish(s: AsyncSession, *scopes: str | None) -> None:
+async def commit_and_publish(s: AsyncSession, *scopes: Scope | None) -> None:
     await s.commit()
     publish_scopes(s, *scopes)
 
