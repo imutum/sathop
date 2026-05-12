@@ -41,8 +41,15 @@ _Avoid_: package, plugin, script
 _Avoid_: asset, resource
 
 **Stage**:
-A named timing checkpoint along the **Granule**'s pipeline (`download_wait`, `download`, `process_wait`, `process`, `upload_wait`, `upload`). Each closes at a specific state-transition.
+A named timing checkpoint along the **Granule**'s pipeline (`download_wait`, `download`, `process_wait`, `process`, `upload_wait`, `upload`). Each closes at a specific state-transition; the row goes into `granule_stage_timings` so the UI can chart wall-clock durations. Authoritative names live in `STATE_TABLE[<state>].closes_stage`.
 _Avoid_: step, phase
+
+**Worker stage counter**:
+The worker-side counterpart to **Stage** — a six-bucket count of "how many granule handlers are in this section of the pipeline right now". Each name corresponds to a **Stage**, with two differences:
+  1. Suffix conventions: `_wait` (orchestrator, duration) ↔ `pending_` prefix (worker, count); active-stage names match exactly (`download` ↔ `downloading` is the one true rename — historical, kept stable). The full mapping lives in [ADR-0004](adr/0004-stage-vocabulary-dual-names.md).
+  2. Wire-format DB column names mirror the worker names (`queue_pending_download`, `queue_downloading`, …) because that's where the count is reported.
+
+Both vocabularies are deliberate and stable: rename ADR-0004 explains why we did not collapse them into one.
 
 **State**:
 One of 11 values in the **Granule**'s lifecycle (pending → queued → downloading → … → uploaded → acked → deleted, plus failed/blacklisted). Declared in `shared/state_machine.py::STATE_TABLE`.
