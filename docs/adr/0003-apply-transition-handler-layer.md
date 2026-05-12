@@ -1,0 +1,11 @@
+# `apply_transition` is the handler-layer Transition applier
+
+`orchestrator/api/_transition.py::apply_transition()` wraps the four pieces every state-changing endpoint repeats: `snapshot_of` → `state_machine.apply` → `StateConflict` policy → `apply_to_session` (the Runner). Before it existed, the same dance was open-coded in 8 call sites across `workers.py`, `receivers.py`, `batches.py`, and `worker_leases.py`, with five different conflict policies and bespoke logging at each one.
+
+The helper deliberately **does not** call `commit_and_publish`, write event-log rows, or emit any side-channel artefact. That line is the same one ADR-0002 draws around `TransitionResult`: log entries and transition rows must remain atomic in the same SQLAlchemy transaction, and the handler is the only place that knows which event-log message belongs to which transition. Letting the helper commit would either (a) force log writes through a callback parameter — which inflates the helper's interface and routes logging via a generic seam, the very anti-pattern ADR-0002 rejected — or (b) drop atomicity, so a crash between transition and log leaves a transition with no narrative.
+
+The helper does, however, read `settings.max_retries` directly. That coupling is fine because `_transition.py` is already an orchestrator-side adapter; the Runner (`_runner.py`) and the pure state machine (`shared/state_machine.py`) remain settings-free.
+
+Conflict policy is collapsed to two values: `raise_409` (the default — converts `StateConflict` to `HTTPException(409)`, optionally with a caller-supplied `conflict_message` callback) and `skip` (returns `None`, used by bulk loops and `receivers.ack` where a cancelled-mid-flight granule is expected). Sites with SQL pre-filters that make conflict impossible (`claim_pending_granules`, `revoke_worker_leases`) use the default — a conflict there would be a bug and surfacing it as 409 is fine.
+
+Future temptations to extend this helper — adding a `commit=True` parameter, a `log_message=...` parameter, an `on_success` callback that writes event-log rows — should be rejected on the same grounds as the analogous extensions to `TransitionResult`. Hold the line: the helper applies a Transition; the handler owns the transaction.
