@@ -1,9 +1,21 @@
-"""Worker runtime helper functions."""
+"""Worker runtime per-granule helpers.
+
+Small functions that shape worker output into wire-format events:
+  - `auth_for` resolves a `Credential` by name (with operator-visible warning
+    when the bundle requested a name the batch didn't carry).
+  - `processing_failure_message` / `tail_or_none` / `traceback_tail` cap text
+    fields on `ProcessingFailed` so a misbehaving bundle can't write multi-MB
+    rows.
+
+Per-storage and per-downloader formatters that used to live here have moved
+to their domain homes:
+  - `render_key` → `worker.storage.render_key`
+  - `download_progress_detail` → `worker.downloader.progress_detail`
+"""
 
 from __future__ import annotations
 
 import traceback
-from pathlib import Path
 
 from sathop.shared.protocol import Credential
 
@@ -33,23 +45,3 @@ def tail_or_none(value: str, n: int) -> str | None:
 
 def traceback_tail(exc: Exception) -> str:
     return "".join(traceback.format_exception(exc))[-WORKER_TRACEBACK_TAIL_CHARS:]
-
-
-def download_progress_detail(downloaded: int, total: int | None) -> str:
-    downloaded_mb = downloaded / 1_000_000
-    if total:
-        return f"{downloaded_mb:.1f}/{total / 1_000_000:.1f} MB"
-    return f"{downloaded_mb:.1f} MB"
-
-
-def render_key(template: str, out: Path, meta: dict) -> str:
-    fields = {
-        "stem": out.stem,
-        "ext": out.suffix,
-        "name": out.name,
-        **{k: str(v) for k, v in meta.items()},
-    }
-    try:
-        return template.format(**fields)
-    except KeyError:
-        return out.name

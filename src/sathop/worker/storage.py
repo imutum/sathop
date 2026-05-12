@@ -30,6 +30,24 @@ from sathop.shared.state_machine import UploadedObject
 log = logging.getLogger("sathop.worker.storage")
 
 
+def render_key(template: str, out: Path, meta: dict) -> str:
+    """Render a bundle's `outputs.object_key_template` against one output file.
+
+    Built-in fields `{stem}`, `{ext}`, `{name}` from the path; granule `meta`
+    keys are merged on top (str-coerced). Unknown placeholders fall back to
+    the bare filename so a typo in the template doesn't crash the upload."""
+    fields = {
+        "stem": out.stem,
+        "ext": out.suffix,
+        "name": out.name,
+        **{k: str(v) for k, v in meta.items()},
+    }
+    try:
+        return template.format(**fields)
+    except KeyError:
+        return out.name
+
+
 class Storage(Protocol):
     needs_static_server: bool
 

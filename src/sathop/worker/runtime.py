@@ -45,9 +45,7 @@ from .progress import ProgressServer
 from .runtime_helpers import (
     PROCESS_OUTPUT_TAIL_CHARS,
     auth_for,
-    download_progress_detail,
     processing_failure_message,
-    render_key,
     tail_or_none,
     traceback_tail,
 )
@@ -60,7 +58,9 @@ from .stages import (
     UPLOADING,
     StageTracker,
     WorkerStages,
+    staged,
 )
+from .storage import render_key
 
 log = logging.getLogger("sathop.worker")
 
@@ -340,10 +340,8 @@ class Worker:
 
     async def _download_inputs(self, item: LeaseItem, input_dir: Path, stage: StageTracker) -> list[Path]:
         gid = item.granule_id
-        stage.enter(PENDING_DOWNLOAD)
         paths: list[Path] = []
-        async with self._download_sem:
-            stage.enter(DOWNLOADING)
+        async with staged(stage, PENDING_DOWNLOAD, self._download_sem, DOWNLOADING):
             await self._emit_lease_event(DownloadStarted(granule_id=gid, worker_id=self.s.worker_id))
             log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
             for spec in item.inputs:
@@ -354,7 +352,6 @@ class Worker:
                 if spec.checksum:
                     await downloader.verify_sha256(dst, spec.checksum)
                 paths.append(dst)
-        stage.exit()
         await self._emit_lease_event(DownloadFinished(granule_id=gid, worker_id=self.s.worker_id))
         return paths
 
@@ -375,9 +372,7 @@ class Worker:
             self.s.orchestrator_url,
             self.s.token,
         )
-        stage.enter(PENDING_PROCESSING)
-        async with self._process_sem:
-            stage.enter(PROCESSING)
+        async with staged(stage, PENDING_PROCESSING, self._process_sem, PROCESSING):
             await self._emit_lease_event(ProcessStarted(granule_id=gid, worker_id=self.s.worker_id))
             result = await run_bundle(
                 handle,
@@ -389,7 +384,6 @@ class Worker:
                 item.execution_env,
                 progress_url,
             )
-        stage.exit()
         return handle, result
 
     async def _upload_outputs(
@@ -401,12 +395,10 @@ class Worker:
     ) -> None:
         gid = item.granule_id
         await self._emit_lease_event(ProcessFinished(granule_id=gid, worker_id=self.s.worker_id))
-        stage.enter(PENDING_UPLOAD)
-        async with self._upload_sem:
-            stage.enter(UPLOADING)
+        async with staged(stage, PENDING_UPLOAD, self._upload_sem, UPLOADING):
             await self._emit_lease_event(UploadStarted(granule_id=gid, worker_id=self.s.worker_id))
             uploaded: list[UploadedObject] = []
-            key_tpl = handle.manifest.outputs.get("object_key_template", "{stem}{ext}")
+            key_tpl = handle.manifest.outputs.object_key_template
             for out in outputs:
                 key = render_key(key_tpl, out, item.meta)
                 uploaded.append(await self.storage.put(out, key))
@@ -417,7 +409,6 @@ class Worker:
                     objects=uploaded,
                 )
             )
-        stage.exit()
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
 
     async def _emit_lease_event(self, event: GranuleEvent) -> None:
@@ -475,7 +466,7 @@ class Worker:
                     ProgressEvent(
                         step=f"download:{filename}",
                         pct=pct,
-                        detail=download_progress_detail(downloaded, total),
+                        detail=downloader.progress_detail(downloaded, total),
                     ),
                 )
             except Exception as e:

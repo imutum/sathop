@@ -32,6 +32,17 @@ _CHUNK = 256 * 1024
 ProgressCb = Callable[[int, int | None], Awaitable[None]]
 
 
+def progress_detail(downloaded: int, total: int | None) -> str:
+    """Human-readable byte-progress label for the orchestrator progress feed:
+    `"5.0/10.0 MB"` when the server reported Content-Length, `"5.0 MB"` when
+    not. Decimal MB (not MiB) because end-users expect download UIs to round
+    that way."""
+    downloaded_mb = downloaded / 1_000_000
+    if total:
+        return f"{downloaded_mb:.1f}/{total / 1_000_000:.1f} MB"
+    return f"{downloaded_mb:.1f} MB"
+
+
 class ChecksumMismatch(RuntimeError):
     """A downloaded input's sha256 didn't match `InputSpec.checksum`."""
 

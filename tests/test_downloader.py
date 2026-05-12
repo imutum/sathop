@@ -10,7 +10,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from sathop.shared.protocol import Credential
-from sathop.worker.downloader import ChecksumMismatch, HttpDownloader, verify_sha256
+from sathop.worker.downloader import (
+    ChecksumMismatch,
+    HttpDownloader,
+    progress_detail,
+    verify_sha256,
+)
 
 
 def _start(handler_cls: type[BaseHTTPRequestHandler]) -> tuple[HTTPServer, int]:
@@ -154,6 +159,30 @@ async def test_verify_sha256_raises_on_mismatch(tmp_path):
     p.write_bytes(b"actual content")
     with pytest.raises(ChecksumMismatch):
         await verify_sha256(p, "0" * 64)
+
+
+# ─── progress_detail ───────────────────────────────────────────────────────
+
+
+def test_progress_detail_with_known_total():
+    assert progress_detail(5_000_000, 10_000_000) == "5.0/10.0 MB"
+
+
+def test_progress_detail_with_zero_total_treats_as_unknown():
+    """total=0 is falsy → "MB" label, no /total."""
+    assert progress_detail(2_000_000, 0) == "2.0 MB"
+
+
+def test_progress_detail_with_none_total():
+    assert progress_detail(2_000_000, None) == "2.0 MB"
+
+
+def test_progress_detail_rounds_to_one_decimal():
+    assert progress_detail(1_234_567, 10_000_000) == "1.2/10.0 MB"
+
+
+def test_progress_detail_zero_bytes():
+    assert progress_detail(0, 10_000_000) == "0.0/10.0 MB"
 
 
 async def test_no_auth_passes_nothing(tmp_path):

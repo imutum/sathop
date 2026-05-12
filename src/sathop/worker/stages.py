@@ -7,7 +7,10 @@ payload, and UI-facing queue labels from drifting apart.
 
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
 
@@ -108,3 +111,25 @@ class StageTracker:
             return
         self._stages._exit(self._current)
         self._current = None
+
+
+@asynccontextmanager
+async def staged(
+    tracker: StageTracker,
+    pending: StageName,
+    sem: asyncio.Semaphore,
+    active: StageName,
+) -> AsyncIterator[None]:
+    """Pipeline-stage counter scaffold.
+
+    Bumps `pending` while waiting on `sem`, swaps to `active` once acquired,
+    clears the counter on exit (success or exception). Event-emission stays
+    in the caller — each pipeline stage emits its own GranuleEvents at points
+    that differ slightly from the semaphore boundary."""
+    tracker.enter(pending)
+    try:
+        async with sem:
+            tracker.enter(active)
+            yield
+    finally:
+        tracker.exit()

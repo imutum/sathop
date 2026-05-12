@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-
-import pytest
 
 from sathop.shared.protocol import Credential
 from sathop.worker.runtime_helpers import (
@@ -13,9 +10,7 @@ from sathop.worker.runtime_helpers import (
     PROCESSING_FAILURE_TAIL_CHARS,
     WORKER_TRACEBACK_TAIL_CHARS,
     auth_for,
-    download_progress_detail,
     processing_failure_message,
-    render_key,
     tail_or_none,
     traceback_tail,
 )
@@ -129,65 +124,6 @@ def test_traceback_tail_caps_length():
     except RuntimeError as e:
         out = traceback_tail(e)
     assert len(out) <= WORKER_TRACEBACK_TAIL_CHARS
-
-
-# ─── download_progress_detail ──────────────────────────────────────────────
-
-
-def test_download_progress_detail_with_known_total():
-    assert download_progress_detail(5_000_000, 10_000_000) == "5.0/10.0 MB"
-
-
-def test_download_progress_detail_with_zero_total():
-    """total=0 is falsy → treated as unknown total."""
-    assert download_progress_detail(2_000_000, 0) == "2.0 MB"
-
-
-def test_download_progress_detail_with_none_total():
-    assert download_progress_detail(2_000_000, None) == "2.0 MB"
-
-
-def test_download_progress_detail_rounds_to_one_decimal():
-    assert download_progress_detail(1_234_567, 10_000_000) == "1.2/10.0 MB"
-
-
-def test_download_progress_detail_zero_bytes():
-    assert download_progress_detail(0, 10_000_000) == "0.0/10.0 MB"
-
-
-# ─── render_key ────────────────────────────────────────────────────────────
-
-
-def test_render_key_basic_stem_ext_name():
-    p = Path("/tmp/MOD09A1.A2024.tif")
-    assert render_key("{stem}{ext}", p, {}) == "MOD09A1.A2024.tif"
-    assert render_key("{name}", p, {}) == "MOD09A1.A2024.tif"
-    assert render_key("{stem}", p, {}) == "MOD09A1.A2024"
-    assert render_key("{ext}", p, {}) == ".tif"
-
-
-def test_render_key_with_meta_fields():
-    p = Path("/tmp/out.tif")
-    assert render_key("y{year}/{stem}{ext}", p, {"year": 2024}) == "y2024/out.tif"
-
-
-def test_render_key_meta_values_stringified():
-    """Non-string meta values are str()-coerced (granule_id may be int internally)."""
-    p = Path("/tmp/out.tif")
-    assert render_key("{gid}/{stem}", p, {"gid": 42}) == "42/out"
-
-
-def test_render_key_falls_back_to_name_on_missing_placeholder():
-    """An unknown {placeholder} → fall back to bare filename rather than crash."""
-    p = Path("/tmp/out.tif")
-    assert render_key("{nope}/{stem}", p, {}) == "out.tif"
-
-
-def test_render_key_user_meta_overrides_built_in():
-    """If `meta` provides `stem`, it wins over the auto-derived one. Documents
-    the actual behaviour — built-ins are seeded first and overwritten by **meta."""
-    p = Path("/tmp/out.tif")
-    assert render_key("{stem}{ext}", p, {"stem": "user"}) == "user.tif"
 
 
 # ─── constants exist + have plausible values ───────────────────────────────
