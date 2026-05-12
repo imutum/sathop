@@ -22,19 +22,15 @@ from sathop.shared.state_machine import (
     GranuleEvent,
     GranuleState,
     ProcessingFailed,
-    StateConflict,
     UploadCompleted,
 )
-from sathop.shared.state_machine import (
-    apply as apply_event,
-)
 
-from ..config import require_token, settings
+from ..config import require_token
 from ..db import Granule, GranuleObject, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import get_or_404
-from ._runner import apply_to_session, snapshot_of
+from ._transition import apply_transition
 from .worker_heartbeat import (
     apply_worker_heartbeat,
     consume_gc_signal,
@@ -160,16 +156,7 @@ async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) ->
     # ownership and ack state); other events require an active lease.
     if not isinstance(event, DeleteConfirmed) and g.leased_by != event.worker_id:
         raise HTTPException(409, "granule not leased by this worker")
-    try:
-        result = apply_event(
-            snapshot_of(g),
-            event,
-            now=utcnow(),
-            max_retries=settings.max_retries,
-        )
-    except StateConflict as e:
-        raise HTTPException(409, str(e)) from e
-    await apply_to_session(s, g, result)
+    result = await apply_transition(s, g, event, now=utcnow())
     if isinstance(event, UploadCompleted):
         await log(
             s,

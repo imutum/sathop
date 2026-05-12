@@ -16,13 +16,10 @@ from sathop.shared.state_machine import (
     GranuleState,
     RevokedByOperator,
 )
-from sathop.shared.state_machine import (
-    apply as apply_event,
-)
 
 from ..config import settings
 from ..db import Batch, Granule, GranuleObject, Worker
-from ._runner import apply_to_session, snapshot_of
+from ._transition import apply_transition
 
 log = logging.getLogger("sathop.orchestrator.worker_leases")
 
@@ -116,17 +113,18 @@ async def claim_pending_granules(
 
     items: list[LeaseItem] = []
     for granule in rows:
-        result = apply_event(
-            snapshot_of(granule),
+        # SQL above pre-filters state==PENDING so apply_transition's default
+        # raise_409 policy is unreachable in practice.
+        await apply_transition(
+            s,
+            granule,
             ClaimByLease(
                 granule_id=granule.granule_id,
                 worker_id=worker_id,
                 lease_expires_at=expires,
             ),
             now=now,
-            max_retries=settings.max_retries,
         )
-        await apply_to_session(s, granule, result)
         batch = await s.get(Batch, granule.batch_id)
         items.append(lease_item(granule, batch))
     return items
@@ -181,11 +179,12 @@ async def revoke_worker_leases(s: AsyncSession, worker_id: str, now) -> int:
         .all()
     )
     for granule in rows:
-        result = apply_event(
-            snapshot_of(granule),
+        # SQL above pre-filters LEASED_STATES so the default raise_409 policy
+        # is unreachable in practice.
+        await apply_transition(
+            s,
+            granule,
             RevokedByOperator(granule_id=granule.granule_id),
             now=now,
-            max_retries=settings.max_retries,
         )
-        await apply_to_session(s, granule, result)
     return len(rows)

@@ -23,10 +23,6 @@ from sathop.shared.state_machine import (
     CancelGranule,
     GranuleState,
     RetryGranule,
-    StateConflict,
-)
-from sathop.shared.state_machine import (
-    apply as apply_event,
 )
 
 from ..bundle_schema import InputsSchema, parse_shared_files, validate_granule
@@ -46,7 +42,7 @@ from ..db import (
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import get_or_404
-from ._runner import apply_to_session, snapshot_of
+from ._transition import apply_transition
 from .batch_readmodels import (
     batch_eta_seconds_bulk,
     batch_exhausted_objects,
@@ -298,16 +294,13 @@ async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dic
     )
     rows = (await s.execute(stmt)).scalars().all()
     for granule in rows:
-        try:
-            result = apply_event(
-                snapshot_of(granule),
-                RetryGranule(granule_id=granule.granule_id),
-                now=now,
-                max_retries=settings.max_retries,
-            )
-        except StateConflict:
-            continue
-        await apply_to_session(s, granule, result)
+        await apply_transition(
+            s,
+            granule,
+            RetryGranule(granule_id=granule.granule_id),
+            now=now,
+            on_conflict="skip",
+        )
     await commit_and_publish(s, "batches" if rows else None)
     return {"ok": True, "reset": len(rows)}
 
@@ -315,16 +308,13 @@ async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dic
 @router.post("/{batch_id}/granules/{granule_id}/cancel")
 async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depends(session)) -> dict:
     g = await _granule_in_batch_or_404(s, batch_id, granule_id)
-    try:
-        result = apply_event(
-            snapshot_of(g),
-            CancelGranule(granule_id=granule_id),
-            now=utcnow(),
-            max_retries=settings.max_retries,
-        )
-    except StateConflict:
-        raise HTTPException(409, f"cannot cancel granule in state {g.state!r}") from None
-    await apply_to_session(s, g, result)
+    await apply_transition(
+        s,
+        g,
+        CancelGranule(granule_id=granule_id),
+        now=utcnow(),
+        conflict_message=lambda g, _e: f"cannot cancel granule in state {g.state!r}",
+    )
     await log(s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id)
     await commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
@@ -333,16 +323,13 @@ async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depen
 @router.post("/{batch_id}/granules/{granule_id}/retry")
 async def retry_granule(batch_id: str, granule_id: str, s: AsyncSession = Depends(session)) -> dict:
     g = await _granule_in_batch_or_404(s, batch_id, granule_id)
-    try:
-        result = apply_event(
-            snapshot_of(g),
-            RetryGranule(granule_id=granule_id),
-            now=utcnow(),
-            max_retries=settings.max_retries,
-        )
-    except StateConflict:
-        raise HTTPException(409, f"cannot retry granule in state {g.state!r}") from None
-    await apply_to_session(s, g, result)
+    await apply_transition(
+        s,
+        g,
+        RetryGranule(granule_id=granule_id),
+        now=utcnow(),
+        conflict_message=lambda g, _e: f"cannot retry granule in state {g.state!r}",
+    )
     await log(s, "admin", f"retried granule {granule_id}", granule_id=granule_id)
     await commit_and_publish(s, "batches")
     return {"ok": True, "state": g.state}
@@ -365,16 +352,13 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
         .all()
     )
     for g in rows:
-        try:
-            result = apply_event(
-                snapshot_of(g),
-                CancelGranule(granule_id=g.granule_id),
-                now=now,
-                max_retries=settings.max_retries,
-            )
-        except StateConflict:
-            continue
-        await apply_to_session(s, g, result)
+        await apply_transition(
+            s,
+            g,
+            CancelGranule(granule_id=g.granule_id),
+            now=now,
+            on_conflict="skip",
+        )
     if rows:
         await log(s, "admin", f"cancelled batch {batch_id}: {len(rows)} granules blacklisted", level="warn")
     await commit_and_publish(s, "batches" if rows else None)
