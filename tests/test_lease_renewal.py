@@ -1,4 +1,4 @@
-﻿"""Lease auto-renewal on heartbeat + worker-side LeaseRevoked handling.
+"""Lease auto-renewal on heartbeat + worker-side LeaseRevoked handling.
 
 Heartbeat doubles as a keep-alive: every check-in pushes the
 `lease_expires_at` of every granule the worker holds forward by

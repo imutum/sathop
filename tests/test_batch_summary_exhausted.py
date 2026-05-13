@@ -1,4 +1,4 @@
-﻿"""BatchSummary now carries an authoritative `objects_exhausted` count so the
+"""BatchSummary now carries an authoritative `objects_exhausted` count so the
 batches list / detail can flag stuck-delivery batches without paging through
 the granules endpoint (which caps at 200 rows).
 """

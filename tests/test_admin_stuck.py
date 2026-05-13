@@ -1,4 +1,4 @@
-﻿"""GET /api/admin/stuck — top-N stuck granules across every non-terminal state.
+"""GET /api/admin/stuck — top-N stuck granules across every non-terminal state.
 Powers the Dashboard's stuck-granule drill-down so operators can actually see
 which granules to investigate, instead of just the count."""
 

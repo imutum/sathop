@@ -1,4 +1,4 @@
-﻿"""GET /api/events?source=<id> — exact-match filter on Event.source.
+"""GET /api/events?source=<id> — exact-match filter on Event.source.
 
 Powers the "view events for this node" link on Worker / Receiver cards. Without
 it, operators had to type the worker_id into the global fuzzy search — which

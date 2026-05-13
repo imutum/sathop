@@ -1,4 +1,4 @@
-﻿"""Prometheus /api/metrics endpoint: seeds DB with a few rows, hits the endpoint
+"""Prometheus /api/metrics endpoint: seeds DB with a few rows, hits the endpoint
 via FastAPI TestClient, asserts expected metric names and values appear."""
 
 from __future__ import annotations

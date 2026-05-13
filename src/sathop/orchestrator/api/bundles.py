@@ -20,10 +20,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.bundle_archive import detect_wrapper_dir
+from sathop.shared.bundle_manifest import BundleManifest, parse_shared_files
 from sathop.shared.protocol import BundleDetail, BundleSummary, format_bundle_ref
 from sathop.shared.state_machine import Scope
 
-from sathop.shared.bundle_manifest import BundleManifest, parse_shared_files
 from ..config import require_token, settings
 from ..db import Batch, Bundle, SharedFile, session, utcnow
 from ..pubsub import commit_and_publish

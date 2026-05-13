@@ -40,9 +40,7 @@ def _make_zip(
     inputs_yaml: str = "inputs:\n  slots:\n    - name: primary\n      product: any\n",
 ) -> bytes:
     body = (
-        f"name: {name}\nversion: '{version}'\n"
-        + inputs_yaml
-        + "execution:\n  entrypoint: 'python run.py'\n"
+        f"name: {name}\nversion: '{version}'\n" + inputs_yaml + "execution:\n  entrypoint: 'python run.py'\n"
         "outputs:\n  watch_dir: output\n"
         f"{manifest_extra_yaml}"
     )

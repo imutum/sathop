@@ -1,4 +1,4 @@
-﻿"""Hard-delete batch endpoint.
+"""Hard-delete batch endpoint.
 
 Cancel-then-delete is the supported workflow. The endpoint refuses by default
 when any granule is still mid-flight on a worker (downloading / downloaded /

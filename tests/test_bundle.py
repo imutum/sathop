@@ -220,8 +220,7 @@ def test_bundle_manifest_load(tmp_path):
 def test_bundle_manifest_load_shared_files(tmp_path):
     p = tmp_path / "manifest.yaml"
     p.write_text(
-        _MANIFEST_TEMPLATE.format(name="demo", version="1")
-        + "shared_files:\n  - mask.tif\n  - dem.bin\n",
+        _MANIFEST_TEMPLATE.format(name="demo", version="1") + "shared_files:\n  - mask.tif\n  - dem.bin\n",
         encoding="utf-8",
     )
     m = BundleManifest.from_yaml(p)

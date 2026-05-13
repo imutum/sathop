@@ -1,4 +1,4 @@
-﻿"""Granule progress ingress + timeline query on the orchestrator side."""
+"""Granule progress ingress + timeline query on the orchestrator side."""
 
 from __future__ import annotations
 

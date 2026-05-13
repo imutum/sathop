@@ -1,4 +1,4 @@
-﻿"""Receiver pull-failure throttling.
+"""Receiver pull-failure throttling.
 
 Permanently broken presigned URLs used to spin every receiver forever — the
 pull endpoint had no notion of "give up". Now `failed_pulls` increments on

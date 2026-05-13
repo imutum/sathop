@@ -184,9 +184,7 @@ async def delete(name: str, s: AsyncSession = Depends(session)) -> dict:
     # Refuse if any registered bundle still references this name — fail fast
     # rather than let a lease crash on a silently-missing shared file.
     bundles = (await s.execute(select(Bundle))).scalars().all()
-    referrers = [
-        f"{b.name}@{b.version}" for b in bundles if name in parse_shared_files(b.manifest)
-    ]
+    referrers = [f"{b.name}@{b.version}" for b in bundles if name in parse_shared_files(b.manifest)]
     if referrers:
         sample = ", ".join(referrers[:5])
         more = f" (+{len(referrers) - 5} more)" if len(referrers) > 5 else ""

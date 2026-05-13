@@ -1,4 +1,4 @@
-﻿"""Per-stage timing recording + query endpoints."""
+"""Per-stage timing recording + query endpoints."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-﻿"""Coverage for the per-batch ETA helper that powers BatchSummary.eta_seconds."""
+"""Coverage for the per-batch ETA helper that powers BatchSummary.eta_seconds."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-﻿"""Per-worker max-inflight cap on /api/workers/lease.
+"""Per-worker max-inflight cap on /api/workers/lease.
 
 Covers:
   • cap=0 (default) leaves behavior unchanged

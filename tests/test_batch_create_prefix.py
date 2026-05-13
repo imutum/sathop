@@ -1,4 +1,4 @@
-﻿"""Granule-id auto-prefixing in POST /api/batches and POST /api/batches/{id}/granules.
+"""Granule-id auto-prefixing in POST /api/batches and POST /api/batches/{id}/granules.
 
 Keeps the global single-column PK on `granules.granule_id` while letting users
 pick short IDs that only need to be unique inside their batch."""

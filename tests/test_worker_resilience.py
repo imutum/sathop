@@ -125,6 +125,7 @@ async def test_heartbeat_404_triggers_re_register(tmp_path):
         w.client.heartbeat = fake_heartbeat  # type: ignore[method-assign]
 
         task = asyncio.create_task(w._heartbeat_loop())
+
         # Wait until both heartbeat replies have been consumed AND we re-registered
         # — deterministic regardless of CI scheduler jitter. 5s ceiling guards
         # against the loop never firing (regression).

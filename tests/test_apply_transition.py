@@ -1,4 +1,4 @@
-﻿"""Unit tests for the handler-layer Transition applier."""
+"""Unit tests for the handler-layer Transition applier."""
 
 from __future__ import annotations
 

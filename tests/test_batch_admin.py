@@ -1,4 +1,4 @@
-﻿"""Cancel / retry endpoints on batches + individual granules."""
+"""Cancel / retry endpoints on batches + individual granules."""
 
 from __future__ import annotations
 

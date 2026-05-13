@@ -1,4 +1,4 @@
-﻿"""GET /api/batches/{bid}/granules: listing, state filter, pagination."""
+"""GET /api/batches/{bid}/granules: listing, state filter, pagination."""
 
 from __future__ import annotations
 

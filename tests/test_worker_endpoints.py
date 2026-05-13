@@ -1,4 +1,4 @@
-﻿"""Endpoint contract for POST /api/workers/events (upload_completed and
+"""Endpoint contract for POST /api/workers/events (upload_completed and
 processing_failed payloads).
 
 These two events are the worker's terminal state-write paths and must both:

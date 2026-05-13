@@ -1,4 +1,4 @@
-﻿"""Retention sweeper: old events + aged-out DELETED granules get pruned;
+"""Retention sweeper: old events + aged-out DELETED granules get pruned;
 recent rows stay. Exercises the module against a real temp-file SQLite DB."""
 
 from __future__ import annotations

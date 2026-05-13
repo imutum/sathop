@@ -1,4 +1,4 @@
-﻿"""Worker / receiver enable + forget endpoints — runtime kill-switch and
+"""Worker / receiver enable + forget endpoints — runtime kill-switch and
 permanent removal, with safety guards so an operator can't drop a busy node."""
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-﻿"""/api/events: verify the batch_id join — events tied to a granule carry the
+"""/api/events: verify the batch_id join — events tied to a granule carry the
 parent batch_id so the UI can deep-link straight to the batch-detail page."""
 
 from __future__ import annotations

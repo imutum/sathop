@@ -1,4 +1,4 @@
-﻿"""Worker /events endpoint + lease-sweeper coverage of the in-flight states
+"""Worker /events endpoint + lease-sweeper coverage of the in-flight states
 (queued/downloading/downloaded/processing/processed/uploading)."""
 
 from __future__ import annotations

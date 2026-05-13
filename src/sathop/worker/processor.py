@@ -149,9 +149,7 @@ async def _drain_to_cap(stream: asyncio.StreamReader | None, cap: int) -> tuple[
             truncated = True
 
 
-async def _communicate_bounded(
-    proc: asyncio.subprocess.Process, cap: int
-) -> tuple[bytes, bytes, bool, bool]:
+async def _communicate_bounded(proc: asyncio.subprocess.Process, cap: int) -> tuple[bytes, bytes, bool, bool]:
     """Like ``proc.communicate()`` but stdout/stderr each capped at ``cap``."""
     out_task = asyncio.create_task(_drain_to_cap(proc.stdout, cap))
     err_task = asyncio.create_task(_drain_to_cap(proc.stderr, cap))
