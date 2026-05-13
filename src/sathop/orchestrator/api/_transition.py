@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.state_machine import (
-    GranuleEvent,
+    AnyGranuleEvent,
     StateConflict,
     TransitionResult,
 )
@@ -32,7 +32,7 @@ from ._runner import apply_to_session, snapshot_of
 async def apply_transition(
     s: AsyncSession,
     granule: Granule,
-    event: GranuleEvent,
+    event: AnyGranuleEvent,
     *,
     now: datetime,
     on_conflict: Literal["raise_409"] = "raise_409",
@@ -44,7 +44,7 @@ async def apply_transition(
 async def apply_transition(
     s: AsyncSession,
     granule: Granule,
-    event: GranuleEvent,
+    event: AnyGranuleEvent,
     *,
     now: datetime,
     on_conflict: Literal["skip"],
@@ -55,7 +55,7 @@ async def apply_transition(
 async def apply_transition(
     s: AsyncSession,
     granule: Granule,
-    event: GranuleEvent,
+    event: AnyGranuleEvent,
     *,
     now: datetime,
     on_conflict: Literal["raise_409", "skip"] = "raise_409",

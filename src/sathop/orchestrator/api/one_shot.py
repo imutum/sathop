@@ -9,19 +9,19 @@ grow sibling boilerplate.
 
 from __future__ import annotations
 
-from typing import Protocol
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.state_machine import Scope
 
-from ..db import utcnow
+from ..db import Receiver, Worker, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 
-
-class _HasVersion(Protocol):
-    version: str
+# Versioned heartbeat agents. Explicit union (not a Protocol) because
+# SQLAlchemy's `Mapped[str]` descriptor doesn't satisfy a `version: str`
+# Protocol under pyright's invariance rules — and the two concrete agents
+# are the only callers anyway, so naming them is accurate, not constraining.
+_VersionedAgent = Worker | Receiver
 
 
 async def request_one_shot_signal(
@@ -62,7 +62,7 @@ async def consume_one_shot_signal(
 
 async def record_version_flap(
     s: AsyncSession,
-    entity: _HasVersion,
+    entity: _VersionedAgent,
     *,
     new_version: str,
     source: str,

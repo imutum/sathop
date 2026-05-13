@@ -252,6 +252,15 @@ class ObjectAcked(BaseModel):
     granule_id: str
 
 
+# Union of every event `apply()` handles — wire-format GranuleEvent plus the
+# five orchestrator-internal triggers. `apply_transition()` types its `event`
+# parameter against this so internal-event call sites (worker_leases.claim /
+# revoke, receivers.ack, batches.cancel / retry) type-check without forcing
+# them to import Annotated. Runtime is unaffected: apply() match-cases on the
+# concrete class regardless of the static union.
+AnyGranuleEvent = GranuleEvent | ClaimByLease | RevokedByOperator | CancelGranule | RetryGranule | ObjectAcked
+
+
 # Tail caps applied by apply() — matches old mark_failed semantics so a
 # misbehaving worker can't write multi-MB rows.
 _ERROR_CAP = 2000
