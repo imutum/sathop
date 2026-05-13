@@ -2,7 +2,6 @@
 import { ref } from "vue";
 import { API, setToken, suspendAuthRecovery } from "@/api";
 import { useAuthGate } from "@/composables/useAuthGate";
-import { Loader2Icon } from "lucide-vue-next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -125,11 +124,11 @@ const year = new Date().getFullYear();
           type="submit"
           size="lg"
           class="mt-5 w-full"
-          :disabled="probing || !input.trim()"
-          :aria-busy="probing || undefined"
+          :disabled="!input.trim()"
+          :pending="probing"
+          pending-label="验证中…"
         >
-          <Loader2Icon v-if="probing" class="size-3.5 animate-spin" />
-          {{ probing ? "验证中…" : "进入控制台" }}
+          进入控制台
         </Button>
 
         <div class="mt-6 border-t border-border pt-4 text-2xs leading-relaxed text-muted-foreground">

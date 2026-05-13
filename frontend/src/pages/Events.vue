@@ -20,7 +20,6 @@ import QueryState from "@/components/QueryState.vue";
 import HintTip from "@/components/HintTip.vue";
 import SelectInput from "@/ui/SelectInput.vue";
 import Segmented from "@/components/Segmented.vue";
-import { Loader2Icon } from "lucide-vue-next";
 import TextInput from "@/ui/TextInput.vue";
 import { Icon } from "@/components/Icon";
 
@@ -318,11 +317,11 @@ function highlight(text: string, n: string): HighlightSeg[] {
                 type="button"
                 variant="outline"
                 size="sm"
-                :disabled="loadingOlder"
+                :pending="loadingOlder"
+                pending-label="加载中…"
                 @click="loadOlder"
               >
-                <Loader2Icon v-if="loadingOlder" class="size-3 animate-spin" />
-                {{ loadingOlder ? "加载中…" : "加载更早事件" }}
+                加载更早事件
               </Button>
               <span v-else class="text-2xs text-muted-foreground">已加载到最早事件</span>
             </div>
