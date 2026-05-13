@@ -55,11 +55,10 @@ async def lifespan(app: FastAPI):
     finally:
         for t in bg:
             t.cancel()
-        for t in bg:
-            try:
-                await t
-            except (asyncio.CancelledError, Exception):
-                pass
+        # gather(return_exceptions=True) swallows both CancelledError and any
+        # exception a task raised during shutdown — same intent as the prior
+        # per-task try/except, half the lines, parallel awaits.
+        await asyncio.gather(*bg, return_exceptions=True)
         await shutdown_db()
 
 

@@ -106,6 +106,19 @@ def _httpx_auth_and_headers(
     return None, {}
 
 
+def _aria2_auth_options(auth: Credential | None) -> dict[str, object]:
+    """aria2 sibling of `_httpx_auth_and_headers`. Adding a new scheme means
+    editing both translators in lockstep — keep the branch order identical."""
+    if auth is None:
+        return {}
+    if auth.scheme == "basic" and auth.username and auth.password:
+        return {"http-user": auth.username, "http-passwd": auth.password}
+    if auth.scheme == "bearer" and auth.token:
+        return {"header": [f"Authorization: Bearer {auth.token}"]}
+    _warn_incomplete_credential(auth)
+    return {}
+
+
 class HttpDownloader:
     async def fetch(
         self,
@@ -192,15 +205,8 @@ class Aria2Downloader:
             "split": "4",
             "retry-wait": "5",
             "max-tries": "3",
+            **_aria2_auth_options(auth),
         }
-        if auth is not None:
-            if auth.scheme == "basic" and auth.username and auth.password:
-                options["http-user"] = auth.username
-                options["http-passwd"] = auth.password
-            elif auth.scheme == "bearer" and auth.token:
-                options["header"] = [f"Authorization: Bearer {auth.token}"]
-            else:
-                _warn_incomplete_credential(auth)
 
         dl = await asyncio.to_thread(self._api.add_uris, [url], options=options)
         try:

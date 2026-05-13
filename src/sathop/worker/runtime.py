@@ -28,7 +28,6 @@ from sathop.shared.state_machine import (
     DownloadStarted,
     GranuleEvent,
     ProcessFinished,
-    ProcessingFailed,
     ProcessStarted,
     UploadCompleted,
     UploadedObject,
@@ -43,11 +42,9 @@ from .config import Settings
 from .processor import ProcessResult, run_bundle
 from .progress import ProgressServer
 from .runtime_helpers import (
-    PROCESS_OUTPUT_TAIL_CHARS,
     auth_for,
-    processing_failure_message,
-    tail_or_none,
-    traceback_tail,
+    processing_failed_from_exception,
+    processing_failed_from_result,
 )
 from .stages import (
     DOWNLOADING,
@@ -306,16 +303,7 @@ class Worker:
             handle, result = await self._process_inputs(item, paths, progress_url, stage)
 
             if not result.ok:
-                await self._emit_best_effort(
-                    ProcessingFailed(
-                        granule_id=gid,
-                        worker_id=self.s.worker_id,
-                        error=processing_failure_message(result.stderr),
-                        stdout_tail=tail_or_none(result.stdout, PROCESS_OUTPUT_TAIL_CHARS),
-                        stderr_tail=tail_or_none(result.stderr, PROCESS_OUTPUT_TAIL_CHARS),
-                        exit_code=result.exit_code,
-                    )
-                )
+                await self._emit_best_effort(processing_failed_from_result(gid, self.s.worker_id, result))
                 log.warning("[%s] processing failed exit=%s", gid, result.exit_code)
                 return
 
@@ -325,14 +313,7 @@ class Worker:
             log.info("[%s] handler aborted (lease revoked)", gid)
         except Exception as e:
             log.exception("[%s] unhandled error", gid)
-            await self._emit_best_effort(
-                ProcessingFailed(
-                    granule_id=gid,
-                    worker_id=self.s.worker_id,
-                    error=f"worker {type(e).__name__}: {e}\n\n{traceback_tail(e)}",
-                    exit_code=None,
-                )
-            )
+            await self._emit_best_effort(processing_failed_from_exception(gid, self.s.worker_id, e))
         finally:
             stage.exit()
             self.progress.revoke(nonce)

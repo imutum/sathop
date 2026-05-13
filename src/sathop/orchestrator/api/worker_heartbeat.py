@@ -9,21 +9,6 @@ from sathop.shared.protocol import WorkerHeartbeat
 from sathop.shared.state_machine import LEASED_STATES
 
 from ..db import Granule, Worker
-from ..pubsub import log_event as log
-from .one_shot import consume_one_shot_signal
-
-
-async def record_worker_version(s: AsyncSession, worker: Worker, req: WorkerHeartbeat) -> None:
-    if not req.version or req.version == worker.version:
-        return
-    await log(
-        s,
-        req.worker_id,
-        f"worker version changed {worker.version!r} → {req.version!r} "
-        "(if this keeps flipping, two containers likely share the worker_id)",
-        level="warn",
-    )
-    worker.version = req.version
 
 
 def apply_worker_heartbeat(worker: Worker, req: WorkerHeartbeat, now) -> None:
@@ -59,29 +44,3 @@ async def revoked_active_granules(s: AsyncSession, req: WorkerHeartbeat) -> list
     )
     owned_set = set(still_owned)
     return [gid for gid in req.active_granule_ids if gid not in owned_set]
-
-
-async def consume_restart_signal(s: AsyncSession, worker: Worker) -> bool:
-    def clear() -> None:
-        worker.restart_requested_at = None
-
-    return await consume_one_shot_signal(
-        s,
-        worker.restart_requested_at is not None,
-        clear,
-        source=worker.worker_id,
-        message="restart signal delivered to worker",
-    )
-
-
-async def consume_gc_signal(s: AsyncSession, worker: Worker) -> bool:
-    def clear() -> None:
-        worker.gc_requested_at = None
-
-    return await consume_one_shot_signal(
-        s,
-        worker.gc_requested_at is not None,
-        clear,
-        source=worker.worker_id,
-        message="cache GC signal delivered to worker",
-    )

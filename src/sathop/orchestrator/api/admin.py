@@ -96,39 +96,51 @@ async def gc_bundles(
     they don't have such flows in flight."""
     if age_days < 0:
         return {"error": "age_days must be ≥ 0"}
-    threshold = utcnow() - timedelta(days=age_days)
+    now = utcnow()
+    candidates = await _gc_candidates(s, threshold=now - timedelta(days=age_days))
+    if dry_run:
+        return {
+            "dry_run": True,
+            "age_days": age_days,
+            "candidates": [_gc_candidate_dict(b, now=now) for b in candidates],
+            "freed_bytes_estimate": sum(b.size for b in candidates),
+        }
+    summary = await _gc_apply(s, candidates)
+    return {"dry_run": False, "age_days": age_days, **summary}
+
+
+async def _gc_candidates(s: AsyncSession, *, threshold: datetime) -> list[Bundle]:
+    """Bundles with no batch referencing them AND uploaded before `threshold`.
+    Pure query — never mutates."""
     bundles = (await s.execute(select(Bundle))).scalars().all()
     counts_stmt = select(Batch.bundle_ref, func.count(Batch.batch_id)).group_by(Batch.bundle_ref)
     in_use = {ref: n for ref, n in (await s.execute(counts_stmt)).all()}
-
-    candidates: list[Bundle] = [
+    return [
         b
         for b in bundles
         if in_use.get(format_bundle_ref(b.name, b.version), 0) == 0 and b.uploaded_at < threshold
     ]
 
-    if dry_run:
-        return {
-            "dry_run": True,
-            "age_days": age_days,
-            "candidates": [
-                {
-                    "name": b.name,
-                    "version": b.version,
-                    "size": b.size,
-                    "sha256": b.sha256,
-                    "uploaded_at": b.uploaded_at.isoformat(),
-                    "age_days": (utcnow() - b.uploaded_at).days,
-                }
-                for b in candidates
-            ],
-            "freed_bytes_estimate": sum(b.size for b in candidates),
-        }
 
-    # Actual delete: stage row deletes, decide which blobs are orphaned post-
-    # delete (a sha shared by two rows where we delete one must keep the blob),
-    # commit, then unlink. Order matters: unlinking before commit means a
-    # rollback would leave dangling DB rows referencing missing blobs.
+def _gc_candidate_dict(b: Bundle, *, now: datetime) -> dict[str, Any]:
+    return {
+        "name": b.name,
+        "version": b.version,
+        "size": b.size,
+        "sha256": b.sha256,
+        "uploaded_at": b.uploaded_at.isoformat(),
+        "age_days": (now - b.uploaded_at).days,
+    }
+
+
+async def _gc_apply(s: AsyncSession, candidates: list[Bundle]) -> dict[str, Any]:
+    """Stage row deletes, find which blobs become orphaned post-delete, commit,
+    then unlink. Order matters: unlinking before commit means a rollback would
+    leave dangling DB rows referencing missing blobs.
+
+    A sha shared by two rows where we delete one must keep the blob alive —
+    that's why orphan detection runs AFTER `flush()` (so the post-delete row
+    count reflects what'll exist after commit)."""
     deleted_meta: list[dict[str, Any]] = []
     freed = 0
     shas: set[str] = set()
@@ -139,11 +151,11 @@ async def gc_bundles(
         await s.delete(b)
     await s.flush()
 
-    orphan_shas: list[str] = []
-    for sha in shas:
-        others = await s.scalar(select(func.count()).select_from(Bundle).where(Bundle.sha256 == sha))
-        if not others:
-            orphan_shas.append(sha)
+    orphan_shas = [
+        sha
+        for sha in shas
+        if not await s.scalar(select(func.count()).select_from(Bundle).where(Bundle.sha256 == sha))
+    ]
 
     if deleted_meta:
         await log(s, "bundles", f"GC deleted {len(deleted_meta)} bundle(s) ({freed} bytes)")
@@ -156,13 +168,7 @@ async def gc_bundles(
             blob.unlink()
             unlinked.append(sha)
 
-    return {
-        "dry_run": False,
-        "age_days": age_days,
-        "deleted": deleted_meta,
-        "freed_bytes": freed,
-        "unlinked_blobs": len(unlinked),
-    }
+    return {"deleted": deleted_meta, "freed_bytes": freed, "unlinked_blobs": len(unlinked)}
 
 
 @router.get("/settings/info", response_model=OrchestratorInfo)

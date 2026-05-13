@@ -13,12 +13,11 @@ import sys
 import zipfile
 from pathlib import Path
 
-import httpx
 import yaml
 
 from sathop.cli.validate_bundle import validate as _validate
 from sathop.shared.config import add_orch_args, resolve_orch_or_exit
-from sathop.shared.http import bearer_headers
+from sathop.shared.http import make_sync_orch_client
 
 EXCLUDE_NAMES = {"__pycache__", ".git", ".venv", ".mypy_cache", ".pytest_cache"}
 EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
@@ -80,12 +79,10 @@ def main() -> int:
     blob = _build_zip(bundle_dir)
     print(f">>> zipped {bundle_dir.name} ({len(blob)} bytes)")
 
-    url = f"{orch_url}/api/bundles"
     params = {"description": args.description} if args.description else None
-    with httpx.Client(timeout=60) as c:
+    with make_sync_orch_client(orch_url, token, timeout=60) as c:
         r = c.post(
-            url,
-            headers=bearer_headers(token),
+            "/api/bundles",
             params=params,
             files={"file": ("bundle.zip", blob, "application/zip")},
         )

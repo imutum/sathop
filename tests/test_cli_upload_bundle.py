@@ -123,13 +123,18 @@ def _install_orch(monkeypatch: pytest.MonkeyPatch, handler) -> list[httpx.Reques
         return handler(req)
 
     transport = httpx.MockTransport(wrapped)
-    original = httpx.Client
 
-    def patched(**kwargs: object) -> httpx.Client:
-        kwargs["transport"] = transport
-        return original(**kwargs)  # type: ignore[arg-type]
+    def patched_factory(orch_url: str, token: str, timeout: float = 30.0) -> httpx.Client:
+        from sathop.shared.http import bearer_headers
 
-    monkeypatch.setattr(upload_bundle.httpx, "Client", patched)
+        return httpx.Client(
+            base_url=orch_url,
+            timeout=timeout,
+            headers=bearer_headers(token),
+            transport=transport,
+        )
+
+    monkeypatch.setattr(upload_bundle, "make_sync_orch_client", patched_factory)
     return captured
 
 

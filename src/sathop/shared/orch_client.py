@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
+from pydantic import BaseModel
 
 from sathop.shared.http import make_orch_client
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class AuthTokenInvalid(BaseException):
@@ -36,6 +39,15 @@ class OrchClient:
         r = await self._client.get(path)
         self._check(r, path)
         return r
+
+    async def post_typed(self, path: str, req: BaseModel, resp_cls: type[T]) -> T:
+        """POST a Pydantic request, parse the response into `resp_cls`. The
+        typed-RPC shape every wire-symmetric endpoint follows — collapses the
+        `model_dump` + `model_validate(r.json())` boilerplate at every call site.
+        Use `post()` directly only when the request needs non-default dump
+        options (e.g. `mode="json"`, `exclude_none=True`) or no response parsing."""
+        r = await self.post(path, json=req.model_dump())
+        return resp_cls.model_validate(r.json())
 
     @staticmethod
     def _check(r: httpx.Response, path: str) -> None:

@@ -53,9 +53,9 @@ def test_fmt_age_accepts_naive_iso():
 
 
 def _install_orch(monkeypatch: pytest.MonkeyPatch, routes: dict[str, object]) -> list[httpx.Request]:
-    """Replace `httpx.Client` so any constructor call routes through a
-    MockTransport whose handler picks responses from `routes` by URL path.
-    Returns a list that captures each intercepted request."""
+    """Replace `make_sync_orch_client` so the CLI's outbound calls route
+    through a MockTransport whose handler picks responses from `routes` by
+    URL path. Returns a list that captures each intercepted request."""
     captured: list[httpx.Request] = []
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -66,13 +66,18 @@ def _install_orch(monkeypatch: pytest.MonkeyPatch, routes: dict[str, object]) ->
         return httpx.Response(200, json=body)
 
     transport = httpx.MockTransport(handler)
-    original = httpx.Client
 
-    def patched(**kwargs: object) -> httpx.Client:
-        kwargs["transport"] = transport
-        return original(**kwargs)  # type: ignore[arg-type]
+    def patched_factory(orch_url: str, token: str, timeout: float = 30.0) -> httpx.Client:
+        from sathop.shared.http import bearer_headers
 
-    monkeypatch.setattr(reconcile.httpx, "Client", patched)
+        return httpx.Client(
+            base_url=orch_url,
+            timeout=timeout,
+            headers=bearer_headers(token),
+            transport=transport,
+        )
+
+    monkeypatch.setattr(reconcile, "make_sync_orch_client", patched_factory)
     return captured
 
 

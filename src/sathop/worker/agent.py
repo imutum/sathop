@@ -24,20 +24,18 @@ from sathop.shared.state_machine import GranuleEvent
 
 class OrchestratorClient(OrchClient):
     async def register(self, req: WorkerRegister) -> WorkerRegisterResponse:
-        r = await self.post("/api/workers/register", json=req.model_dump())
-        return WorkerRegisterResponse.model_validate(r.json())
+        return await self.post_typed("/api/workers/register", req, WorkerRegisterResponse)
 
     async def heartbeat(self, req: WorkerHeartbeat) -> WorkerHeartbeatResponse:
-        r = await self.post("/api/workers/heartbeat", json=req.model_dump())
-        return WorkerHeartbeatResponse.model_validate(r.json())
+        return await self.post_typed("/api/workers/heartbeat", req, WorkerHeartbeatResponse)
 
     async def lease(self, req: LeaseRequest) -> LeaseResponse:
-        r = await self.post("/api/workers/lease", json=req.model_dump())
-        return LeaseResponse.model_validate(r.json())
+        return await self.post_typed("/api/workers/lease", req, LeaseResponse)
 
     async def emit_event(self, event: GranuleEvent) -> None:
         # `event` is a Pydantic model — the GranuleEvent alias only matters at
         # type-check time; at runtime every member has `model_dump`.
+        # mode="json" because event payloads contain datetimes; can't use post_typed.
         await self.post("/api/workers/events", json=event.model_dump(mode="json"))
 
     async def get_deletable(self, worker_id: str) -> list[DeletableGranule]:

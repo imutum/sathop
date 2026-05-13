@@ -28,7 +28,7 @@ from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import get_or_404
 from ._transition import apply_transition
-from .one_shot import consume_one_shot_signal
+from .one_shot import consume_one_shot_signal, record_version_flap, request_one_shot_signal
 
 router = APIRouter(prefix="/receivers", tags=["receivers"], dependencies=[Depends(require_token)])
 
@@ -54,29 +54,14 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
     # Version flap detection — see workers.heartbeat for the rationale. Same
     # orphan-container symptom on the receiver side: pulls split between two
     # processes, half failing on stale TLS trust / fixed `.part` filename.
-    if req.version and req.version != r.version:
-        await log(
-            s,
-            req.receiver_id,
-            f"receiver version changed {r.version!r} → {req.version!r} "
-            "(if this keeps flipping, two containers likely share the receiver_id)",
-            level="warn",
-        )
-        r.version = req.version
+    await record_version_flap(s, r, new_version=req.version, source=req.receiver_id, kind="receiver")
     r.last_seen = utcnow()
     r.disk_free_gb = req.disk_free_gb
     r.queue_pulling = req.queue_pulling
     r.recent_pull_bps = req.recent_pull_bps
 
-    def clear_restart() -> None:
-        r.restart_requested_at = None
-
     restart_requested = await consume_one_shot_signal(
-        s,
-        r.restart_requested_at is not None,
-        clear_restart,
-        source=req.receiver_id,
-        message="restart signal delivered to receiver",
+        s, r, "restart_requested_at", source=req.receiver_id, message="restart signal delivered to receiver"
     )
     await commit_and_publish(s, Scope.RECEIVERS)
     return ReceiverHeartbeatResponse(restart_requested=restart_requested)
@@ -177,9 +162,14 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
 async def request_restart(receiver_id: str, s: AsyncSession = Depends(session)) -> dict:
     """Operator-triggered restart — see workers.request_restart."""
     r = await get_or_404(s, Receiver, receiver_id, "receiver not found")
-    r.restart_requested_at = utcnow()
-    await log(s, receiver_id, "restart requested via UI")
-    await commit_and_publish(s, Scope.RECEIVERS)
+    await request_one_shot_signal(
+        s,
+        r,
+        "restart_requested_at",
+        source=receiver_id,
+        message="restart requested via UI",
+        scope=Scope.RECEIVERS,
+    )
     return {"ok": True}
 
 

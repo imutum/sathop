@@ -18,9 +18,10 @@ def test_bearer_headers_shape():
 
 
 def test_bearer_headers_with_empty_token():
-    """Empty token still yields a header — auth-required endpoints will 401,
-    but the function itself doesn't validate."""
-    assert bearer_headers("") == {"Authorization": "Bearer "}
+    """Empty token yields no header — anonymous callers (orchestrator in open
+    mode, CLI without --token) don't send a phantom `Authorization: Bearer `
+    that obscures the intent on the wire."""
+    assert bearer_headers("") == {}
 
 
 def test_bearer_headers_passes_through_special_chars():

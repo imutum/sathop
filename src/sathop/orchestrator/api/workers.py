@@ -32,11 +32,9 @@ from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import get_or_404
 from ._transition import apply_transition
+from .one_shot import consume_one_shot_signal, record_version_flap, request_one_shot_signal
 from .worker_heartbeat import (
     apply_worker_heartbeat,
-    consume_gc_signal,
-    consume_restart_signal,
-    record_worker_version,
     revoked_active_granules,
 )
 from .worker_leases import (
@@ -100,7 +98,7 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
 async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) -> WorkerHeartbeatResponse:
     w = await get_or_404(s, Worker, req.worker_id, "worker not registered")
     now = utcnow()
-    await record_worker_version(s, w, req)
+    await record_version_flap(s, w, new_version=req.version, source=req.worker_id, kind="worker")
     apply_worker_heartbeat(w, req, now)
     await renew_worker_leases(s, req.worker_id, now)
 
@@ -108,8 +106,12 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     # instruction in this heartbeat response.
     revoked = await revoked_active_granules(s, req)
 
-    restart_requested = await consume_restart_signal(s, w)
-    gc_requested = await consume_gc_signal(s, w)
+    restart_requested = await consume_one_shot_signal(
+        s, w, "restart_requested_at", source=w.worker_id, message="restart signal delivered to worker"
+    )
+    gc_requested = await consume_one_shot_signal(
+        s, w, "gc_requested_at", source=w.worker_id, message="cache GC signal delivered to worker"
+    )
 
     await commit_and_publish(s, Scope.WORKERS)
     return WorkerHeartbeatResponse(
@@ -234,9 +236,14 @@ async def request_restart(worker_id: str, s: AsyncSession = Depends(session)) ->
     its next heartbeat and exits 0 on. Idempotent — re-clicks while a previous
     request hasn't been consumed just refresh the timestamp."""
     w = await get_or_404(s, Worker, worker_id, "worker not found")
-    w.restart_requested_at = utcnow()
-    await log(s, worker_id, "restart requested via UI")
-    await commit_and_publish(s, Scope.WORKERS)
+    await request_one_shot_signal(
+        s,
+        w,
+        "restart_requested_at",
+        source=worker_id,
+        message="restart requested via UI",
+        scope=Scope.WORKERS,
+    )
     return {"ok": True}
 
 
@@ -297,9 +304,14 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
     sets a timestamp, next heartbeat reply forwards it, worker runs prune_caches
     out-of-band of its periodic loop."""
     w = await get_or_404(s, Worker, worker_id, "worker not found")
-    w.gc_requested_at = utcnow()
-    await log(s, worker_id, "cache GC requested via UI")
-    await commit_and_publish(s, Scope.WORKERS)
+    await request_one_shot_signal(
+        s,
+        w,
+        "gc_requested_at",
+        source=worker_id,
+        message="cache GC requested via UI",
+        scope=Scope.WORKERS,
+    )
     return {"ok": True}
 
 

@@ -4,12 +4,14 @@ import asyncio
 import logging
 import shutil
 import ssl
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 
 from sathop import __version__
 from sathop.shared import agent_lifecycle
+from sathop.shared.http import make_orch_client
 from sathop.shared.periodic import run_periodic
 from sathop.shared.protocol import AckReport, PullItem, PullRequest, ReceiverHeartbeat, ReceiverRegister
 
@@ -35,6 +37,40 @@ def is_cert_error(e: BaseException) -> bool:
             return True
         cur = cur.__cause__ or cur.__context__
     return False
+
+
+@dataclass(frozen=True)
+class PullOutcome:
+    """The result of fetching one object. Drives a single ack call site.
+
+    `pulled_bytes` is 0 on any failure so stats only count verified bytes.
+    `sha` is empty on transport failure (no bytes to hash); for sha/size
+    mismatch it's the digest we computed so the orchestrator can correlate.
+    """
+
+    success: bool
+    sha: str
+    pulled_bytes: int
+    error: str | None
+    log_kind: str  # "ok" | "mismatch" | "transport"
+
+    @classmethod
+    def ok(cls, sha: str, size: int) -> PullOutcome:
+        return cls(success=True, sha=sha, pulled_bytes=size, error=None, log_kind="ok")
+
+    @classmethod
+    def mismatch(cls, item: PullItem, sha: str, size: int) -> PullOutcome:
+        return cls(
+            success=False,
+            sha=sha,
+            pulled_bytes=0,
+            error=f"sha/size mismatch {sha}/{size} vs {item.sha256}/{item.size}",
+            log_kind="mismatch",
+        )
+
+    @classmethod
+    def transport_error(cls, e: BaseException) -> PullOutcome:
+        return cls(success=False, sha="", pulled_bytes=0, error=str(e), log_kind="transport")
 
 
 class Receiver:
@@ -89,9 +125,10 @@ class Receiver:
 
     async def _refresh_trust(self) -> None:
         bundle_path = self.s.storage_dir / ".orch-ca-bundle.pem"
-        url = f"{self.s.orchestrator_url}/api/receivers/ca-bundle"
-        async with httpx.AsyncClient(timeout=15.0, headers={"Authorization": f"Bearer {self.s.token}"}) as c:
-            r = await c.get(url)
+        # Use system CAs for this one fetch — we're bootstrapping trust, so
+        # the orchestrator-managed bundle isn't available yet by definition.
+        async with make_orch_client(self.s.orchestrator_url, self.s.token, timeout=15.0) as c:
+            r = await c.get("/api/receivers/ca-bundle")
         if r.status_code == 204:
             log.warning("orchestrator has no worker CAs — using system CAs")
             return
@@ -215,42 +252,46 @@ class Receiver:
 
     async def _fetch_one_inner(self, item: PullItem) -> None:
         self.stats.begin()
-        pulled_bytes = 0
+        outcome = await self._pull_one(item)
         try:
-            dest = self.s.storage_dir / item.object_key
-            try:
-                sha, size = await self._pull_with_trust_retry(item.presigned_url, dest, item.size)
-                ok = sha == item.sha256 and size == item.size
-                if ok:
-                    pulled_bytes = size
-                else:
-                    dest.unlink(missing_ok=True)
-                await self.client.ack(
-                    AckReport(
-                        receiver_id=self.s.receiver_id,
-                        object_id=item.object_id,
-                        sha256=sha,
-                        success=ok,
-                        error=None if ok else f"sha/size mismatch {sha}/{size} vs {item.sha256}/{item.size}",
-                    )
-                )
-                if ok:
-                    log.info("pulled %s (%d bytes)", item.object_key, size)
-                else:
-                    log.error("verify failed %s", item.object_key)
-            except Exception as e:
-                log.warning("pull %s failed: %s", item.object_key, e)
-                try:
-                    await self.client.ack(
-                        AckReport(
-                            receiver_id=self.s.receiver_id,
-                            object_id=item.object_id,
-                            sha256="",
-                            success=False,
-                            error=str(e),
-                        )
-                    )
-                except Exception:
-                    pass
+            await self._ack_outcome(item, outcome)
         finally:
-            self.stats.end(pulled_bytes)
+            self._log_outcome(item, outcome)
+            self.stats.end(outcome.pulled_bytes)
+
+    async def _pull_one(self, item: PullItem) -> PullOutcome:
+        dest = self.s.storage_dir / item.object_key
+        try:
+            sha, size = await self._pull_with_trust_retry(item.presigned_url, dest, item.size)
+        except Exception as e:
+            return PullOutcome.transport_error(e)
+        if sha == item.sha256 and size == item.size:
+            return PullOutcome.ok(sha, size)
+        dest.unlink(missing_ok=True)
+        return PullOutcome.mismatch(item, sha, size)
+
+    async def _ack_outcome(self, item: PullItem, outcome: PullOutcome) -> None:
+        # Ack is best-effort: a network-failed ack of either flavour just
+        # means the orchestrator will re-offer this object on the next pull,
+        # and we converge after at most max_pull_failures rounds. Propagating
+        # would crash the pull worker task — much worse than a stale offer.
+        report = AckReport(
+            receiver_id=self.s.receiver_id,
+            object_id=item.object_id,
+            sha256=outcome.sha,
+            success=outcome.success,
+            error=outcome.error,
+        )
+        try:
+            await self.client.ack(report)
+        except Exception as e:
+            log.warning("ack for %s failed: %s", item.object_key, e)
+
+    @staticmethod
+    def _log_outcome(item: PullItem, outcome: PullOutcome) -> None:
+        if outcome.log_kind == "ok":
+            log.info("pulled %s (%d bytes)", item.object_key, outcome.pulled_bytes)
+        elif outcome.log_kind == "mismatch":
+            log.error("verify failed %s", item.object_key)
+        else:
+            log.warning("pull %s failed: %s", item.object_key, outcome.error)

@@ -11,10 +11,8 @@ import argparse
 import sys
 from datetime import UTC, datetime
 
-import httpx
-
 from sathop.shared.config import add_orch_args, resolve_orch_or_exit
-from sathop.shared.http import bearer_headers
+from sathop.shared.http import make_sync_orch_client
 
 
 def _fmt_age(iso: str) -> str:
@@ -36,15 +34,14 @@ def main() -> int:
     add_orch_args(p, default_orch_url="http://127.0.0.1:8765")
     args = p.parse_args()
     base, token = resolve_orch_or_exit(args, require_token=False)
-    headers = bearer_headers(token) if token else {}
 
     issues: list[str] = []
 
-    with httpx.Client(timeout=15, headers=headers) as c:
-        overview = c.get(f"{base}/api/admin/overview").json()
-        workers = c.get(f"{base}/api/workers").json()
-        receivers = c.get(f"{base}/api/receivers").json()
-        batches = c.get(f"{base}/api/batches").json()
+    with make_sync_orch_client(base, token, timeout=15) as c:
+        overview = c.get("/api/admin/overview").json()
+        workers = c.get("/api/workers").json()
+        receivers = c.get("/api/receivers").json()
+        batches = c.get("/api/batches").json()
 
         print("=" * 60)
         print(f"SatHop @ {base}")
@@ -64,7 +61,7 @@ def main() -> int:
             for state, n in stuck.items():
                 print(f"  {state:<14} {n:>8}")
                 issues.append(f"{n} granules stuck in '{state}' > {stuck_h}h")
-                sample = c.get(f"{base}/api/admin/stuck/{state}").json()[:3]
+                sample = c.get(f"/api/admin/stuck/{state}").json()[:3]
                 for g in sample:
                     print(
                         f"     └─ {g['granule_id']}  age={g['age_hours']:.1f}h  batch={g['batch_id']}  err={g.get('error') or '-'}"

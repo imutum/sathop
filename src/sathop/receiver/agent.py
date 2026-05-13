@@ -16,12 +16,10 @@ class OrchestratorClient(OrchClient):
         await self.post("/api/receivers/register", json=req.model_dump())
 
     async def heartbeat(self, req: ReceiverHeartbeat) -> ReceiverHeartbeatResponse:
-        r = await self.post("/api/receivers/heartbeat", json=req.model_dump())
-        return ReceiverHeartbeatResponse.model_validate(r.json())
+        return await self.post_typed("/api/receivers/heartbeat", req, ReceiverHeartbeatResponse)
 
     async def pull(self, req: PullRequest) -> PullResponse:
-        r = await self.post("/api/receivers/pull", json=req.model_dump())
-        return PullResponse.model_validate(r.json())
+        return await self.post_typed("/api/receivers/pull", req, PullResponse)
 
     async def ack(self, req: AckReport) -> None:
         await self.post("/api/receivers/ack", json=req.model_dump())
