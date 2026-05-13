@@ -3,6 +3,7 @@ import { API, type ReceiverInfo } from "@/api";
 import { fmtGB, fmtRate, nodeStatusBadge } from "@/lib/format";
 import { PLATFORM_ZH, fmtAge } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import CopyButton from "@/components/CopyButton.vue";
 import HintTip from "@/components/HintTip.vue";
@@ -97,15 +98,14 @@ const status = computed(() => nodeStatusBadge(props.receiver.enabled, props.rece
       </HintTip>
     </div>
 
-    <div class="flex items-center justify-end gap-3 border-t border-border/60 px-5 py-2.5">
+    <div class="flex items-center justify-end gap-2 border-t border-border/60 px-5 py-2.5">
       <HintTip text="跳转到事件日志，已按本接收端过滤">
-        <RouterLink
-          :to="`/events?source=${encodeURIComponent(receiver.receiver_id)}`"
-          class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-primary"
-        >
-          <Icon name="events" :size="11" />
-          事件
-        </RouterLink>
+        <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
+          <RouterLink :to="`/events?source=${encodeURIComponent(receiver.receiver_id)}`">
+            <Icon name="events" :size="11" />
+            事件
+          </RouterLink>
+        </Button>
       </HintTip>
       <NodeLifecycleActions
         :enabled="receiver.enabled"

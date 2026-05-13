@@ -108,6 +108,18 @@ const PATHS = {
   ],
   chevronRight: () => [h("polyline", { points: "9 6 15 12 9 18" })],
   chevronLeft: () => [h("polyline", { points: "15 6 9 12 15 18" })],
+  chevronDown: () => [h("polyline", { points: "6 9 12 15 18 9" })],
+  more: () => [
+    h("circle", { cx: 12, cy: 12, r: 1.2, fill: "currentColor", stroke: "none" }),
+    h("circle", { cx: 5, cy: 12, r: 1.2, fill: "currentColor", stroke: "none" }),
+    h("circle", { cx: 19, cy: 12, r: 1.2, fill: "currentColor", stroke: "none" }),
+  ],
+  help: () => [
+    h("circle", { cx: 12, cy: 12, r: 10 }),
+    h("path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" }),
+    h("line", { x1: 12, y1: 17, x2: 12.01, y2: 17 }),
+  ],
+  filter: () => [h("polygon", { points: "22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" })],
   sun: () => [
     h("circle", { cx: 12, cy: 12, r: 4 }),
     h("path", {

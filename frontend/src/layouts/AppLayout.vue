@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Icon, type IconName } from "@/components/Icon";
 import HintTip from "@/components/HintTip.vue";
@@ -185,49 +187,51 @@ const isDark = computed(() => effective.value === "dark");
     <div class="flex min-w-0 flex-1 flex-col">
       <header class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/85 px-4 backdrop-blur-md md:px-6 lg:px-8">
         <div class="flex items-center gap-3">
-          <button
+          <Button
             type="button"
-            @click="mobileOpen = true"
+            variant="outline"
+            size="icon"
+            class="text-muted-foreground md:hidden"
             aria-label="打开导航"
-            class="grid h-9 w-9 place-items-center rounded-md border border-border bg-background text-muted-foreground transition hover:text-foreground md:hidden"
+            @click="mobileOpen = true"
           >
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <line x1="3" y1="6" x2="21" y2="6" />
               <line x1="3" y1="12" x2="21" y2="12" />
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
-          </button>
+          </Button>
         </div>
         <div class="flex items-center gap-2">
           <HintTip :text="connected ? '后台事件流已连接，页面会自动刷新' : 'SSE 未连接，数据可能延迟，会在 60s 安全网内重试'">
-            <span
+            <Badge
+              :variant="connected ? 'success' : 'outline'"
               :class="[
-                'hidden items-center gap-2 rounded-full border px-2.5 py-1 text-2xs font-medium md:inline-flex',
-                connected
-                  ? 'border-success/30 bg-success/10 text-success'
-                  : 'border-border bg-muted text-muted-foreground',
+                'hidden h-7 rounded-full md:inline-flex',
+                connected ? '' : 'text-muted-foreground',
               ]"
             >
-              <span class="relative grid h-1.5 w-1.5 place-items-center">
-                <span
-                  :class="[
-                    'absolute inset-0 rounded-full',
-                    connected ? 'bg-success animate-pulse-soft' : 'bg-muted-foreground',
-                  ]"
-                />
-              </span>
+              <span
+                :class="[
+                  'h-1.5 w-1.5 rounded-full',
+                  connected ? 'bg-success animate-pulse-soft' : 'bg-muted-foreground',
+                ]"
+                aria-hidden
+              />
               {{ connected ? "实时" : "离线" }}
-            </span>
+            </Badge>
           </HintTip>
           <HintTip :text="isDark ? '切换到亮色模式' : '切换到暗色模式'">
-            <button
+            <Button
               type="button"
-              @click="toggleTheme"
+              variant="outline"
+              size="icon"
+              class="text-muted-foreground hover:text-foreground"
               :aria-label="isDark ? '切换到亮色模式' : '切换到暗色模式'"
-              class="grid h-9 w-9 place-items-center rounded-md border border-border bg-background text-muted-foreground transition hover:text-foreground hover:shadow-soft"
+              @click="toggleTheme"
             >
               <Icon :name="isDark ? 'sun' : 'moon'" :stroke-width="2" />
-            </button>
+            </Button>
           </HintTip>
         </div>
       </header>

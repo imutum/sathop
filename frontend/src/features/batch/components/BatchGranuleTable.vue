@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import EmptyState from "@/components/EmptyState.vue";
+import { Icon } from "@/components/Icon";
 import { stripBatchPrefix } from "@/lib/utils";
 import ErrorCell from "@/features/batch/components/ErrorCell.vue";
 import GranuleEvents from "@/features/batch/components/GranuleEvents.vue";
@@ -57,11 +58,17 @@ const emit = defineEmits<{
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
             <button
+              type="button"
               @click="emit('toggle', g.granule_id)"
-              class="mr-1 text-muted-foreground hover:text-foreground"
+              class="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              :aria-expanded="expanded === g.granule_id"
               :title="expanded === g.granule_id ? '收起进度' : '展开进度'"
             >
-              {{ expanded === g.granule_id ? "▾" : "▸" }}
+              <Icon
+                :name="expanded === g.granule_id ? 'chevronDown' : 'chevronRight'"
+                :size="12"
+                :stroke-width="2.2"
+              />
             </button>
             <span class="break-all font-mono text-cell">{{ stripBatchPrefix(g.granule_id, props.batchId) }}</span>
             <LatestProgressLine
@@ -160,11 +167,17 @@ const emit = defineEmits<{
           >
             <TableCell class="px-5 py-2.5 font-mono text-cell">
               <button
+                type="button"
                 @click="emit('toggle', g.granule_id)"
-                class="mr-1 inline-block w-3 text-muted-foreground hover:text-foreground"
+                class="mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                :aria-expanded="expanded === g.granule_id"
                 :title="expanded === g.granule_id ? '收起进度' : '展开进度'"
               >
-                {{ expanded === g.granule_id ? "▾" : "▸" }}
+                <Icon
+                  :name="expanded === g.granule_id ? 'chevronDown' : 'chevronRight'"
+                  :size="12"
+                  :stroke-width="2.2"
+                />
               </button>
               {{ stripBatchPrefix(g.granule_id, props.batchId) }}
               <LatestProgressLine

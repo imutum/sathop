@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { hasCred } from "@/credCache";
 import { type CredDraft } from "@/features/batch/types";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import FieldLabel from "@/components/FieldLabel.vue";
 import SelectInput from "@/ui/SelectInput.vue";
 import TextInput from "@/ui/TextInput.vue";
@@ -72,29 +75,34 @@ function update(name: string, patch: Partial<CredDraft>) {
           class="font-mono"
         />
         <div class="flex items-center gap-2 whitespace-nowrap">
-          <label
-            :for="`cred-${name}-remember`"
-            class="flex items-center gap-1 text-2xs text-muted-foreground"
+          <div
+            class="flex items-center gap-1.5"
             title="勾选后，提交成功时把该凭证保存到本浏览器；下次新建任务自动填入。"
           >
-            <input
+            <Checkbox
               :id="`cred-${name}-remember`"
-              type="checkbox"
-              :checked="remember[name] ?? false"
-              @change="emit('rememberChange', name, ($event.target as HTMLInputElement).checked)"
-              class="accent-primary"
+              :model-value="remember[name] ?? false"
+              @update:model-value="(v: boolean | 'indeterminate') => emit('rememberChange', name, v === true)"
+              class="h-3.5 w-3.5"
             />
-            记住
-          </label>
-          <button
+            <Label
+              :for="`cred-${name}-remember`"
+              class="text-2xs font-normal text-muted-foreground"
+            >
+              记住
+            </Label>
+          </div>
+          <Button
             v-if="hasCred(name)"
             type="button"
-            @click="emit('forget', name)"
+            variant="ghost"
+            size="xs"
             class="text-2xs text-muted-foreground hover:text-danger"
             title="从本浏览器删除已保存的凭证"
+            @click="emit('forget', name)"
           >
             清除
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -119,7 +119,7 @@ const onSubmit = handleSubmit((vals) => {
         </FormItem>
       </FormField>
       <div class="mt-3 flex justify-end gap-2">
-        <Button type="button" @click="emit('close')">取消</Button>
+        <Button type="button" variant="outline" @click="emit('close')">取消</Button>
         <Button type="submit" variant="default">导入</Button>
       </div>
     </form>

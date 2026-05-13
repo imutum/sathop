@@ -8,8 +8,10 @@ import { useToast } from "@/composables/useToast";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import CopyButton from "@/components/CopyButton.vue";
 import Field from "@/components/Field.vue";
+import RowActions from "@/components/RowActions.vue";
 import BundleFileBrowser from "@/features/bundle/components/BundleFileBrowser.vue";
 import BundleSection from "@/features/bundle/components/BundleSection.vue";
 import { Icon } from "@/components/Icon";
@@ -77,30 +79,31 @@ async function download() {
         </div>
         <div v-if="d.description" class="mt-1.5 text-xs text-muted-foreground">{{ d.description }}</div>
       </div>
-      <div class="flex items-center gap-2">
-        <Button variant="default" @click="gotoNewBatch" title="跳转到批次页并预选此任务包">
-          新建批次
-          <Icon name="arrowRight" :size="13" />
-        </Button>
-        <Button
-          @click="download"
-          :pending="downloading"
-          pending-label="下载中…"
-          title="下载原始 ZIP 包"
+      <RowActions align="end">
+        <template #primary>
+          <Button variant="default" @click="gotoNewBatch" title="跳转到批次页并预选此任务包">
+            新建批次
+            <Icon name="arrowRight" :size="13" />
+          </Button>
+          <Button
+            variant="outline"
+            @click="download"
+            :pending="downloading"
+            pending-label="下载中…"
+            title="下载原始 ZIP 包"
+          >
+            <Icon name="download" :size="13" />
+            下载
+          </Button>
+        </template>
+        <DropdownMenuItem
+          class="text-danger focus:bg-danger/10 focus:text-danger"
+          :disabled="pending"
+          @select="confirmDelete"
         >
-          <Icon name="download" :size="13" />
-          下载
-        </Button>
-        <Button
-          variant="destructive"
-          @click="confirmDelete"
-          :pending="pending"
-          pending-label="删除中…"
-        >
-          <Icon name="trash" :size="13" />
-          删除
-        </Button>
-      </div>
+          删除任务包…
+        </DropdownMenuItem>
+      </RowActions>
     </div>
     <Alert v-if="error" variant="destructive"><AlertDescription>{{ error }}</AlertDescription></Alert>
 

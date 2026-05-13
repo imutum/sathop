@@ -4,6 +4,8 @@ import { API, setToken, suspendAuthRecovery } from "@/api";
 import { useAuthGate } from "@/composables/useAuthGate";
 import { Loader2Icon } from "lucide-vue-next";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import FieldLabel from "@/components/FieldLabel.vue";
 import TextInput from "@/ui/TextInput.vue";
 
@@ -71,13 +73,14 @@ const year = new Date().getFullYear();
             基于 lease 的分布式管线 · SQLite 单事实状态 · 实时事件流 · 用户脚本任务包热插拔。
           </p>
           <div class="flex flex-wrap items-center gap-2">
-            <span
+            <Badge
               v-for="t in ['Orchestrator', 'Worker', 'Receiver', '任务包注册表']"
               :key="t"
-              class="rounded-full border border-border bg-background/80 px-2.5 py-1 font-mono text-mini text-muted-foreground backdrop-blur"
+              variant="outline"
+              class="rounded-full font-mono"
             >
               {{ t }}
-            </span>
+            </Badge>
           </div>
         </div>
 
@@ -118,15 +121,16 @@ const year = new Date().getFullYear();
           <Alert variant="destructive"><AlertDescription>{{ loginError }}</AlertDescription></Alert>
         </div>
 
-        <button
+        <Button
           type="submit"
+          size="lg"
+          class="mt-5 w-full"
           :disabled="probing || !input.trim()"
           :aria-busy="probing || undefined"
-          class="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2.5 text-sm font-semibold text-primary-foreground shadow-soft transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Loader2Icon v-if="probing" class="size-3.5 animate-spin" />
           {{ probing ? "验证中…" : "进入控制台" }}
-        </button>
+        </Button>
 
         <div class="mt-6 border-t border-border pt-4 text-2xs leading-relaxed text-muted-foreground">
           令牌仅保存在本浏览器 localStorage。

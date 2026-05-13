@@ -7,7 +7,6 @@ import { fmtAge, stateLabel } from "@/i18n";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -16,6 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import CardSection from "@/components/CardSection.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import EventTimeline from "@/components/EventTimeline.vue";
 import HintTip from "@/components/HintTip.vue";
@@ -74,7 +74,6 @@ const activeReceivers = computed(
 );
 
 const hasChartData = computed(() => pipelineSegments(counts.value).length > 0);
-
 const active = computed(() => inflight.data.value ?? []);
 
 const firstRun = computed(
@@ -157,67 +156,52 @@ function fmtHours(h: number): string {
     </div>
 
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <Card class="lg:col-span-2">
-        <CardHeader>
-          <CardTitle>管道健康</CardTitle>
-          <CardDescription>各阶段当前驻留的数据粒分布</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div v-if="!hasChartData" class="flex h-44 items-center justify-center">
-            <EmptyState title="暂无数据粒" description="管线空闲，等待新批次注入" illustration="signal" />
-          </div>
-          <PipelineHealth v-else :counts="counts" />
-        </CardContent>
-      </Card>
+      <CardSection
+        title="管道健康"
+        description="各阶段当前驻留的数据粒分布"
+        class="lg:col-span-2"
+      >
+        <div v-if="!hasChartData" class="flex h-44 items-center justify-center">
+          <EmptyState title="暂无数据粒" description="管线空闲，等待新批次注入" illustration="signal" />
+        </div>
+        <PipelineHealth v-else :counts="counts" />
+      </CardSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>节点</CardTitle>
-          <CardDescription>集群健康度</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div class="space-y-3">
-            <NodeStat
-              label="工作节点"
-              :value="activeWorkers"
-              :total="workers.data.value?.length ?? 0"
-              tooltip="点击查看节点详情；'在线' = 心跳在 2 分钟内"
-              @click="router.push('/workers')"
-            >
-              <template #icon><Icon name="workers" :size="18" /></template>
-            </NodeStat>
-            <NodeStat
-              label="接收端"
-              :value="activeReceivers"
-              :total="receivers.data.value?.length ?? 0"
-              tooltip="点击查看接收端详情；'在线' = 心跳在 2 分钟内"
-              @click="router.push('/receivers')"
-            >
-              <template #icon><Icon name="receivers" :size="18" /></template>
-            </NodeStat>
-          </div>
-        </CardContent>
-      </Card>
+      <CardSection title="节点" description="集群健康度">
+        <div class="space-y-3">
+          <NodeStat
+            label="工作节点"
+            :value="activeWorkers"
+            :total="workers.data.value?.length ?? 0"
+            tooltip="点击查看节点详情；'在线' = 心跳在 2 分钟内"
+            @click="router.push('/workers')"
+          >
+            <template #icon><Icon name="workers" :size="18" /></template>
+          </NodeStat>
+          <NodeStat
+            label="接收端"
+            :value="activeReceivers"
+            :total="receivers.data.value?.length ?? 0"
+            tooltip="点击查看接收端详情；'在线' = 心跳在 2 分钟内"
+            @click="router.push('/receivers')"
+          >
+            <template #icon><Icon name="receivers" :size="18" /></template>
+          </NodeStat>
+        </div>
+      </CardSection>
     </div>
 
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <Card class="lg:col-span-2">
-        <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
-          <div class="space-y-1.5">
-            <CardTitle>正在处理</CardTitle>
-            <CardDescription>近 30 条非终态数据粒 · 点击行进入详情</CardDescription>
-          </div>
-          <span
-            :class="[
-              'rounded-full border px-2.5 py-0.5 text-2xs font-medium tabular-nums',
-              active.length > 0
-                ? 'border-primary/30 bg-primary/10 text-primary'
-                : 'border-border bg-muted text-muted-foreground',
-            ]"
-          >
-            {{ active.length > 0 ? `${active.length} 条` : "空闲" }}
-          </span>
-        </CardHeader>
+      <CardSection
+        title="正在处理"
+        description="近 30 条非终态数据粒"
+        :padded="false"
+        class="lg:col-span-2"
+      >
+        <template #meta>
+          <Badge v-if="active.length > 0" variant="info" class="tabular-nums">{{ active.length }} 条</Badge>
+          <Badge v-else variant="outline" class="text-muted-foreground">空闲</Badge>
+        </template>
         <EmptyState
           v-if="active.length === 0"
           title="当前没有正在处理的数据粒"
@@ -225,7 +209,7 @@ function fmtHours(h: number): string {
           illustration="signal"
         />
         <Table v-else>
-          <TableHeader class="bg-muted/50">
+          <TableHeader class="bg-muted/40">
             <TableRow>
               <TableHead class="px-5">数据粒</TableHead>
               <TableHead>批次</TableHead>
@@ -239,7 +223,6 @@ function fmtHours(h: number): string {
               v-for="g in active"
               :key="g.granule_id"
               class="cursor-pointer"
-              title="点击查看该数据粒的详情、进度与事件"
               @click="gotoGranule(g.batch_id, g.granule_id)"
             >
               <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
@@ -254,8 +237,7 @@ function fmtHours(h: number): string {
                 <RouterLink
                   v-if="g.leased_by"
                   :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                  class="transition hover:text-primary"
-                  title="跳转到该 worker 卡片"
+                  class="transition-colors hover:text-primary"
                 >
                   {{ g.leased_by }}
                 </RouterLink>
@@ -265,46 +247,37 @@ function fmtHours(h: number): string {
             </TableRow>
           </TableBody>
         </Table>
-      </Card>
+      </CardSection>
 
-      <Card>
-        <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
-          <div class="space-y-1.5">
-            <CardTitle>最近事件</CardTitle>
-            <CardDescription>最新 10 条 · 点击查看全部</CardDescription>
-          </div>
-          <RouterLink
-            to="/events"
-            class="rounded-md border border-border bg-background px-2.5 py-1 text-2xs font-medium text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
-          >
-            查看全部
-          </RouterLink>
-        </CardHeader>
+      <CardSection title="最近事件" description="最新 10 条" :padded="false">
+        <template #meta>
+          <Button as-child variant="ghost" size="xs" class="text-muted-foreground hover:text-foreground">
+            <RouterLink to="/events">查看全部</RouterLink>
+          </Button>
+        </template>
         <EmptyState
           v-if="lastEvents.length === 0"
           title="暂无事件"
           illustration="inbox"
         />
         <EventTimeline v-else :events="lastEvents" />
-      </Card>
+      </CardSection>
     </div>
 
-    <Card v-if="stuckTotal > 0" class="border-warning/40">
-      <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
-        <div class="space-y-1.5">
-          <CardTitle>卡住的数据粒</CardTitle>
-          <CardDescription>非终态且 &gt; {{ stuckHours }} 小时未推进 · 最旧者优先</CardDescription>
-        </div>
+    <CardSection
+      v-if="stuckTotal > 0"
+      title="卡住的数据粒"
+      :description="`非终态且 > ${stuckHours} 小时未推进 · 最旧者优先`"
+      :padded="false"
+      class="border-warning/40"
+    >
+      <template #meta>
         <HintTip text="数据粒在非终态停留过久，多半是 worker 失联、下载卡死或脚本无响应。点击行查看其事件日志。">
-          <span
-            class="rounded-full border border-warning/40 bg-warning/10 px-2.5 py-0.5 text-2xs font-medium text-warning tabular-nums"
-          >
-            {{ stuckRows.length }} / {{ stuckTotal }}
-          </span>
+          <Badge variant="warning" class="tabular-nums">{{ stuckRows.length }} / {{ stuckTotal }}</Badge>
         </HintTip>
-      </CardHeader>
+      </template>
       <Table>
-        <TableHeader class="bg-muted/50">
+        <TableHeader class="bg-muted/40">
           <TableRow>
             <TableHead class="px-5">数据粒</TableHead>
             <TableHead>批次</TableHead>
@@ -319,7 +292,6 @@ function fmtHours(h: number): string {
             v-for="g in stuckRows"
             :key="g.granule_id"
             class="cursor-pointer"
-            title="点击查看该数据粒的详情、进度与事件"
             @click="gotoGranule(g.batch_id, g.granule_id)"
           >
             <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
@@ -334,7 +306,7 @@ function fmtHours(h: number): string {
               <RouterLink
                 v-if="g.leased_by"
                 :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                class="transition hover:text-primary"
+                class="transition-colors hover:text-primary"
               >
                 {{ g.leased_by }}
               </RouterLink>
@@ -349,6 +321,6 @@ function fmtHours(h: number): string {
           </TableRow>
         </TableBody>
       </Table>
-    </Card>
+    </CardSection>
   </div>
 </template>

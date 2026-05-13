@@ -87,7 +87,7 @@ const onSubmit = handleSubmit((vals) => {
         <AlertDescription>{{ submitError }}</AlertDescription>
       </Alert>
       <div class="flex justify-end gap-2 pt-2">
-        <Button type="button" @click="emit('close')">取消</Button>
+        <Button type="button" variant="outline" @click="emit('close')">取消</Button>
         <Button
           type="submit"
           variant="default"

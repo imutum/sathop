@@ -8,10 +8,16 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
+import HintTip from "@/components/HintTip.vue";
 import SelectInput from "@/ui/SelectInput.vue";
 import Segmented from "@/components/Segmented.vue";
 import { Loader2Icon } from "lucide-vue-next";
@@ -34,9 +40,6 @@ const filter = ref<Level>(
 );
 const search = ref((route.query.q as string | undefined) ?? "");
 const batchFilter = ref((route.query.batch as string | undefined) ?? "");
-// Server-side exact-match filter on Event.source — used by per-node drill-downs
-// (worker / receiver cards link here with ?source=<id>). Reset rows when it
-// changes so we re-fetch a clean page rather than mixing old global rows in.
 const sourceFilter = ref((route.query.source as string | undefined) ?? "");
 const rows = ref<EventRow[]>([]);
 const expanded = ref<Set<number>>(new Set());
@@ -111,6 +114,10 @@ const visible = computed(() =>
   }),
 );
 
+const hasActiveFilters = computed(
+  () => !!(search.value || batchFilter.value || sourceFilter.value || filter.value !== "all"),
+);
+
 function isLong(msg: string) {
   return msg.length > 160 || msg.includes("\n");
 }
@@ -149,14 +156,15 @@ function highlight(text: string, n: string): HighlightSeg[] {
       description="所有 Orchestrator / Worker / Receiver 上报事件的合并视图"
     >
       <template #actions>
-        <span class="rounded-full border border-border bg-muted px-3 py-1 text-2xs font-medium tabular-nums text-muted-foreground">
-          <span class="text-foreground">{{ visible.length }}</span> / {{ rows.length }} 条
-        </span>
+        <Badge variant="info" class="tabular-nums">
+          <span class="text-foreground">{{ visible.length }}</span>
+          <span class="text-muted-foreground/80">/ {{ rows.length }} 条</span>
+        </Badge>
       </template>
     </PageHeader>
 
     <Card>
-      <div class="flex flex-wrap items-center gap-2 border-b border-border/60 px-5 py-3.5">
+      <div class="flex flex-wrap items-center gap-2 border-b border-border/60 px-5 py-3">
         <div class="min-w-[260px] flex-1">
           <TextInput
             v-model="search"
@@ -171,53 +179,67 @@ function highlight(text: string, n: string): HighlightSeg[] {
         <SelectInput
           v-model="batchFilter"
           aria-label="按批次过滤"
-          class="h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground outline-none transition hover:border-primary/40 focus:border-primary"
+          class="h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground outline-none transition-colors hover:border-primary/40 focus:border-primary"
         >
           <option value="">所有批次</option>
           <option v-for="b in batches" :key="b" :value="b">{{ b }}</option>
         </SelectInput>
         <Segmented v-model="filter" :options="LEVEL_FILTERS" />
-        <span
+        <Badge
           v-if="sourceFilter"
-          class="inline-flex h-8 items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 text-xs text-primary"
-          title="按事件源（worker / receiver ID）过滤 — 服务端精确匹配"
+          variant="outline"
+          class="border-primary/40 bg-primary/10 text-primary"
         >
-          源: <span class="font-mono">{{ sourceFilter }}</span>
+          <span class="opacity-70">源</span>
+          <span class="font-mono">{{ sourceFilter }}</span>
           <button
             type="button"
             @click="sourceFilter = ''"
-            class="text-primary/70 transition hover:text-primary"
-            title="移除源过滤"
+            class="-mr-1 grid h-4 w-4 place-items-center rounded text-primary/70 transition-colors hover:bg-primary/15 hover:text-primary"
             aria-label="移除源过滤"
           >
-            ×
+            <Icon name="x" :size="10" :stroke-width="2.4" />
           </button>
-        </span>
-        <button
-          v-if="search || batchFilter || sourceFilter || filter !== 'all'"
+        </Badge>
+        <Popover>
+          <HintTip text="事件等级与展开规则说明">
+            <PopoverTrigger as-child>
+              <Button type="button" variant="outline" size="icon-sm" aria-label="说明">
+                <Icon name="help" :size="14" />
+              </Button>
+            </PopoverTrigger>
+          </HintTip>
+          <PopoverContent align="end" class="w-72 text-cell">
+            <div class="mb-2 text-mini font-medium uppercase tracking-label text-muted-foreground">等级图例</div>
+            <ul class="space-y-1.5 text-muted-foreground">
+              <li class="flex items-center gap-2">
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/70" aria-hidden />
+                <span><span class="text-foreground">信息</span> · 例行状态推进</span>
+              </li>
+              <li class="flex items-center gap-2">
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
+                <span><span class="text-foreground">警告</span> · 值得关注但未失败</span>
+              </li>
+              <li class="flex items-center gap-2">
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" aria-hidden />
+                <span><span class="text-foreground">错误</span> · 处理失败 / 异常</span>
+              </li>
+            </ul>
+            <div class="mt-3 border-t border-border/60 pt-2 text-2xs text-muted-foreground">
+              长消息可点击展开
+            </div>
+          </PopoverContent>
+        </Popover>
+        <Button
+          v-if="hasActiveFilters"
+          type="button"
+          variant="ghost"
+          size="sm"
+          class="text-muted-foreground hover:text-foreground"
           @click="clearAll"
-          class="h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
         >
           清除筛选
-        </button>
-      </div>
-      <!-- Level legend — explains the dot colors so first-time users don't
-           have to decode them. Only shown when there's actually a list to read. -->
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-border/60 bg-muted/30 px-5 py-2 text-2xs text-muted-foreground">
-        <span class="font-medium">图例</span>
-        <span class="inline-flex items-center gap-1.5">
-          <span class="h-1.5 w-1.5 rounded-full bg-muted-foreground/70" aria-hidden />
-          <span>信息</span>
-        </span>
-        <span class="inline-flex items-center gap-1.5">
-          <span class="h-1.5 w-1.5 rounded-full bg-warning" aria-hidden />
-          <span>警告（值得关注但未失败）</span>
-        </span>
-        <span class="inline-flex items-center gap-1.5">
-          <span class="h-1.5 w-1.5 rounded-full bg-danger" aria-hidden />
-          <span>错误（处理失败 / 异常）</span>
-        </span>
-        <span class="ml-auto text-muted-foreground/70">长消息可点击展开</span>
+        </Button>
       </div>
 
       <div class="max-h-[70vh] overflow-auto font-mono">
@@ -241,70 +263,69 @@ function highlight(text: string, n: string): HighlightSeg[] {
             <EmptyState title="暂无事件" illustration="inbox" />
           </template>
           <template #default>
-        <EmptyState
-          v-if="visible.length === 0"
-          title="当前筛选条件下没有匹配"
-        />
-        <ul v-else class="divide-y divide-border/50">
-          <li
-            v-for="e in visible"
-            :key="e.id"
-            class="flex items-start gap-3 px-5 py-2 text-cell transition hover:bg-muted/40"
-          >
-            <span class="w-20 shrink-0 text-muted-foreground">{{ fmtAge(e.ts) }}</span>
-            <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>
-            <span class="w-32 shrink-0 truncate text-muted-foreground" :title="e.source">{{ e.source }}</span>
-            <span
-              :class="
-                isLong(e.message) && !expanded.has(e.id)
-                  ? 'flex-1 cursor-pointer truncate hover:text-foreground'
-                  : 'flex-1 break-all whitespace-pre-wrap'
-              "
-              :title="isLong(e.message) && !expanded.has(e.id) ? '点击展开完整消息' : undefined"
-              @click="isLong(e.message) && toggle(e.id)"
+            <EmptyState
+              v-if="visible.length === 0"
+              title="当前筛选条件下没有匹配"
+            />
+            <ul v-else class="divide-y divide-border/50">
+              <li
+                v-for="e in visible"
+                :key="e.id"
+                class="flex items-start gap-3 px-5 py-2 text-cell transition-colors hover:bg-muted/40"
+              >
+                <span class="w-20 shrink-0 text-muted-foreground">{{ fmtAge(e.ts) }}</span>
+                <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>
+                <span class="w-32 shrink-0 truncate text-muted-foreground" :title="e.source">{{ e.source }}</span>
+                <span
+                  :class="
+                    isLong(e.message) && !expanded.has(e.id)
+                      ? 'flex-1 cursor-pointer truncate hover:text-foreground'
+                      : 'flex-1 break-all whitespace-pre-wrap'
+                  "
+                  @click="isLong(e.message) && toggle(e.id)"
+                >
+                  <template v-for="(seg, i) in highlight(e.message, needle)" :key="i">
+                    <mark v-if="seg.mark" class="rounded bg-warning/30 px-0.5 text-warning">{{ seg.text }}</mark>
+                    <template v-else>{{ seg.text }}</template>
+                  </template>
+                  <button
+                    v-if="isLong(e.message)"
+                    type="button"
+                    @click.stop="toggle(e.id)"
+                    class="ml-2 text-3xs text-muted-foreground hover:text-primary"
+                  >
+                    {{ expanded.has(e.id) ? "收起" : "展开" }}
+                  </button>
+                </span>
+                <template v-if="e.granule_id">
+                  <RouterLink
+                    v-if="e.batch_id"
+                    :to="`/batches/${e.batch_id}?granule=${encodeURIComponent(e.granule_id)}`"
+                    class="shrink-0 truncate text-muted-foreground transition-colors hover:text-primary"
+                  >
+                    {{ e.granule_id }}
+                  </RouterLink>
+                  <span v-else class="shrink-0 truncate text-muted-foreground">{{ e.granule_id }}</span>
+                </template>
+              </li>
+            </ul>
+            <div
+              v-if="rows.length > 0"
+              class="flex items-center justify-center border-t border-border/60 px-5 py-3"
             >
-              <template v-for="(seg, i) in highlight(e.message, needle)" :key="i">
-                <mark v-if="seg.mark" class="rounded bg-warning/30 px-0.5 text-warning">{{ seg.text }}</mark>
-                <template v-else>{{ seg.text }}</template>
-              </template>
-              <button
-                v-if="isLong(e.message)"
+              <Button
+                v-if="hasMoreOlder"
                 type="button"
-                @click.stop="toggle(e.id)"
-                class="ml-2 text-3xs text-muted-foreground hover:text-primary"
+                variant="outline"
+                size="sm"
+                :disabled="loadingOlder"
+                @click="loadOlder"
               >
-                {{ expanded.has(e.id) ? "收起" : "展开" }}
-              </button>
-            </span>
-            <template v-if="e.granule_id">
-              <RouterLink
-                v-if="e.batch_id"
-                :to="`/batches/${e.batch_id}?granule=${encodeURIComponent(e.granule_id)}`"
-                class="shrink-0 truncate text-muted-foreground transition hover:text-primary"
-                :title="`跳转到 ${e.batch_id} 中的 ${e.granule_id}`"
-              >
-                {{ e.granule_id }}
-              </RouterLink>
-              <span v-else class="shrink-0 truncate text-muted-foreground">{{ e.granule_id }}</span>
-            </template>
-          </li>
-        </ul>
-        <div
-          v-if="rows.length > 0"
-          class="flex items-center justify-center border-t border-border/60 px-5 py-3"
-        >
-          <button
-            v-if="hasMoreOlder"
-            type="button"
-            @click="loadOlder"
-            :disabled="loadingOlder"
-            class="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-cell text-muted-foreground transition hover:border-primary/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Loader2Icon v-if="loadingOlder" class="size-3 animate-spin" />
-            {{ loadingOlder ? "加载中…" : "加载更早事件" }}
-          </button>
-          <span v-else class="text-2xs text-muted-foreground">已加载到最早事件</span>
-        </div>
+                <Loader2Icon v-if="loadingOlder" class="size-3 animate-spin" />
+                {{ loadingOlder ? "加载中…" : "加载更早事件" }}
+              </Button>
+              <span v-else class="text-2xs text-muted-foreground">已加载到最早事件</span>
+            </div>
           </template>
         </QueryState>
       </div>

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { type Row, type RowErrors, type Schema, emptyRow } from "@/features/batch/types";
 import { requestConfirm } from "@/composables/useConfirm";
+import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/Icon";
 import CreateBatchCell from "@/features/batch/components/CreateBatchCell.vue";
 
 const props = defineProps<{
@@ -52,21 +54,26 @@ async function removeRow(idx: number) {
   <div>
     <div class="mb-2 flex items-center justify-between">
       <span class="text-xs text-muted-foreground">数据粒 · {{ rows.length }} 条</span>
-      <div class="flex gap-1.5 text-xs">
-        <button
+      <div class="flex gap-1.5">
+        <Button
           type="button"
+          variant="outline"
+          size="xs"
+          class="text-muted-foreground hover:text-foreground"
           @click="emit('openCsv')"
-          class="rounded-md border border-border bg-background px-2 py-1 text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
         >
           粘贴 CSV
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="outline"
+          size="xs"
+          class="text-muted-foreground hover:text-foreground"
           @click="addRow"
-          class="rounded-md border border-border bg-background px-2 py-1 text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
         >
-          + 添加行
-        </button>
+          <Icon name="plus" :size="11" />
+          添加行
+        </Button>
       </div>
     </div>
     <div class="overflow-x-auto rounded-lg border border-border">
@@ -190,13 +197,17 @@ async function removeRow(idx: number) {
               />
             </td>
             <td class="px-2 py-1 text-right">
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="删除该行"
+                title="删除该行"
+                class="h-6 w-6 text-muted-foreground hover:bg-danger/10 hover:text-danger"
                 @click="removeRow(idx)"
-                class="text-muted-foreground hover:text-danger"
               >
-                ×
-              </button>
+                <Icon name="x" :size="12" :stroke-width="2.4" />
+              </Button>
             </td>
           </tr>
           <tr v-if="rows.length === 0">

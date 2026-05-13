@@ -1,4 +1,12 @@
 <script setup lang="ts">
+import { Button } from "@/components/ui/button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import HintTip from "@/components/HintTip.vue";
+import RowActions from "@/components/RowActions.vue";
+
+// 节点生命周期三件套 — 启用 / 重启 / 移除。
+// "简约至上 · 转移" 策略：最常用的 启用/禁用 留在外侧 Button，
+// 重启 / 移除 这种破坏性 + 低频动作下沉到 ⋯ 菜单。
 const props = defineProps<{
   enabled: boolean;
   pending: boolean;
@@ -13,60 +21,40 @@ const emit = defineEmits<{
   restart: [];
 }>();
 
-// All three ops are soft-reversible — disable flips back via the same button;
-// forget only deletes the DB row, a live receiver/worker re-registers on
-// next heartbeat; restart goes through the heartbeat reply, container restart
-// policy brings the process back. Parent owns the confirm flow on forget +
-// restart.
 function toggle(): void {
   emit("setEnabled", !props.enabled);
-}
-function forget(): void {
-  emit("forget");
-}
-function restart(): void {
-  emit("restart");
 }
 </script>
 
 <template>
-  <span class="flex items-center gap-1.5">
-    <button
-      type="button"
-      :disabled="pending"
-      @click="restart"
+  <RowActions>
+    <template #primary>
+      <HintTip :text="enabled ? (disableTitle ?? '禁用此节点（在手任务继续，可点启用恢复）') : '重新启用此节点'">
+        <Button
+          type="button"
+          :variant="enabled ? 'outline' : 'default'"
+          size="sm"
+          :disabled="pending"
+          @click="toggle"
+        >
+          {{ pending ? "…" : enabled ? "禁用" : "启用" }}
+        </Button>
+      </HintTip>
+    </template>
+    <DropdownMenuItem
       :title="restartTitle ?? '触发该节点重启（一次心跳内生效，依赖容器 restart 策略恢复）'"
-      class="rounded-md border border-border bg-background px-2 py-0.5 text-mini font-medium text-muted-foreground transition hover:border-primary/40 hover:text-primary disabled:opacity-50"
-    >
-      {{ pending ? "…" : "重启" }}
-    </button>
-    <button
-      type="button"
       :disabled="pending"
-      @click="toggle"
-      :title="enabled ? (disableTitle ?? '禁用此节点') : '重新启用此节点'"
-      :class="[
-        'rounded-md border px-2 py-0.5 text-mini font-medium transition disabled:opacity-50',
-        enabled
-          ? 'border-border bg-background text-muted-foreground hover:border-danger/40 hover:text-danger'
-          : 'border-success/30 bg-success/10 text-success hover:bg-success/15',
-      ]"
+      @select="emit('restart')"
     >
-      {{ pending ? "…" : enabled ? "禁用" : "启用" }}
-    </button>
-    <button
-      type="button"
-      :disabled="pending || enabled"
-      @click="forget"
+      重启…
+    </DropdownMenuItem>
+    <DropdownMenuItem
       :title="enabled ? '请先禁用此节点，再点击此按钮永久移除' : (forgetTitle ?? '永久从注册表中删除（misclick → 重启 receiver/worker 自动重建）')"
-      :class="[
-        'rounded-md border px-2 py-0.5 text-mini font-medium transition disabled:cursor-not-allowed',
-        enabled
-          ? 'border-border bg-muted/40 text-muted-foreground/60 disabled:opacity-60'
-          : 'border-danger/30 bg-danger/10 text-danger hover:bg-danger/15 disabled:opacity-50',
-      ]"
+      :disabled="pending || enabled"
+      class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
+      @select="emit('forget')"
     >
-      {{ pending ? "…" : "移除" }}
-    </button>
-  </span>
+      永久移除…
+    </DropdownMenuItem>
+  </RowActions>
 </template>

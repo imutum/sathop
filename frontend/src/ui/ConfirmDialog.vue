@@ -9,9 +9,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
 import { confirmInput, confirmRequest, resolveConfirm } from "@/composables/useConfirm";
 
 const inputRef = ref<{ $el?: HTMLInputElement } | null>(null);
@@ -28,12 +27,8 @@ const canConfirm = computed(() => {
   return !required || confirmInput.value === required;
 });
 
-const actionClass = computed(() =>
-  cn(
-    buttonVariants({
-      variant: confirmRequest.value?.tone === "danger" ? "destructive" : "default",
-    }),
-  ),
+const actionVariant = computed<"destructive" | "default">(() =>
+  confirmRequest.value?.tone === "danger" ? "destructive" : "default",
 );
 
 watch(confirmRequest, (request) => {
@@ -84,14 +79,14 @@ function onActionClick() {
         <AlertDialogCancel @click="resolveConfirm(false)">
           {{ confirmRequest.cancelText }}
         </AlertDialogCancel>
-        <button
+        <Button
           type="button"
-          :class="actionClass"
+          :variant="actionVariant"
           :disabled="!canConfirm"
           @click="onActionClick"
         >
           {{ confirmRequest.confirmText }}
-        </button>
+        </Button>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>

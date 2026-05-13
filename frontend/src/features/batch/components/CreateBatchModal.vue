@@ -345,7 +345,7 @@ function onForget(n: string) {
       </Alert>
 
       <div class="flex justify-end gap-2 pt-2">
-        <Button type="button" @click="tryClose">取消</Button>
+        <Button type="button" variant="outline" @click="tryClose">取消</Button>
         <Button
           type="submit"
           variant="default"

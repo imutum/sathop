@@ -9,11 +9,14 @@ import { useToast } from "@/composables/useToast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import CardSection from "@/components/CardSection.vue";
 import CopyButton from "@/components/CopyButton.vue";
 import Field from "@/components/Field.vue";
 import PageHeader from "@/components/PageHeader.vue";
+import RowActions from "@/components/RowActions.vue";
 import Segmented from "@/components/Segmented.vue";
 import BatchEventLog from "@/features/batch/components/BatchEventLog.vue";
 import BatchGranuleTable from "@/features/batch/components/BatchGranuleTable.vue";
@@ -274,45 +277,45 @@ async function confirmDelete() {
             </span>
           </template>
           <template v-if="b" #actions>
-            <Button
-              v-if="failedCount > 0"
-              size="sm"
-              :pending="retryAll.isPending.value"
-              pending-label="重试中…"
-              @click="retryAll.mutate()"
-            >
-              重试失败 ({{ failedCount }})
-            </Button>
-            <Button
-              v-if="exhaustedCount > 0"
-              size="sm"
-              :pending="resetExhausted.isPending.value"
-              pending-label="重置中…"
-              @click="resetExhausted.mutate()"
-              title="清零所有已放弃产物的拉取失败计数 — 下次 receiver poll 重新派发"
-            >
-              重置已放弃 ({{ exhaustedCount }})
-            </Button>
-            <Button
-              v-if="inflightCount > 0"
-              variant="destructive"
-              size="sm"
-              :pending="cancelAll.isPending.value"
-              pending-label="取消中…"
-              @click="confirmCancelAll"
-            >
-              取消 ({{ inflightCount }})
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              :pending="deleteBatch.isPending.value"
-              pending-label="删除中…"
-              @click="confirmDelete"
-              title="永久删除该批次及其全部数据粒、产物、进度、事件"
-            >
-              删除
-            </Button>
+            <RowActions align="end">
+              <template #primary>
+                <Button
+                  v-if="failedCount > 0"
+                  size="sm"
+                  :pending="retryAll.isPending.value"
+                  pending-label="重试中…"
+                  @click="retryAll.mutate()"
+                >
+                  重试失败 ({{ failedCount }})
+                </Button>
+                <Button
+                  v-if="inflightCount > 0"
+                  variant="destructive"
+                  size="sm"
+                  :pending="cancelAll.isPending.value"
+                  pending-label="取消中…"
+                  @click="confirmCancelAll"
+                >
+                  取消 ({{ inflightCount }})
+                </Button>
+              </template>
+              <DropdownMenuItem
+                v-if="exhaustedCount > 0"
+                :disabled="resetExhausted.isPending.value"
+                title="清零所有已放弃产物的拉取失败计数 — 下次 receiver poll 重新派发"
+                @select="resetExhausted.mutate()"
+              >
+                重置已放弃产物 ({{ exhaustedCount }})
+              </DropdownMenuItem>
+              <DropdownMenuSeparator v-if="exhaustedCount > 0" />
+              <DropdownMenuItem
+                :disabled="deleteBatch.isPending.value"
+                class="text-danger focus:bg-danger/10 focus:text-danger"
+                @select="confirmDelete"
+              >
+                永久删除批次…
+              </DropdownMenuItem>
+            </RowActions>
           </template>
         </PageHeader>
       </div>
@@ -364,14 +367,14 @@ async function confirmDelete() {
       </div>
     </Card>
 
-    <Card>
-      <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
-        <div class="space-y-1.5">
-          <CardTitle>数据粒</CardTitle>
-          <CardDescription>按状态筛选 · 点击行展开阶段计时 / 进度时间线 / 该粒事件</CardDescription>
-        </div>
+    <CardSection
+      title="数据粒"
+      description="按状态筛选 · 点击行展开阶段计时 / 进度时间线 / 该粒事件"
+      :padded="false"
+    >
+      <template #meta>
         <Segmented v-model="filter" size="sm" :options="stateOptions" />
-      </CardHeader>
+      </template>
       <BatchGranuleTable
         :rows="rows"
         :batch-id="batchId"
@@ -387,7 +390,7 @@ async function confirmDelete() {
         @cancel="confirmCancel"
         @retry="(id) => retry.mutate(id)"
       />
-    </Card>
+    </CardSection>
 
     <BatchTimingCard
       :batch-id="batchId"
@@ -395,24 +398,20 @@ async function confirmDelete() {
       :eta-seconds="b?.eta_seconds ?? null"
     />
 
-    <Card>
-      <CardHeader class="flex-row items-start justify-between space-y-0 gap-4">
-        <div class="space-y-1.5">
-          <CardTitle>日志</CardTitle>
-          <CardDescription>按级别筛选 · 仅本批次的事件</CardDescription>
-        </div>
-        <div class="flex items-center gap-3">
-          <span class="text-2xs text-muted-foreground tabular-nums">
-            {{ eventCountLabel }}
-          </span>
-          <Segmented
-            v-model="logLevel"
-            size="sm"
-            :options="LOG_LEVEL_OPTIONS"
-          />
-        </div>
-      </CardHeader>
+    <CardSection
+      title="日志"
+      description="按级别筛选 · 仅本批次的事件"
+      :padded="false"
+    >
+      <template #meta>
+        <Badge variant="info" class="tabular-nums">{{ eventCountLabel }}</Badge>
+        <Segmented
+          v-model="logLevel"
+          size="sm"
+          :options="LOG_LEVEL_OPTIONS"
+        />
+      </template>
       <BatchEventLog :events="batchEvents" :batch-id="batchId" />
-    </Card>
+    </CardSection>
   </div>
 </template>
