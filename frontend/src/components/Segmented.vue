@@ -69,7 +69,7 @@ function onKeydown(e: KeyboardEvent, i: number) {
       @keydown="onKeydown($event, i)"
       :class="[
         heightCls,
-        'inline-flex items-center gap-1.5 rounded-md font-medium transition',
+        'inline-flex items-center gap-1.5 rounded-md font-medium transition-colors',
         o.value === modelValue
           ? 'bg-background text-foreground shadow-soft'
           : o.dim

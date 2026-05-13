@@ -178,7 +178,7 @@ async function copySnippet() {
       <div class="mt-1 grid grid-cols-1 gap-1 rounded-md border border-border bg-muted/40 p-0.5 md:grid-cols-3">
         <button
           type="button"
-          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
           :class="exposeMode === 'selfsigned' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="exposeMode = 'selfsigned'"
         >
@@ -186,7 +186,7 @@ async function copySnippet() {
         </button>
         <button
           type="button"
-          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
           :class="exposeMode === 'caddy' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="exposeMode = 'caddy'"
         >
@@ -194,7 +194,7 @@ async function copySnippet() {
         </button>
         <button
           type="button"
-          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
           :class="exposeMode === 'direct' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="exposeMode = 'direct'"
         >
@@ -260,7 +260,7 @@ async function copySnippet() {
     </p>
 
     <details class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
-      <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition hover:text-foreground">
+      <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
         高级：容量 / 心跳 / 并发 / 端口
       </summary>
       <div class="mt-2 grid grid-cols-2 gap-3 md:grid-cols-4">

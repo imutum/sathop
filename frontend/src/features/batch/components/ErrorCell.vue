@@ -48,7 +48,7 @@ function setView(v: View) {
 const tabClass = (active: boolean) =>
   active
     ? "rounded-md bg-danger/25 px-2 py-0.5 text-3xs font-medium text-danger"
-    : "rounded-md px-2 py-0.5 text-3xs font-medium text-muted-foreground transition hover:text-foreground";
+    : "rounded-md px-2 py-0.5 text-3xs font-medium text-muted-foreground transition-colors hover:text-foreground";
 </script>
 
 <template>
@@ -59,7 +59,7 @@ const tabClass = (active: boolean) =>
       <button
         type="button"
         @click="open = true"
-        class="mt-1 rounded-md bg-danger/15 px-1.5 py-0.5 text-3xs font-medium text-danger transition hover:bg-danger/25"
+        class="mt-1 rounded-md bg-danger/15 px-1.5 py-0.5 text-3xs font-medium text-danger transition-colors hover:bg-danger/25"
       >
         展开完整错误（{{ totalChars }} 字符）
       </button>
@@ -92,7 +92,7 @@ const tabClass = (active: boolean) =>
       <button
         type="button"
         @click="open = false"
-        class="mt-1 rounded-md bg-danger/15 px-1.5 py-0.5 text-3xs font-medium text-danger transition hover:bg-danger/25"
+        class="mt-1 rounded-md bg-danger/15 px-1.5 py-0.5 text-3xs font-medium text-danger transition-colors hover:bg-danger/25"
       >
         收起
       </button>

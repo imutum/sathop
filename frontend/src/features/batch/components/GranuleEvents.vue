@@ -26,7 +26,7 @@ const stripped = computed(() => stripBatchPrefix(props.granuleId, props.batchId)
       </span>
       <RouterLink
         :to="`/events?q=${encodeURIComponent(stripped)}`"
-        class="text-mini text-muted-foreground transition hover:text-primary"
+        class="text-mini text-muted-foreground transition-colors hover:text-primary"
       >
         全屏 →
       </RouterLink>

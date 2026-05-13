@@ -93,7 +93,7 @@ const emit = defineEmits<{
             <RouterLink
               v-if="g.leased_by"
               :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-              class="transition hover:text-primary"
+              class="transition-colors hover:text-primary"
               title="跳转到该 worker 卡片"
             >
               {{ g.leased_by }}
@@ -201,7 +201,7 @@ const emit = defineEmits<{
               <RouterLink
                 v-if="g.leased_by"
                 :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                class="transition hover:text-primary"
+                class="transition-colors hover:text-primary"
                 title="跳转到该 worker 卡片"
               >
                 {{ g.leased_by }}

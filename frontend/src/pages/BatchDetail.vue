@@ -263,7 +263,7 @@ async function confirmDelete() {
     <div>
       <RouterLink
         to="/batches"
-        class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+        class="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <Icon name="arrowLeft" :size="12" />
         返回批次列表

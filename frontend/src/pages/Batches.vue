@@ -286,7 +286,7 @@ function onCreated() {
             <li v-for="r in visible" :key="r.b.batch_id" class="space-y-3 p-4">
               <div class="flex items-start justify-between gap-3">
                 <RouterLink :to="`/batches/${r.b.batch_id}`" class="min-w-0 flex-1">
-                  <div class="truncate font-medium text-foreground transition hover:text-primary">
+                  <div class="truncate font-medium text-foreground transition-colors hover:text-primary">
                     {{ r.b.name }}
                   </div>
                   <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground">
@@ -302,7 +302,7 @@ function onCreated() {
                   path: '/bundles',
                   query: { name: r.bundleLink.name, version: r.bundleLink.version },
                 }"
-                class="block truncate font-mono text-2xs text-muted-foreground transition hover:text-primary"
+                class="block truncate font-mono text-2xs text-muted-foreground transition-colors hover:text-primary"
                 title="在任务包页查看"
               >
                 {{ r.b.bundle_ref }}
@@ -392,7 +392,7 @@ function onCreated() {
                 <TableRow v-for="r in visible" :key="r.b.batch_id">
                   <TableCell class="px-5 py-3.5">
                     <RouterLink :to="`/batches/${r.b.batch_id}`" class="block">
-                      <div class="font-medium text-foreground transition hover:text-primary">{{ r.b.name }}</div>
+                      <div class="font-medium text-foreground transition-colors hover:text-primary">{{ r.b.name }}</div>
                       <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground">
                         {{ r.b.batch_id }}
                         <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
@@ -406,7 +406,7 @@ function onCreated() {
                         path: '/bundles',
                         query: { name: r.bundleLink.name, version: r.bundleLink.version },
                       }"
-                      class="transition hover:text-primary"
+                      class="transition-colors hover:text-primary"
                       title="在任务包页查看"
                     >
                       {{ r.b.bundle_ref }}

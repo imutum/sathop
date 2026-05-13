@@ -76,7 +76,7 @@ const isDark = computed(() => effective.value === "dark");
                 @click="navigate"
                 :title="collapsed ? n.label : undefined"
                 :class="[
-                  'group relative flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition outline-none',
+                  'group relative flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors outline-none',
                   (n.end ? isExactActive : isActive)
                     ? 'bg-muted text-foreground'
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -111,7 +111,7 @@ const isDark = computed(() => effective.value === "dark");
           @click="logout"
           :title="collapsed ? '退出登录' : undefined"
           :class="[
-            'flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground',
+            'flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
             collapsed ? 'justify-center' : '',
           ]"
         >
@@ -125,7 +125,7 @@ const isDark = computed(() => effective.value === "dark");
         @click="collapsed = !collapsed"
         :aria-label="collapsed ? '展开侧边栏' : '收起侧边栏'"
         :title="collapsed ? '展开侧边栏' : '收起侧边栏'"
-        class="absolute -right-3 top-20 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-soft transition hover:text-foreground"
+        class="absolute -right-3 top-20 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-soft transition-colors hover:text-foreground"
       >
         <Icon :name="collapsed ? 'chevronRight' : 'chevronLeft'" :size="12" :stroke-width="2.2" />
       </button>
@@ -157,7 +157,7 @@ const isDark = computed(() => effective.value === "dark");
                   :href="href"
                   @click="navigate"
                   :class="[
-                    'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition outline-none',
+                    'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors outline-none',
                     (n.end ? isExactActive : isActive)
                       ? 'bg-muted text-foreground'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -175,7 +175,7 @@ const isDark = computed(() => effective.value === "dark");
           <button
             type="button"
             @click="logout"
-            class="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            class="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <Icon name="logout" class="shrink-0" />
             <span>退出登录</span>

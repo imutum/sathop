@@ -172,7 +172,7 @@ async function copySnippet() {
       <div class="mt-1 grid grid-cols-1 gap-1 rounded-md border border-border bg-muted/40 p-0.5 md:grid-cols-3">
         <button
           type="button"
-          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
           :class="tlsMode === 'trust-orch' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="tlsMode = 'trust-orch'"
         >
@@ -180,7 +180,7 @@ async function copySnippet() {
         </button>
         <button
           type="button"
-          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
           :class="tlsMode === 'strict' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="tlsMode = 'strict'"
         >
@@ -188,7 +188,7 @@ async function copySnippet() {
         </button>
         <button
           type="button"
-          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
           :class="tlsMode === 'insecure' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="tlsMode = 'insecure'"
         >
@@ -209,7 +209,7 @@ async function copySnippet() {
     </div>
 
     <details class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
-      <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition hover:text-foreground">
+      <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
         高级：并发数 / 心跳间隔
       </summary>
       <div class="mt-2 grid grid-cols-2 gap-3">

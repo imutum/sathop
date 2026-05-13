@@ -18,7 +18,7 @@ const props = defineProps<{
       <li
         v-for="e in events"
         :key="e.id"
-        class="flex items-start gap-3 px-5 py-2 text-cell transition hover:bg-muted/40"
+        class="flex items-start gap-3 px-5 py-2 text-cell transition-colors hover:bg-muted/40"
       >
         <span class="w-20 shrink-0 text-muted-foreground">{{ fmtAge(e.ts) }}</span>
         <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>

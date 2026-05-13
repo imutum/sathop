@@ -40,7 +40,7 @@ const items = computed(() =>
     <li
       v-for="{ e, tone, icon } in items"
       :key="e.id"
-      class="flex items-start gap-3 px-5 py-3 transition hover:bg-muted/40"
+      class="flex items-start gap-3 px-5 py-3 transition-colors hover:bg-muted/40"
     >
       <span
         :class="['grid h-8 w-8 shrink-0 place-items-center rounded-full', TILE[tone]]"
