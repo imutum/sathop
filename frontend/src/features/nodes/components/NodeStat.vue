@@ -79,7 +79,7 @@ const statusCls = computed(
     >
       <div class="flex min-w-0 items-center gap-3">
         <span
-          :class="['grid h-11 w-11 shrink-0 place-items-center rounded-lg transition', tileCls]"
+          :class="['grid h-11 w-11 shrink-0 place-items-center rounded-lg transition-colors', tileCls]"
           aria-hidden
         >
           <slot name="icon" />
