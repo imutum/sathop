@@ -36,7 +36,7 @@ describe("ui/Badge", () => {
     expect(dot.classes()).toContain("rounded-full");
   });
 
-  it("BADGE_TONES exposes all 14 state keys", () => {
+  it("BADGE_TONES exposes all 15 state keys", () => {
     expect(Object.keys(BADGE_TONES).sort()).toEqual(
       [
         "acked",
@@ -52,6 +52,7 @@ describe("ui/Badge", () => {
         "processing",
         "queued",
         "uploaded",
+        "uploading",
         "warn",
       ].sort(),
     );
