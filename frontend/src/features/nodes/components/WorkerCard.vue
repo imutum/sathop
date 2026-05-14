@@ -391,13 +391,17 @@ function onKey(e: KeyboardEvent) {
               {{ pause.isPending.value ? "…" : worker.operator_paused ? "恢复" : "暂停" }}
             </Button>
             <DropdownMenu>
-              <HintTip text="更多运维操作">
-                <DropdownMenuTrigger as-child>
-                  <Button type="button" variant="outline" size="icon-sm" aria-label="更多运维">
-                    <Icon name="more" :size="14" />
-                  </Button>
-                </DropdownMenuTrigger>
-              </HintTip>
+              <DropdownMenuTrigger as-child>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  title="更多运维操作"
+                  aria-label="更多运维操作"
+                >
+                  <Icon name="more" :size="14" />
+                </Button>
+              </DropdownMenuTrigger>
               <DropdownMenuContent align="end" class="min-w-48">
                 <DropdownMenuLabel class="text-mini font-medium uppercase tracking-label text-muted-foreground">
                   运维

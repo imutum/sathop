@@ -17,7 +17,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
-import HintTip from "@/components/HintTip.vue";
 import SelectInput from "@/ui/SelectInput.vue";
 import Segmented from "@/components/Segmented.vue";
 import TextInput from "@/ui/TextInput.vue";
@@ -201,13 +200,17 @@ function highlight(text: string, n: string): HighlightSeg[] {
           </button>
         </Badge>
         <Popover>
-          <HintTip text="事件等级与展开规则说明">
-            <PopoverTrigger as-child>
-              <Button type="button" variant="outline" size="icon-sm" aria-label="说明">
-                <Icon name="help" :size="14" />
-              </Button>
-            </PopoverTrigger>
-          </HintTip>
+          <PopoverTrigger as-child>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              title="事件等级与展开规则说明"
+              aria-label="事件等级与展开规则说明"
+            >
+              <Icon name="help" :size="14" />
+            </Button>
+          </PopoverTrigger>
           <PopoverContent align="end" class="w-72 text-cell">
             <div class="mb-2 text-mini font-medium uppercase tracking-label text-muted-foreground">等级图例</div>
             <ul class="space-y-1.5 text-muted-foreground">
