@@ -173,8 +173,12 @@ function onUploaded(d: BundleDetail) {
                 <TableRow
                   v-for="b in bundleRows"
                   :key="`${b.name}@${b.version}`"
+                  role="button"
+                  tabindex="0"
                   @click="selected = { name: b.name, version: b.version }"
-                  :class="['cursor-pointer', isActive(b) ? 'bg-accent/60' : '']"
+                  @keydown.enter="selected = { name: b.name, version: b.version }"
+                  @keydown.space.prevent="selected = { name: b.name, version: b.version }"
+                  :class="['cursor-pointer focus:outline-none focus-visible:bg-muted/50', isActive(b) ? 'bg-accent/60' : '']"
                 >
                   <TableCell class="px-5 font-mono text-[12px] font-medium">{{ b.name }}</TableCell>
                   <TableCell>
