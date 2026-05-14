@@ -9,11 +9,11 @@ defineProps<{ label: string; mono?: boolean; hint?: string }>();
     </div>
     <div
       :class="[
-        'mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 break-all',
+        'mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1',
         mono ? 'font-mono text-cell' : 'text-sm',
       ]"
     >
-      <span class="min-w-0 break-all"><slot /></span>
+      <span class="min-w-0 break-words"><slot /></span>
       <span
         v-if="hint"
         class="rounded bg-warning/15 px-1.5 py-0.5 text-mini font-medium text-warning"
