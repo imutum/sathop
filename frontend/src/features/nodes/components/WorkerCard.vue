@@ -370,14 +370,15 @@ function onKey(e: KeyboardEvent) {
             </HintTip>
           </span>
           <div class="flex items-center gap-2">
-            <HintTip text="跳转到事件日志，已按本节点过滤">
-              <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
-                <RouterLink :to="`/events?source=${encodeURIComponent(worker.worker_id)}`">
-                  <Icon name="events" :size="11" />
-                  事件
-                </RouterLink>
-              </Button>
-            </HintTip>
+            <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
+              <RouterLink
+                :to="`/events?source=${encodeURIComponent(worker.worker_id)}`"
+                title="跳转到事件日志，已按本节点过滤"
+              >
+                <Icon name="events" :size="11" />
+                事件
+              </RouterLink>
+            </Button>
             <Button
               type="button"
               :variant="worker.operator_paused ? 'default' : 'outline'"
