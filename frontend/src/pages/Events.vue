@@ -273,16 +273,16 @@ function highlight(text: string, n: string): HighlightSeg[] {
               <li
                 v-for="e in visible"
                 :key="e.id"
-                class="flex items-start gap-3 px-5 py-2 text-cell transition-colors hover:bg-muted/40"
+                class="flex flex-wrap items-start gap-x-3 gap-y-1 px-5 py-2 text-cell transition-colors hover:bg-muted/40"
               >
                 <span class="w-20 shrink-0 text-muted-foreground">{{ fmtAge(e.ts) }}</span>
                 <Badge :tone="e.level" dot>{{ levelLabel(e.level) }}</Badge>
-                <span class="w-32 shrink-0 truncate text-muted-foreground" :title="e.source">{{ e.source }}</span>
+                <span class="min-w-0 shrink truncate text-muted-foreground md:w-32 md:shrink-0" :title="e.source">{{ e.source }}</span>
                 <span
                   :class="
                     isLong(e.message) && !expanded.has(e.id)
-                      ? 'flex-1 cursor-pointer truncate hover:text-foreground'
-                      : 'flex-1 break-all whitespace-pre-wrap'
+                      ? 'min-w-0 basis-full cursor-pointer truncate hover:text-foreground md:basis-0 md:flex-1'
+                      : 'min-w-0 basis-full break-words whitespace-pre-wrap md:basis-0 md:flex-1'
                   "
                   @click="isLong(e.message) && toggle(e.id)"
                 >
@@ -303,11 +303,11 @@ function highlight(text: string, n: string): HighlightSeg[] {
                   <RouterLink
                     v-if="e.batch_id"
                     :to="`/batches/${e.batch_id}?granule=${encodeURIComponent(e.granule_id)}`"
-                    class="shrink-0 truncate text-muted-foreground transition-colors hover:text-primary"
+                    class="min-w-0 max-w-full shrink truncate text-muted-foreground transition-colors hover:text-primary md:shrink-0"
                   >
                     {{ e.granule_id }}
                   </RouterLink>
-                  <span v-else class="shrink-0 truncate text-muted-foreground">{{ e.granule_id }}</span>
+                  <span v-else class="min-w-0 max-w-full shrink truncate text-muted-foreground md:shrink-0">{{ e.granule_id }}</span>
                 </template>
               </li>
             </ul>
