@@ -2,7 +2,7 @@ import { defineComponent, h, type PropType } from "vue";
 
 // Single source of truth for inline SVG icons. Use:
 //   <Icon name="search" :size="13" />
-//   <Icon name="trash" />            <!-- defaults to 16 -->
+//   <Icon name="alert" />            <!-- defaults to 16 -->
 // Stroke defaults to 1.8 with currentColor; pass `:stroke-width="2.4"` to
 // override. Color is inherited from surrounding text-* utility.
 
@@ -71,12 +71,6 @@ const PATHS = {
     h("polyline", { points: "7 10 12 15 17 10" }),
     h("line", { x1: 12, y1: 15, x2: 12, y2: 3 }),
   ],
-  trash: () => [
-    h("polyline", { points: "3 6 5 6 21 6" }),
-    h("path", { d: "M19 6l-1.5 14a2 2 0 0 1-2 1.85H8.5a2 2 0 0 1-2-1.85L5 6" }),
-    h("path", { d: "M10 11v6M14 11v6" }),
-    h("path", { d: "M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" }),
-  ],
   arrowRight: () => [
     h("line", { x1: 5, y1: 12, x2: 19, y2: 12 }),
     h("polyline", { points: "12 5 19 12 12 19" }),
@@ -119,7 +113,6 @@ const PATHS = {
     h("path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" }),
     h("line", { x1: 12, y1: 17, x2: 12.01, y2: 17 }),
   ],
-  filter: () => [h("polygon", { points: "22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" })],
   sun: () => [
     h("circle", { cx: 12, cy: 12, r: 4 }),
     h("path", {
