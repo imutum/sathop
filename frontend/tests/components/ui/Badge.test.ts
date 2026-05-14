@@ -36,6 +36,12 @@ describe("ui/Badge", () => {
     expect(dot.classes()).toContain("rounded-full");
   });
 
+  it("base classes include shrink-0 + whitespace-nowrap (prevents char-by-char wrap when squeezed by flex parent)", () => {
+    const w = mount(Badge, { slots: { default: "信息" } });
+    expect(w.classes()).toContain("shrink-0");
+    expect(w.classes()).toContain("whitespace-nowrap");
+  });
+
   it("BADGE_TONES exposes all 15 state keys", () => {
     expect(Object.keys(BADGE_TONES).sort()).toEqual(
       [
