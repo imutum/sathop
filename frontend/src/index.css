@@ -89,6 +89,20 @@
     box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.55);
     border-radius: 0.5rem;
   }
+
+  /* Respect prefers-reduced-motion — kill animations + transitions for users
+     who opted out at the OS level. Tailwind's animate-* / data-state slide-in
+     classes all sit in the cascade so this override wins universally. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer components {
