@@ -14,6 +14,7 @@ export const BADGE_TONES = {
   downloaded: "bg-sky-500/10 text-sky-600 dark:text-sky-300",
   processing: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-300",
   processed: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-300",
+  uploading: "bg-violet-500/10 text-violet-600 dark:text-violet-300",
   uploaded: "bg-violet-500/10 text-violet-600 dark:text-violet-300",
   acked: "bg-success/10 text-success",
   deleted: "bg-success/10 text-success",
@@ -27,7 +28,7 @@ export const BADGE_TONES = {
 export type BadgeTone = keyof typeof BADGE_TONES
 
 export const badgeVariants = cva(
-  "inline-flex items-center gap-1 rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
   {
     variants: {
       variant: {

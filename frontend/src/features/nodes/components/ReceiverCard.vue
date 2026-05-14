@@ -98,15 +98,16 @@ const status = computed(() => nodeStatusBadge(props.receiver.enabled, props.rece
       </HintTip>
     </div>
 
-    <div class="flex items-center justify-end gap-2 border-t border-border/60 px-5 py-2.5">
-      <HintTip text="跳转到事件日志，已按本接收端过滤">
-        <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
-          <RouterLink :to="`/events?source=${encodeURIComponent(receiver.receiver_id)}`">
-            <Icon name="events" :size="11" />
-            事件
-          </RouterLink>
-        </Button>
-      </HintTip>
+    <div class="flex flex-wrap items-center justify-end gap-2 border-t border-border/60 px-5 py-2.5">
+      <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
+        <RouterLink
+          :to="`/events?source=${encodeURIComponent(receiver.receiver_id)}`"
+          title="跳转到事件日志，已按本接收端过滤"
+        >
+          <Icon name="events" :size="11" />
+          事件
+        </RouterLink>
+      </Button>
       <NodeLifecycleActions
         :enabled="receiver.enabled"
         :pending="lifecycle.pending.value"

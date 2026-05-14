@@ -222,8 +222,12 @@ function fmtHours(h: number): string {
             <TableRow
               v-for="g in active"
               :key="g.granule_id"
-              class="cursor-pointer"
+              role="button"
+              tabindex="0"
+              class="cursor-pointer focus:outline-none focus-visible:bg-muted/50"
               @click="gotoGranule(g.batch_id, g.granule_id)"
+              @keydown.enter="gotoGranule(g.batch_id, g.granule_id)"
+              @keydown.space.prevent="gotoGranule(g.batch_id, g.granule_id)"
             >
               <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
               <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">{{ g.batch_id }}</TableCell>
@@ -291,8 +295,12 @@ function fmtHours(h: number): string {
           <TableRow
             v-for="g in stuckRows"
             :key="g.granule_id"
-            class="cursor-pointer"
+            role="button"
+            tabindex="0"
+            class="cursor-pointer focus:outline-none focus-visible:bg-muted/50"
             @click="gotoGranule(g.batch_id, g.granule_id)"
+            @keydown.enter="gotoGranule(g.batch_id, g.granule_id)"
+            @keydown.space.prevent="gotoGranule(g.batch_id, g.granule_id)"
           >
             <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
             <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">{{ g.batch_id }}</TableCell>

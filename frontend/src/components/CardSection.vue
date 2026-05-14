@@ -7,14 +7,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 //
 // `padded`=true 时内容套 CardContent（默认有水平内边距），
 // 表格内容应传 padded=false 让 <Table> 自己撑满边到边。
-defineProps<{
-  title?: string;
-  description?: string;
-  /** 是否在内容外包 CardContent（默认 true）。表格/列表传 false。 */
-  padded?: boolean;
-  /** Card 容器额外类。 */
-  class?: string;
-}>();
+withDefaults(
+  defineProps<{
+    title?: string;
+    description?: string;
+    /** 是否在内容外包 CardContent（默认 true）。表格/列表传 false。 */
+    padded?: boolean;
+    /** Card 容器额外类。 */
+    class?: string;
+  }>(),
+  { padded: true },
+);
 </script>
 
 <template>
@@ -35,7 +38,7 @@ defineProps<{
         <slot name="meta" />
       </div>
     </CardHeader>
-    <CardContent v-if="padded !== false">
+    <CardContent v-if="padded">
       <slot />
     </CardContent>
     <template v-else>

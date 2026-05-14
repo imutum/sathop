@@ -9,6 +9,11 @@ import { BADGE_TONES, badgeVariants } from "."
 // EventLevel, etc.) — when set, it overrides the variant's bg/text via
 // tailwind-merge while keeping the cva base (border-transparent, sizing).
 // `dot` prepends a same-color status dot (Shadboard convention).
+//
+// `tone` accepts BadgeTone | string by design: the orchestrator's state
+// vocabulary evolves independently of the frontend's release cycle, so an
+// unknown state string falls back to the muted "info" palette rather than
+// crashing or rendering with the default primary color.
 const props = defineProps<{
   variant?: BadgeVariants["variant"]
   tone?: BadgeTone | string

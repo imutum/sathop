@@ -89,11 +89,25 @@
     box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.55);
     border-radius: 0.5rem;
   }
+
+  /* Respect prefers-reduced-motion — kill animations + transitions for users
+     who opted out at the OS level. Tailwind's animate-* / data-state slide-in
+     classes all sit in the cascade so this override wins universally. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer components {
   .stat-label {
-    @apply text-mini font-medium uppercase tracking-label text-muted-foreground;
+    @apply text-mini font-medium tracking-label text-muted-foreground whitespace-nowrap;
   }
   .kbd {
     @apply rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10.5px];
@@ -103,13 +117,6 @@
 @layer utilities {
   .text-balance {
     text-wrap: balance;
-  }
-  .bg-grid {
-    background-image:
-      linear-gradient(to right, hsl(var(--border) / 0.6) 1px, transparent 1px),
-      linear-gradient(to bottom, hsl(var(--border) / 0.6) 1px, transparent 1px);
-    background-size: 32px 32px;
-    background-position: -1px -1px;
   }
   .bg-dotgrid {
     background-image: radial-gradient(

@@ -43,6 +43,12 @@ const isDark = computed(() => effective.value === "dark");
 
 <template>
   <div class="flex h-full bg-background text-foreground">
+    <a
+      href="#main-content"
+      class="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-background focus:px-3 focus:py-1.5 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-pop"
+    >
+      跳到主内容
+    </a>
     <aside
       :class="[
         collapsed ? 'w-[72px]' : 'w-60',
@@ -52,7 +58,7 @@ const isDark = computed(() => effective.value === "dark");
     >
       <div class="flex h-16 items-center gap-3 border-b border-border px-4">
         <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-background text-foreground shadow-soft">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
             <path d="M21 12.79A9 9 0 1 1 11.21 3" />
             <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
           </svg>
@@ -85,7 +91,7 @@ const isDark = computed(() => effective.value === "dark");
               >
                 <span
                   :class="[
-                    'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full transition',
+                    'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full transition-colors',
                     (n.end ? isExactActive : isActive) ? 'bg-foreground' : 'bg-transparent',
                   ]"
                   aria-hidden
@@ -93,7 +99,7 @@ const isDark = computed(() => effective.value === "dark");
                 <Icon
                   :name="n.icon"
                   :class="[
-                    'shrink-0 transition',
+                    'shrink-0 transition-colors',
                     (n.end ? isExactActive : isActive) ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground',
                   ]"
                 />
@@ -195,7 +201,7 @@ const isDark = computed(() => effective.value === "dark");
             aria-label="打开导航"
             @click="mobileOpen = true"
           >
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <line x1="3" y1="6" x2="21" y2="6" />
               <line x1="3" y1="12" x2="21" y2="12" />
               <line x1="3" y1="18" x2="21" y2="18" />
@@ -206,6 +212,8 @@ const isDark = computed(() => effective.value === "dark");
           <HintTip :text="connected ? '后台事件流已连接，页面会自动刷新' : 'SSE 未连接，数据可能延迟，会在 60s 安全网内重试'">
             <Badge
               :variant="connected ? 'success' : 'outline'"
+              role="status"
+              aria-live="polite"
               :class="[
                 'hidden h-7 rounded-full md:inline-flex',
                 connected ? '' : 'text-muted-foreground',
@@ -236,7 +244,7 @@ const isDark = computed(() => effective.value === "dark");
         </div>
       </header>
 
-      <main class="flex-1 overflow-auto">
+      <main id="main-content" class="flex-1 overflow-auto">
         <div class="mx-auto w-full max-w-[1480px] px-4 py-5 md:px-6 md:py-6 lg:px-8 lg:py-8">
           <div class="animate-fade-in">
             <RouterView />

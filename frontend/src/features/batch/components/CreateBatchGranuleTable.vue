@@ -78,7 +78,7 @@ async function removeRow(idx: number) {
     </div>
     <div class="overflow-x-auto rounded-lg border border-border">
       <table class="w-full text-xs">
-        <thead class="bg-muted/60 text-left text-mini font-semibold uppercase tracking-widest text-muted-foreground">
+        <thead class="bg-muted/60 text-left text-mini font-semibold tracking-label text-muted-foreground">
           <tr>
             <th class="px-2 py-1.5">granule_id</th>
             <th

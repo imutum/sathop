@@ -30,7 +30,7 @@ function onCopy(e: MouseEvent) {
       @click="onCopy"
       :aria-label="title ?? '复制'"
       :class="[
-        'ml-1 inline-grid h-5 w-5 place-items-center rounded-md transition',
+        'ml-1 inline-grid h-5 w-5 place-items-center rounded-md transition-colors',
         copied ? 'text-success' : 'text-muted-foreground/60 hover:bg-muted hover:text-foreground',
       ]"
     >

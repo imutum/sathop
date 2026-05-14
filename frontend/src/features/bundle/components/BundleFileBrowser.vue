@@ -41,7 +41,7 @@ function parts(path: string) {
           :title="f.path"
           :style="{ paddingLeft: `${8 + parts(f.path).depth * 14}px` }"
           :class="[
-            'flex w-full items-center justify-between px-2 py-1 text-left font-mono text-2xs transition',
+            'flex w-full items-center justify-between px-2 py-1 text-left font-mono text-2xs transition-colors',
             f.path === sel
               ? 'bg-accent text-primary'
               : 'text-muted-foreground hover:bg-muted hover:text-foreground',

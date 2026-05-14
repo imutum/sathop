@@ -90,7 +90,7 @@ function onUploaded(d: BundleDetail) {
       </template>
     </PageHeader>
 
-    <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+    <div class="grid gap-6 xl:grid-cols-[minmax(480px,2fr)_minmax(0,3fr)]">
       <Card>
         <QueryState :query="list">
           <template #loading>
@@ -132,9 +132,13 @@ function onUploaded(d: BundleDetail) {
               <li
                 v-for="b in bundleRows"
                 :key="`${b.name}@${b.version}`"
+                role="button"
+                tabindex="0"
                 @click="selected = { name: b.name, version: b.version }"
+                @keydown.enter="selected = { name: b.name, version: b.version }"
+                @keydown.space.prevent="selected = { name: b.name, version: b.version }"
                 :class="[
-                  'cursor-pointer p-4 transition',
+                  'cursor-pointer p-4 transition-colors focus:outline-none focus-visible:bg-muted/50',
                   isActive(b) ? 'bg-accent/60' : 'hover:bg-muted/50',
                 ]"
               >
@@ -169,8 +173,12 @@ function onUploaded(d: BundleDetail) {
                 <TableRow
                   v-for="b in bundleRows"
                   :key="`${b.name}@${b.version}`"
+                  role="button"
+                  tabindex="0"
                   @click="selected = { name: b.name, version: b.version }"
-                  :class="['cursor-pointer', isActive(b) ? 'bg-accent/60' : '']"
+                  @keydown.enter="selected = { name: b.name, version: b.version }"
+                  @keydown.space.prevent="selected = { name: b.name, version: b.version }"
+                  :class="['cursor-pointer focus:outline-none focus-visible:bg-muted/50', isActive(b) ? 'bg-accent/60' : '']"
                 >
                   <TableCell class="px-5 font-mono text-[12px] font-medium">{{ b.name }}</TableCell>
                   <TableCell>

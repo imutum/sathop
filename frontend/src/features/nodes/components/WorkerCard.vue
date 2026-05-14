@@ -257,14 +257,14 @@ function onKey(e: KeyboardEvent) {
         <div>
           <div class="mb-1.5 flex items-center justify-between text-2xs text-muted-foreground">
             <HintTip text="超过 SATHOP_DISK_PAUSE_PCT（默认 85%）会自动暂停领新任务">
-              <span class="font-medium uppercase tracking-widest">磁盘</span>
+              <span class="font-medium tracking-label">磁盘</span>
             </HintTip>
             <span class="tabular-nums">{{ fmtGB(worker.disk_used_gb) }} / {{ fmtGB(worker.disk_total_gb) }}</span>
           </div>
           <ProgressBar :value="worker.disk_used_gb" :max="worker.disk_total_gb" :tone="diskTone" />
         </div>
 
-        <div class="grid grid-cols-3 gap-2 rounded-lg border border-border bg-muted/60 p-3 text-center sm:grid-cols-6">
+        <div class="grid grid-cols-3 gap-2 rounded-lg border border-border bg-muted/60 p-3 text-center lg:grid-cols-6">
           <HintTip text="已 lease、等下载槽位（download_sem 满）">
             <div>
               <div class="stat-label">待下载</div>
@@ -369,15 +369,16 @@ function onKey(e: KeyboardEvent) {
               </Button>
             </HintTip>
           </span>
-          <div class="flex items-center gap-2">
-            <HintTip text="跳转到事件日志，已按本节点过滤">
-              <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
-                <RouterLink :to="`/events?source=${encodeURIComponent(worker.worker_id)}`">
-                  <Icon name="events" :size="11" />
-                  事件
-                </RouterLink>
-              </Button>
-            </HintTip>
+          <div class="flex flex-wrap items-center justify-end gap-1.5">
+            <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
+              <RouterLink
+                :to="`/events?source=${encodeURIComponent(worker.worker_id)}`"
+                title="跳转到事件日志，已按本节点过滤"
+              >
+                <Icon name="events" :size="11" />
+                事件
+              </RouterLink>
+            </Button>
             <Button
               type="button"
               :variant="worker.operator_paused ? 'default' : 'outline'"
@@ -403,7 +404,7 @@ function onKey(e: KeyboardEvent) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" class="min-w-48">
-                <DropdownMenuLabel class="text-mini font-medium uppercase tracking-label text-muted-foreground">
+                <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
                   运维
                 </DropdownMenuLabel>
                 <DropdownMenuItem
@@ -423,7 +424,7 @@ function onKey(e: KeyboardEvent) {
                   释放在手 lease {{ inflightTotal > 0 ? `(${inflightTotal})` : '' }}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel class="text-mini font-medium uppercase tracking-label text-muted-foreground">
+                <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
                   生命周期
                 </DropdownMenuLabel>
                 <DropdownMenuItem
@@ -452,7 +453,7 @@ function onKey(e: KeyboardEvent) {
             >
               {{ lifecycle.pending.value ? "…" : worker.enabled ? "禁用" : "启用" }}
             </Button>
-            <span>心跳 {{ fmtAge(worker.last_seen) }}</span>
+            <span class="whitespace-nowrap">心跳 {{ fmtAge(worker.last_seen) }}</span>
           </div>
         </div>
       </div>
