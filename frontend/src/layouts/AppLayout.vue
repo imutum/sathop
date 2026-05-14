@@ -85,7 +85,7 @@ const isDark = computed(() => effective.value === "dark");
               >
                 <span
                   :class="[
-                    'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full transition',
+                    'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full transition-colors',
                     (n.end ? isExactActive : isActive) ? 'bg-foreground' : 'bg-transparent',
                   ]"
                   aria-hidden
@@ -93,7 +93,7 @@ const isDark = computed(() => effective.value === "dark");
                 <Icon
                   :name="n.icon"
                   :class="[
-                    'shrink-0 transition',
+                    'shrink-0 transition-colors',
                     (n.end ? isExactActive : isActive) ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground',
                   ]"
                 />

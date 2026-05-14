@@ -134,7 +134,7 @@ function onUploaded(d: BundleDetail) {
                 :key="`${b.name}@${b.version}`"
                 @click="selected = { name: b.name, version: b.version }"
                 :class="[
-                  'cursor-pointer p-4 transition',
+                  'cursor-pointer p-4 transition-colors',
                   isActive(b) ? 'bg-accent/60' : 'hover:bg-muted/50',
                 ]"
               >
