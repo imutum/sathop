@@ -132,9 +132,13 @@ function onUploaded(d: BundleDetail) {
               <li
                 v-for="b in bundleRows"
                 :key="`${b.name}@${b.version}`"
+                role="button"
+                tabindex="0"
                 @click="selected = { name: b.name, version: b.version }"
+                @keydown.enter="selected = { name: b.name, version: b.version }"
+                @keydown.space.prevent="selected = { name: b.name, version: b.version }"
                 :class="[
-                  'cursor-pointer p-4 transition-colors',
+                  'cursor-pointer p-4 transition-colors focus:outline-none focus-visible:bg-muted/50',
                   isActive(b) ? 'bg-accent/60' : 'hover:bg-muted/50',
                 ]"
               >
