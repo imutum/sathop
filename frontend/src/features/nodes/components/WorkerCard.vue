@@ -264,7 +264,7 @@ function onKey(e: KeyboardEvent) {
           <ProgressBar :value="worker.disk_used_gb" :max="worker.disk_total_gb" :tone="diskTone" />
         </div>
 
-        <div class="grid grid-cols-3 gap-2 rounded-lg border border-border bg-muted/60 p-3 text-center sm:grid-cols-6">
+        <div class="grid grid-cols-3 gap-2 rounded-lg border border-border bg-muted/60 p-3 text-center lg:grid-cols-6">
           <HintTip text="已 lease、等下载槽位（download_sem 满）">
             <div>
               <div class="stat-label">待下载</div>
@@ -369,7 +369,7 @@ function onKey(e: KeyboardEvent) {
               </Button>
             </HintTip>
           </span>
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center justify-end gap-1.5">
             <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
               <RouterLink
                 :to="`/events?source=${encodeURIComponent(worker.worker_id)}`"
@@ -453,7 +453,7 @@ function onKey(e: KeyboardEvent) {
             >
               {{ lifecycle.pending.value ? "…" : worker.enabled ? "禁用" : "启用" }}
             </Button>
-            <span>心跳 {{ fmtAge(worker.last_seen) }}</span>
+            <span class="whitespace-nowrap">心跳 {{ fmtAge(worker.last_seen) }}</span>
           </div>
         </div>
       </div>

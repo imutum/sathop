@@ -98,7 +98,7 @@ const status = computed(() => nodeStatusBadge(props.receiver.enabled, props.rece
       </HintTip>
     </div>
 
-    <div class="flex items-center justify-end gap-2 border-t border-border/60 px-5 py-2.5">
+    <div class="flex flex-wrap items-center justify-end gap-2 border-t border-border/60 px-5 py-2.5">
       <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
         <RouterLink
           :to="`/events?source=${encodeURIComponent(receiver.receiver_id)}`"
