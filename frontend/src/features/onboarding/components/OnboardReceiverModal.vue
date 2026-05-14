@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Modal from "@/ui/Modal.vue";
 import {
   DEFAULT_RECEIVER_DIR,
@@ -139,14 +140,16 @@ async function copySnippet() {
             placeholder="orchestrator bearer token"
             class="pr-9 font-mono text-xs"
           />
-          <button
+          <Button
             type="button"
-            class="absolute right-1 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            variant="ghost"
+            size="icon-sm"
+            class="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground"
             :title="showToken ? '隐藏' : '显示'"
             @click="showToken = !showToken"
           >
             <Icon :name="showToken ? 'x' : 'info'" :size="13" />
-          </button>
+          </Button>
         </div>
         <p class="mt-1 text-2xs text-muted-foreground">
           默认填的是当前登录 token；要发给同事，可以换成另一个有权限的 token
@@ -169,7 +172,7 @@ async function copySnippet() {
       <div class="mt-1 grid grid-cols-1 gap-1 rounded-md border border-border bg-muted/40 p-0.5 md:grid-cols-3">
         <button
           type="button"
-          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
           :class="tlsMode === 'trust-orch' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="tlsMode = 'trust-orch'"
         >
@@ -177,7 +180,7 @@ async function copySnippet() {
         </button>
         <button
           type="button"
-          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
           :class="tlsMode === 'strict' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="tlsMode = 'strict'"
         >
@@ -185,7 +188,7 @@ async function copySnippet() {
         </button>
         <button
           type="button"
-          class="rounded px-3 py-1.5 text-xs font-medium transition"
+          class="rounded px-3 py-1.5 text-xs font-medium transition-colors"
           :class="tlsMode === 'insecure' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="tlsMode = 'insecure'"
         >
@@ -206,7 +209,7 @@ async function copySnippet() {
     </div>
 
     <details class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
-      <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition hover:text-foreground">
+      <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
         高级：并发数 / 心跳间隔
       </summary>
       <div class="mt-2 grid grid-cols-2 gap-3">
@@ -228,27 +231,16 @@ async function copySnippet() {
     </Alert>
 
     <div class="mt-5">
-      <div class="flex items-end justify-between gap-3 border-b border-border">
-        <div class="flex gap-1">
-          <button
-            v-for="t in tabs"
-            :key="t.key"
-            type="button"
-            class="border-b-2 px-3 py-2 text-xs font-medium transition"
-            :class="
-              activeTab === t.key
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            "
-            @click="activeTab = t.key"
-          >
+      <Tabs v-model="activeTab" class="flex flex-wrap items-end justify-between gap-3">
+        <TabsList>
+          <TabsTrigger v-for="t in tabs" :key="t.key" :value="t.key">
             {{ t.label }}
-          </button>
-        </div>
-        <span class="pb-2 text-2xs text-muted-foreground">
+          </TabsTrigger>
+        </TabsList>
+        <span class="text-2xs text-muted-foreground">
           {{ tabs.find((t) => t.key === activeTab)?.hint }}
         </span>
-      </div>
+      </Tabs>
 
       <div v-if="activeTab === 'docker-run'" class="mt-3">
         <Alert>

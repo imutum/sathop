@@ -9,6 +9,7 @@ import { useToast } from "@/composables/useToast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -22,6 +23,7 @@ import CopyButton from "@/components/CopyButton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
+import RowActions from "@/components/RowActions.vue";
 import UploadSharedModal from "@/features/shared/components/UploadSharedModal.vue";
 import { Icon } from "@/components/Icon";
 
@@ -115,18 +117,18 @@ function onUploaded() {
                 <CopyButton :value="f.sha256" title="复制完整 SHA256" />
               </div>
               <div v-if="f.description" class="text-2xs text-muted-foreground">{{ f.description }}</div>
-              <div class="flex justify-end gap-1.5">
-                <Button size="sm" @click="replaceTarget = f">替换</Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  :pending="del.isPending.value && del.variables.value === f.name"
-                  pending-label="删除中…"
-                  @click="confirmDelete(f)"
+              <RowActions align="end">
+                <template #primary>
+                  <Button size="sm" @click="replaceTarget = f">替换</Button>
+                </template>
+                <DropdownMenuItem
+                  class="text-danger focus:bg-danger/10 focus:text-danger"
+                  :disabled="del.isPending.value && del.variables.value === f.name"
+                  @select="confirmDelete(f)"
                 >
-                  删除
-                </Button>
-              </div>
+                  删除…
+                </DropdownMenuItem>
+              </RowActions>
             </li>
           </ul>
           <!-- sm+ : table. -->
@@ -158,18 +160,18 @@ function onUploaded() {
                   </TableCell>
                   <TableCell class="py-3 text-cell text-muted-foreground">{{ fmtAge(f.uploaded_at) }}</TableCell>
                   <TableCell class="px-5 py-3 text-right">
-                    <div class="inline-flex gap-1.5">
-                      <Button size="sm" @click="replaceTarget = f">替换</Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        :pending="del.isPending.value && del.variables.value === f.name"
-                        pending-label="删除中…"
-                        @click="confirmDelete(f)"
+                    <RowActions align="end">
+                      <template #primary>
+                        <Button size="sm" @click="replaceTarget = f">替换</Button>
+                      </template>
+                      <DropdownMenuItem
+                        class="text-danger focus:bg-danger/10 focus:text-danger"
+                        :disabled="del.isPending.value && del.variables.value === f.name"
+                        @select="confirmDelete(f)"
                       >
-                        删除
-                      </Button>
-                    </div>
+                        删除…
+                      </DropdownMenuItem>
+                    </RowActions>
                   </TableCell>
                 </TableRow>
               </TableBody>

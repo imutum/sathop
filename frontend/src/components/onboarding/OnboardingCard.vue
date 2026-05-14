@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import CardSection from "@/components/CardSection.vue";
 import { Icon, type IconName } from "@/components/Icon";
 
 type Step = {
@@ -17,22 +18,20 @@ const STEPS: Step[] = [
 </script>
 
 <template>
-  <Card>
-    <CardHeader>
-      <CardTitle>首次使用 SatHop？</CardTitle>
-      <CardDescription>集群里还没有任务包或工作节点。三步完成首个批次：</CardDescription>
-    </CardHeader>
-    <CardContent>
-      <ol class="grid gap-4 md:grid-cols-3">
+  <CardSection
+    title="首次使用 SatHop？"
+    description="集群里还没有任务包或工作节点。三步完成首个批次："
+  >
+    <ol class="grid gap-4 md:grid-cols-3">
       <li
         v-for="(s, i) in STEPS"
         :key="s.title"
-        class="flex h-full flex-col rounded-lg border border-border bg-muted/40 p-4"
+        class="flex h-full flex-col rounded-lg border border-border bg-muted/40 p-4 transition-colors hover:border-primary/30 hover:bg-muted/60"
       >
         <div class="flex items-center gap-2.5">
-          <span class="grid h-7 w-7 place-items-center rounded-lg bg-primary/15 text-[12.5px] font-semibold text-primary tabular-nums">
+          <Badge variant="info" class="h-7 w-7 justify-center rounded-lg bg-primary/15 px-0 text-[12.5px] font-semibold text-primary tabular-nums">
             {{ i + 1 }}
-          </span>
+          </Badge>
           <span class="text-muted-foreground"><Icon :name="s.icon" /></span>
           <span class="text-sm font-semibold text-foreground">{{ s.title }}</span>
         </div>
@@ -46,12 +45,11 @@ const STEPS: Step[] = [
           <template v-else>选定任务包 + 凭证，提交首组数据粒。</template>
         </p>
         <div v-if="s.cta" class="mt-3">
-          <RouterLink :to="s.cta.to">
-            <Button :variant="s.cta.variant">{{ s.cta.label }}</Button>
-          </RouterLink>
+          <Button as-child :variant="s.cta.variant" size="sm">
+            <RouterLink :to="s.cta.to">{{ s.cta.label }}</RouterLink>
+          </Button>
         </div>
-        </li>
-      </ol>
-    </CardContent>
-  </Card>
+      </li>
+    </ol>
+  </CardSection>
 </template>

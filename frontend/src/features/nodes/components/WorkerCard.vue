@@ -7,10 +7,18 @@ import { fmtAge } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import CopyButton from "@/components/CopyButton.vue";
 import HintTip from "@/components/HintTip.vue";
-import NodeLifecycleActions from "@/features/nodes/components/NodeLifecycleActions.vue";
 import { useNodeLifecycle } from "@/features/nodes/useNodeLifecycle";
 import ProgressBar from "@/components/ProgressBar.vue";
 import TextInput from "@/ui/TextInput.vue";
@@ -307,7 +315,7 @@ function onKey(e: KeyboardEvent) {
           </HintTip>
         </div>
 
-        <div class="flex items-center justify-between border-t border-border/60 pt-3 text-2xs text-muted-foreground">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3 text-2xs text-muted-foreground">
           <span class="flex items-center gap-1.5">
             <HintTip text="当前生效的并发上限 / 容器启动时声明的硬容量">
               <span>容量 {{ effective }}/{{ worker.capacity }}</span>
@@ -325,20 +333,24 @@ function onKey(e: KeyboardEvent) {
                 placeholder="env"
                 class="w-14 text-2xs tabular-nums"
               />
-              <button
-                @click="submitDraft"
+              <Button
+                type="button"
+                size="xs"
                 :disabled="setCap.isPending.value"
-                class="rounded-md bg-primary/15 px-1.5 py-0.5 text-mini font-medium text-primary hover:bg-primary/25 disabled:opacity-50"
+                @click="submitDraft"
               >
                 保存
-              </button>
-              <button
-                @click="draft = null"
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
                 :disabled="setCap.isPending.value"
-                class="text-mini text-muted-foreground hover:text-foreground"
+                class="text-muted-foreground hover:text-foreground"
+                @click="draft = null"
               >
                 取消
-              </button>
+              </Button>
             </template>
             <HintTip
               v-else
@@ -346,72 +358,96 @@ function onKey(e: KeyboardEvent) {
                 ? '修改运行时并发上限（不能超过容器声明的容量）'
                 : '人工限流：临时压低这台节点的并发上限'"
             >
-              <button
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                class="text-muted-foreground hover:text-foreground"
                 @click="startEdit"
-                class="rounded-md border border-border bg-background px-1.5 py-0.5 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
               >
                 {{ worker.desired_capacity != null ? "改" : "限流" }}
-              </button>
+              </Button>
             </HintTip>
           </span>
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
             <HintTip text="跳转到事件日志，已按本节点过滤">
-              <RouterLink
-                :to="`/events?source=${encodeURIComponent(worker.worker_id)}`"
-                class="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-mini text-muted-foreground transition hover:border-primary/40 hover:text-primary"
-              >
-                <Icon name="events" :size="11" />
-                事件
-              </RouterLink>
+              <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
+                <RouterLink :to="`/events?source=${encodeURIComponent(worker.worker_id)}`">
+                  <Icon name="events" :size="11" />
+                  事件
+                </RouterLink>
+              </Button>
             </HintTip>
-            <span class="flex items-center gap-1.5">
-              <button
-                type="button"
-                :disabled="pause.isPending.value"
-                @click="onTogglePause"
-                :title="worker.operator_paused
-                  ? '恢复领取新任务'
-                  : '暂停领取新任务（在手的继续跑完）'"
-                :class="[
-                  'rounded-md border px-2 py-0.5 text-mini font-medium transition disabled:opacity-50',
-                  worker.operator_paused
-                    ? 'border-success/30 bg-success/10 text-success hover:bg-success/15'
-                    : 'border-border bg-background text-muted-foreground hover:border-warn/40 hover:text-warn',
-                ]"
-              >
-                {{ pause.isPending.value ? "…" : worker.operator_paused ? "恢复" : "暂停" }}
-              </button>
-              <button
-                type="button"
-                :disabled="revoke.isPending.value || inflightTotal === 0"
-                @click="onRevokeAll"
-                :title="inflightTotal === 0
-                  ? '当前无在手 lease'
-                  : `立即释放在手的 ${inflightTotal} 条 lease（丢弃中间产物）`"
-                class="rounded-md border border-border bg-background px-2 py-0.5 text-mini font-medium text-muted-foreground transition hover:border-danger/40 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {{ revoke.isPending.value ? "…" : "释放" }}
-              </button>
-              <button
-                type="button"
-                :disabled="gc.isPending.value"
-                @click="onGc"
-                title="立即触发 worker 端缓存清理（venv LRU + shared 孤儿）"
-                class="rounded-md border border-border bg-background px-2 py-0.5 text-mini font-medium text-muted-foreground transition hover:border-primary/40 hover:text-primary disabled:opacity-50"
-              >
-                {{ gc.isPending.value ? "…" : "清缓存" }}
-              </button>
-            </span>
-            <NodeLifecycleActions
-              :enabled="worker.enabled"
-              :pending="lifecycle.pending.value"
-              @set-enabled="lifecycle.setEnabled"
-              @forget="lifecycle.confirmForget"
-              @restart="lifecycle.confirmRestart"
-              disable-title="禁用此节点（在手任务继续，可点启用恢复）"
-              forget-title="永久从注册表中删除（仅在已禁用且无任务时允许）"
-              restart-title="向该 worker 发送重启信号（一次心跳内生效）"
-            />
+            <Button
+              type="button"
+              :variant="worker.operator_paused ? 'default' : 'outline'"
+              size="xs"
+              :disabled="pause.isPending.value"
+              :title="worker.operator_paused
+                ? '恢复领取新任务'
+                : '暂停领取新任务（在手的继续跑完）'"
+              @click="onTogglePause"
+            >
+              {{ pause.isPending.value ? "…" : worker.operator_paused ? "恢复" : "暂停" }}
+            </Button>
+            <DropdownMenu>
+              <HintTip text="更多运维操作">
+                <DropdownMenuTrigger as-child>
+                  <Button type="button" variant="outline" size="icon-sm" aria-label="更多运维">
+                    <Icon name="more" :size="14" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </HintTip>
+              <DropdownMenuContent align="end" class="min-w-48">
+                <DropdownMenuLabel class="text-mini font-medium uppercase tracking-label text-muted-foreground">
+                  运维
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  :disabled="gc.isPending.value"
+                  @select="onGc"
+                >
+                  立即清理缓存
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  :disabled="revoke.isPending.value || inflightTotal === 0"
+                  :title="inflightTotal === 0
+                    ? '当前无在手 lease'
+                    : `立即释放在手的 ${inflightTotal} 条 lease（丢弃中间产物）`"
+                  class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
+                  @select="onRevokeAll"
+                >
+                  释放在手 lease {{ inflightTotal > 0 ? `(${inflightTotal})` : '' }}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel class="text-mini font-medium uppercase tracking-label text-muted-foreground">
+                  生命周期
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  :disabled="lifecycle.pending.value"
+                  @select="lifecycle.confirmRestart"
+                >
+                  重启…
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  :disabled="lifecycle.pending.value || worker.enabled"
+                  :title="worker.enabled ? '请先禁用此节点，再点击此按钮永久移除' : '永久从注册表中删除（misclick → 重启 worker 自动重建）'"
+                  class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
+                  @select="lifecycle.confirmForget"
+                >
+                  永久移除…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              type="button"
+              :variant="worker.enabled ? 'outline' : 'default'"
+              size="xs"
+              :disabled="lifecycle.pending.value"
+              :title="worker.enabled ? '禁用此节点（在手任务继续，可点启用恢复）' : '重新启用此节点'"
+              @click="lifecycle.setEnabled(!worker.enabled)"
+            >
+              {{ lifecycle.pending.value ? "…" : worker.enabled ? "禁用" : "启用" }}
+            </Button>
             <span>心跳 {{ fmtAge(worker.last_seen) }}</span>
           </div>
         </div>

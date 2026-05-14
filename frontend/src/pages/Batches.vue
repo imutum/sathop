@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -24,6 +25,7 @@ import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import ProgressBar from "@/components/ProgressBar.vue";
 import QueryState from "@/components/QueryState.vue";
+import RowActions from "@/components/RowActions.vue";
 import Segmented from "@/components/Segmented.vue";
 import TextInput from "@/ui/TextInput.vue";
 import CreateBatchModal from "@/features/batch/components/CreateBatchModal.vue";
@@ -229,9 +231,10 @@ function onCreated() {
           ]"
         />
       </div>
-      <div class="text-xs text-muted-foreground tabular-nums">
-        显示 <span class="font-medium text-foreground">{{ visible.length }}</span> / {{ allCount }}
-      </div>
+      <Badge variant="info" class="h-7 tabular-nums">
+        <span class="text-foreground">{{ visible.length }}</span>
+        <span class="text-muted-foreground/80">/ {{ allCount }}</span>
+      </Badge>
     </div>
 
     <CreateBatchModal
@@ -283,7 +286,7 @@ function onCreated() {
             <li v-for="r in visible" :key="r.b.batch_id" class="space-y-3 p-4">
               <div class="flex items-start justify-between gap-3">
                 <RouterLink :to="`/batches/${r.b.batch_id}`" class="min-w-0 flex-1">
-                  <div class="truncate font-medium text-foreground transition hover:text-primary">
+                  <div class="truncate font-medium text-foreground transition-colors hover:text-primary">
                     {{ r.b.name }}
                   </div>
                   <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground">
@@ -299,7 +302,7 @@ function onCreated() {
                   path: '/bundles',
                   query: { name: r.bundleLink.name, version: r.bundleLink.version },
                 }"
-                class="block truncate font-mono text-2xs text-muted-foreground transition hover:text-primary"
+                class="block truncate font-mono text-2xs text-muted-foreground transition-colors hover:text-primary"
                 title="在任务包页查看"
               >
                 {{ r.b.bundle_ref }}
@@ -340,39 +343,35 @@ function onCreated() {
               </div>
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="text-2xs text-muted-foreground">{{ fmtAge(r.b.created_at) }}</span>
-                <div class="flex flex-wrap gap-1.5">
-                  <Button
-                    v-if="r.errors > 0"
-                    size="sm"
-                    :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
-                    pending-label="重试中…"
-                    @click="retry.mutate(r.b.batch_id)"
+                <RowActions>
+                  <template #primary>
+                    <Button
+                      v-if="r.errors > 0"
+                      size="sm"
+                      :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
+                      pending-label="重试中…"
+                      @click="retry.mutate(r.b.batch_id)"
+                    >
+                      重试失败 ({{ r.errors }})
+                    </Button>
+                    <Button
+                      v-if="r.inFlight > 0"
+                      variant="destructive"
+                      size="sm"
+                      :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
+                      pending-label="取消中…"
+                      @click="confirmCancel(r.b)"
+                    >
+                      取消 ({{ r.inFlight }})
+                    </Button>
+                  </template>
+                  <DropdownMenuItem
+                    class="text-danger focus:bg-danger/10 focus:text-danger"
+                    @select="confirmDelete(r.b)"
                   >
-                    重试失败 ({{ r.errors }})
-                  </Button>
-                  <Button
-                    v-if="r.inFlight > 0"
-                    variant="destructive"
-                    size="sm"
-                    :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
-                    pending-label="取消中…"
-                    @click="confirmCancel(r.b)"
-                  >
-                    取消 ({{ r.inFlight }})
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    :pending="
-                      remove.isPending.value && remove.variables.value?.id === r.b.batch_id
-                    "
-                    pending-label="删除中…"
-                    @click="confirmDelete(r.b)"
-                    title="永久删除该批次及其所有数据粒、产物、进度、事件"
-                  >
-                    删除
-                  </Button>
-                </div>
+                    永久删除…
+                  </DropdownMenuItem>
+                </RowActions>
               </div>
             </li>
           </ul>
@@ -393,7 +392,7 @@ function onCreated() {
                 <TableRow v-for="r in visible" :key="r.b.batch_id">
                   <TableCell class="px-5 py-3.5">
                     <RouterLink :to="`/batches/${r.b.batch_id}`" class="block">
-                      <div class="font-medium text-foreground transition hover:text-primary">{{ r.b.name }}</div>
+                      <div class="font-medium text-foreground transition-colors hover:text-primary">{{ r.b.name }}</div>
                       <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground">
                         {{ r.b.batch_id }}
                         <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
@@ -407,7 +406,7 @@ function onCreated() {
                         path: '/bundles',
                         query: { name: r.bundleLink.name, version: r.bundleLink.version },
                       }"
-                      class="transition hover:text-primary"
+                      class="transition-colors hover:text-primary"
                       title="在任务包页查看"
                     >
                       {{ r.b.bundle_ref }}
@@ -449,38 +448,36 @@ function onCreated() {
                     />
                   </TableCell>
                   <TableCell class="py-3.5 text-cell text-muted-foreground">{{ fmtAge(r.b.created_at) }}</TableCell>
-                  <TableCell class="space-x-1.5 whitespace-nowrap px-5 py-3.5 text-right">
-                    <Button
-                      v-if="r.errors > 0"
-                      size="sm"
-                      :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
-                      pending-label="重试中…"
-                      @click="retry.mutate(r.b.batch_id)"
-                    >
-                      重试失败 ({{ r.errors }})
-                    </Button>
-                    <Button
-                      v-if="r.inFlight > 0"
-                      variant="destructive"
-                      size="sm"
-                      :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
-                      pending-label="取消中…"
-                      @click="confirmCancel(r.b)"
-                    >
-                      取消 ({{ r.inFlight }})
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      :pending="
-                        remove.isPending.value && remove.variables.value?.id === r.b.batch_id
-                      "
-                      pending-label="删除中…"
-                      @click="confirmDelete(r.b)"
-                      title="永久删除该批次及其所有数据粒、产物、进度、事件"
-                    >
-                      删除
-                    </Button>
+                  <TableCell class="whitespace-nowrap px-5 py-3.5 text-right">
+                    <RowActions align="end">
+                      <template #primary>
+                        <Button
+                          v-if="r.errors > 0"
+                          size="sm"
+                          :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
+                          pending-label="重试中…"
+                          @click="retry.mutate(r.b.batch_id)"
+                        >
+                          重试失败 ({{ r.errors }})
+                        </Button>
+                        <Button
+                          v-if="r.inFlight > 0"
+                          variant="destructive"
+                          size="sm"
+                          :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
+                          pending-label="取消中…"
+                          @click="confirmCancel(r.b)"
+                        >
+                          取消 ({{ r.inFlight }})
+                        </Button>
+                      </template>
+                      <DropdownMenuItem
+                        class="text-danger focus:bg-danger/10 focus:text-danger"
+                        @select="confirmDelete(r.b)"
+                      >
+                        永久删除…
+                      </DropdownMenuItem>
+                    </RowActions>
                   </TableCell>
                 </TableRow>
               </TableBody>

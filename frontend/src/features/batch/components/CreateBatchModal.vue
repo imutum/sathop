@@ -322,7 +322,7 @@ function onForget(n: string) {
       />
 
       <details class="rounded-lg border border-border bg-muted/40 px-3 py-2.5">
-        <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition hover:text-foreground">
+        <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
           高级：环境变量覆盖（可选，JSON 对象）
         </summary>
         <FormField v-slot="{ componentField }" name="envText">
@@ -345,7 +345,7 @@ function onForget(n: string) {
       </Alert>
 
       <div class="flex justify-end gap-2 pt-2">
-        <Button type="button" @click="tryClose">取消</Button>
+        <Button type="button" variant="outline" @click="tryClose">取消</Button>
         <Button
           type="submit"
           variant="default"
