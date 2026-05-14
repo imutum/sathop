@@ -51,7 +51,7 @@ const emit = defineEmits<{
       <li
         :ref="(el) => emit('rowRef', g.granule_id, el as Element | null)"
         :class="[
-          'space-y-3 p-4 transition',
+          'space-y-3 p-4 transition-colors',
           g.granule_id === highlight ? 'bg-accent/40' : '',
         ]"
       >
