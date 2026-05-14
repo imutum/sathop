@@ -212,7 +212,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" class="w-72 text-cell">
-            <div class="mb-2 text-mini font-medium uppercase tracking-label text-muted-foreground">等级图例</div>
+            <div class="mb-2 text-mini font-medium tracking-label text-muted-foreground">等级图例</div>
             <ul class="space-y-1.5 text-muted-foreground">
               <li class="flex items-center gap-2">
                 <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/70" aria-hidden />

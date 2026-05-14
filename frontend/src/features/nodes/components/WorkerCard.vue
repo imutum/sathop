@@ -257,7 +257,7 @@ function onKey(e: KeyboardEvent) {
         <div>
           <div class="mb-1.5 flex items-center justify-between text-2xs text-muted-foreground">
             <HintTip text="超过 SATHOP_DISK_PAUSE_PCT（默认 85%）会自动暂停领新任务">
-              <span class="font-medium uppercase tracking-widest">磁盘</span>
+              <span class="font-medium tracking-label">磁盘</span>
             </HintTip>
             <span class="tabular-nums">{{ fmtGB(worker.disk_used_gb) }} / {{ fmtGB(worker.disk_total_gb) }}</span>
           </div>
@@ -404,7 +404,7 @@ function onKey(e: KeyboardEvent) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" class="min-w-48">
-                <DropdownMenuLabel class="text-mini font-medium uppercase tracking-label text-muted-foreground">
+                <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
                   运维
                 </DropdownMenuLabel>
                 <DropdownMenuItem
@@ -424,7 +424,7 @@ function onKey(e: KeyboardEvent) {
                   释放在手 lease {{ inflightTotal > 0 ? `(${inflightTotal})` : '' }}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuLabel class="text-mini font-medium uppercase tracking-label text-muted-foreground">
+                <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
                   生命周期
                 </DropdownMenuLabel>
                 <DropdownMenuItem

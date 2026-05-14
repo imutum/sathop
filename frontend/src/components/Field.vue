@@ -4,7 +4,7 @@ defineProps<{ label: string; mono?: boolean; hint?: string }>();
 
 <template>
   <div class="min-w-0">
-    <div class="text-mini font-medium uppercase tracking-label text-muted-foreground">
+    <div class="text-mini font-medium tracking-label text-muted-foreground">
       {{ label }}
     </div>
     <div

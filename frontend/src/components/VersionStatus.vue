@@ -131,7 +131,7 @@ function refresh() {
     </PopoverTrigger>
     <PopoverContent side="top" align="start" class="w-64">
       <div class="flex items-center justify-between">
-        <div class="text-2xs font-medium uppercase tracking-brand text-muted-foreground">
+        <div class="text-2xs font-medium tracking-label text-muted-foreground">
           当前版本
         </div>
         <Button

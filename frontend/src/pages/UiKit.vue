@@ -169,7 +169,7 @@ const collapsibleOpen = ref(false);
               </Button>
             </PopoverTrigger>
             <PopoverContent>
-              <div class="text-mini font-medium uppercase tracking-label text-muted-foreground">说明</div>
+              <div class="text-mini font-medium tracking-label text-muted-foreground">说明</div>
               <p class="mt-2 text-cell text-muted-foreground">
                 用于挂载图例、解释、上下文操作 — 比放在页面里更克制。
               </p>
