@@ -177,7 +177,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
         <SelectInput
           v-model="batchFilter"
           aria-label="按批次过滤"
-          class="h-8 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground outline-none transition-colors hover:border-primary/40 focus:border-primary"
+          class="h-8 w-full rounded-lg border border-border bg-background px-2.5 text-xs text-foreground outline-none transition-colors hover:border-primary/40 focus:border-primary sm:w-48"
         >
           <option value="">所有批次</option>
           <option v-for="b in batches" :key="b" :value="b">{{ b }}</option>
