@@ -43,6 +43,12 @@ const isDark = computed(() => effective.value === "dark");
 
 <template>
   <div class="flex h-full bg-background text-foreground">
+    <a
+      href="#main-content"
+      class="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-background focus:px-3 focus:py-1.5 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-pop"
+    >
+      跳到主内容
+    </a>
     <aside
       :class="[
         collapsed ? 'w-[72px]' : 'w-60',
@@ -238,7 +244,7 @@ const isDark = computed(() => effective.value === "dark");
         </div>
       </header>
 
-      <main class="flex-1 overflow-auto">
+      <main id="main-content" class="flex-1 overflow-auto">
         <div class="mx-auto w-full max-w-[1480px] px-4 py-5 md:px-6 md:py-6 lg:px-8 lg:py-8">
           <div class="animate-fade-in">
             <RouterView />
