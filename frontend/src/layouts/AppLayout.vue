@@ -206,6 +206,8 @@ const isDark = computed(() => effective.value === "dark");
           <HintTip :text="connected ? '后台事件流已连接，页面会自动刷新' : 'SSE 未连接，数据可能延迟，会在 60s 安全网内重试'">
             <Badge
               :variant="connected ? 'success' : 'outline'"
+              role="status"
+              aria-live="polite"
               :class="[
                 'hidden h-7 rounded-full md:inline-flex',
                 connected ? '' : 'text-muted-foreground',
