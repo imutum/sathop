@@ -52,7 +52,7 @@ const isDark = computed(() => effective.value === "dark");
     >
       <div class="flex h-16 items-center gap-3 border-b border-border px-4">
         <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-background text-foreground shadow-soft">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
             <path d="M21 12.79A9 9 0 1 1 11.21 3" />
             <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
           </svg>
@@ -195,7 +195,7 @@ const isDark = computed(() => effective.value === "dark");
             aria-label="打开导航"
             @click="mobileOpen = true"
           >
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <line x1="3" y1="6" x2="21" y2="6" />
               <line x1="3" y1="12" x2="21" y2="12" />
               <line x1="3" y1="18" x2="21" y2="18" />

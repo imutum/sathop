@@ -49,7 +49,7 @@ const year = new Date().getFullYear();
       <div class="hidden flex-col justify-between lg:flex">
         <div class="flex items-center gap-3">
           <div class="grid h-11 w-11 place-items-center rounded-lg border border-border bg-background text-foreground shadow-soft">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <path d="M21 12.79A9 9 0 1 1 11.21 3" />
               <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
             </svg>
