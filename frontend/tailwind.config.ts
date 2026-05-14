@@ -93,9 +93,7 @@ export default {
       },
       boxShadow: {
         soft: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
-        card: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
         pop: "0 10px 24px -12px hsl(var(--shadow) / 0.24), 0 4px 8px -6px hsl(var(--shadow) / 0.18)",
-        "ring-soft": "0 0 0 4px hsl(var(--primary) / 0.12)",
       },
       keyframes: {
         "fade-in": {

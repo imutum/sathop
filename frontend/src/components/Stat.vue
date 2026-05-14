@@ -52,7 +52,7 @@ const tileCls = computed(
       :is="to ? RouterLink : 'div'"
       :to="to"
       :class="[
-        'group relative block overflow-hidden rounded-xl border border-border bg-card p-5 shadow-card transition',
+        'group relative block overflow-hidden rounded-xl border border-border bg-card p-5 shadow-soft transition',
         to && 'hover:border-primary/40 hover:shadow-pop',
       ]"
     >
