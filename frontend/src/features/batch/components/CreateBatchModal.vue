@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, reactive, ref, shallowRef, watch } from "vue";
 import { useMutation, useQuery } from "@tanstack/vue-query";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
@@ -8,24 +8,15 @@ import { createBatchHeaderSchema } from "@/features/batch/schemas";
 import { clearCred, hasCred, loadCred, saveCred } from "@/credCache";
 import { useToast } from "@/composables/useToast";
 import {
-  type CompiledSchema,
   type CredDraft,
-  type Row,
-  type RowErrors,
-  type Schema,
-  compileSchema,
   credentialsAreValid,
   credentialsHaveDraftContent,
   credentialsPayload,
   emptyCred,
-  emptyRow,
-  hasAnyInput,
-  parseExecutionEnv,
-  rowHasDraftContent,
-  rowHasErrors,
-  rowToGranule,
-  validateRow,
-} from "@/features/batch/types";
+} from "@/features/batch/credentials";
+import { parseExecutionEnv, rowToGranule } from "@/features/batch/serialization";
+import { type Row, type Schema, emptyRow, hasAnyInput, rowHasDraftContent } from "@/features/batch/types";
+import { useBatchRowValidation } from "@/features/batch/useBatchRowValidation";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,9 +39,6 @@ const emit = defineEmits<{ close: []; created: [] }>();
 
 const toast = useToast();
 
-// Header fields (vee-validate + zod). The granule rows and credentials
-// drafts have their own per-element validation patterns and stay
-// imperative; the submit gate combines all three layers below.
 const { handleSubmit, meta: headerMeta, values: headerValues } = useForm({
   validationSchema: toTypedSchema(createBatchHeaderSchema),
   initialValues: {
@@ -61,14 +49,12 @@ const { handleSubmit, meta: headerMeta, values: headerValues } = useForm({
   },
 });
 
-const rows = ref<Row[]>([]);
+const rows = shallowRef<Row[]>([]);
 const creds = reactive<Record<string, CredDraft>>({});
 const remember = reactive<Record<string, boolean>>({});
 const submitError = ref<string | null>(null);
 const showCsv = ref(false);
 
-// Reactive references into header form values, used by downstream queries
-// and watches without leaking the useForm internals.
 const bundleSel = computed(() => headerValues.bundleSel ?? "");
 
 const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
@@ -93,7 +79,6 @@ const requiredCreds = computed<string[]>(
   () => bundleDetail.data.value?.manifest.requirements?.credentials ?? [],
 );
 
-// Reset granule rows when bundle changes (slots/meta shape differs).
 watch(
   () => [bundleSel.value, schema.value?.slots.length, schema.value?.metaFields.length],
   () => {
@@ -101,9 +86,6 @@ watch(
   },
 );
 
-// Hydrate credential drafts when the bundle's required-creds list changes.
-// Cancellation guard mirrors the React effect: a stale fetch shouldn't
-// stomp on a fresher one when the user picks bundles in quick succession.
 watch(
   () => requiredCreds.value.join("|"),
   async () => {
@@ -123,32 +105,7 @@ watch(
 
 const parsedEnv = computed(() => parseExecutionEnv(headerValues.envText));
 
-const compiledSchema = computed<CompiledSchema | null>(() =>
-  schema.value ? compileSchema(schema.value) : null,
-);
-
-let _valCache = new WeakMap<Row, RowErrors>();
-let _lastCompiled: CompiledSchema | null = null;
-
-const rowErrors = computed<RowErrors[]>(() => {
-  const c = compiledSchema.value;
-  if (!c) return [];
-  if (c !== _lastCompiled) {
-    _valCache = new WeakMap();
-    _lastCompiled = c;
-  }
-  return rows.value.map((r) => {
-    let cached = _valCache.get(r);
-    if (!cached) {
-      cached = validateRow(r, c);
-      _valCache.set(r, cached);
-    }
-    return cached;
-  });
-});
-const allRowsOk = computed(
-  () => !!schema.value && rows.value.length > 0 && rowErrors.value.every((e) => !rowHasErrors(e)),
-);
+const { rowErrors, allRowsOk } = useBatchRowValidation(rows, schema);
 
 const credsPayload = computed(() => credentialsPayload(creds));
 
@@ -183,9 +140,6 @@ const create = useMutation({
   },
 });
 
-// Submit gate: header (vee-validate) + rows table + credentials drafts.
-// `disabledReason` is the user-facing tooltip when the submit button is
-// greyed; vee-validate covers header field errors via FormMessage.
 const disabledReason = computed<string | null>(() => {
   if (create.isPending.value) return null;
   if (!headerMeta.value.valid) return "请先完成顶部表单";

@@ -26,6 +26,7 @@ class Settings:
     # its objects polled forever by every receiver. Operator can still ack
     # success=true to retire an object early; no auto-recovery once exhausted.
     max_pull_failures: int = max(1, int(os.getenv("SATHOP_MAX_PULL_FAILURES", "5")))
+    min_worker_version: str = os.getenv("SATHOP_MIN_WORKER_VERSION", "")
 
 
 settings = Settings()

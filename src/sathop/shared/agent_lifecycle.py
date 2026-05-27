@@ -8,7 +8,7 @@ import signal
 import time
 from collections.abc import Callable, Sized
 
-from sathop.shared.orch_client import AuthTokenInvalid
+from sathop.shared.orch_client import AuthTokenInvalid, VersionTooOld
 
 DEFAULT_TIMEOUT_SEC = 60
 DRAIN_POLL_INTERVAL_SEC = 1.0
@@ -26,6 +26,9 @@ async def run_agent(create_tasks: Callable[[asyncio.TaskGroup], None], *, log: l
             create_tasks(tg)
     except* AuthTokenInvalid:
         log.error("orchestrator rejected token (401) — exiting for container restart")
+        raise SystemExit(1) from None
+    except* VersionTooOld as eg:
+        log.error("version rejected (426) — %s", eg.exceptions[0])
         raise SystemExit(1) from None
     except* GracefulAgentExit:
         pass

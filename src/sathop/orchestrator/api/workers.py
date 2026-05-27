@@ -26,7 +26,9 @@ from sathop.shared.state_machine import (
     UploadCompleted,
 )
 
-from ..config import require_token
+from sathop.shared.versioning import parse_version
+
+from ..config import require_token, settings
 from ..db import Granule, GranuleObject, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
@@ -49,6 +51,19 @@ from .worker_leases import (
 
 router = APIRouter(prefix="/workers", tags=["workers"], dependencies=[Depends(require_token)])
 
+def _check_worker_version(version: str, worker_id: str) -> None:
+    min_ver = settings.min_worker_version
+    if not min_ver:
+        return
+    if parse_version(version) < parse_version(min_ver):
+        raise HTTPException(
+            426,
+            f"worker {worker_id} 版本 {version} 低于最低要求 {min_ver}，请升级后重试。\n"
+            f"升级命令：\n"
+            f"  Docker:  docker compose pull && docker compose up -d\n"
+            f"  pip/uv:  uv pip install --upgrade 'sathop[worker]'",
+        )
+
 
 async def _enabled_worker_or_403(s: AsyncSession, worker_id: str) -> Worker:
     worker = await s.get(Worker, worker_id)
@@ -69,6 +84,7 @@ _LEASE_LOCK = asyncio.Lock()
 
 @router.post("/register", response_model=WorkerRegisterResponse)
 async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> WorkerRegisterResponse:
+    _check_worker_version(req.version, req.worker_id)
     w = await s.get(Worker, req.worker_id)
     if w is None:
         w = Worker(
@@ -96,6 +112,7 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
 
 @router.post("/heartbeat", response_model=WorkerHeartbeatResponse)
 async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) -> WorkerHeartbeatResponse:
+    _check_worker_version(req.version, req.worker_id)
     w = await get_or_404(s, Worker, req.worker_id, "worker not registered")
     now = utcnow()
     await record_version_flap(s, w, new_version=req.version, source=req.worker_id, kind="worker")

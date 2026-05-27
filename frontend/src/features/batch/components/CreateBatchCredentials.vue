@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { hasCred } from "@/credCache";
-import { type CredDraft } from "@/features/batch/types";
+import { type CredDraft } from "@/features/batch/credentials";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";

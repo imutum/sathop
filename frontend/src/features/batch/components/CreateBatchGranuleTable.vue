@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useVirtualizer } from "@tanstack/vue-virtual";
-import { type Row, type RowErrors, type Schema, emptyRow, rowHasErrors } from "@/features/batch/types";
+import { type Row, type RowErrors, type Schema, emptyRow } from "@/features/batch/types";
+import { usePaginatedRows } from "@/features/batch/usePaginatedRows";
 import { requestConfirm } from "@/composables/useConfirm";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/Icon";
 import CreateBatchCell from "@/features/batch/components/CreateBatchCell.vue";
 
 const ROW_HEIGHT = 38;
-const PAGE_SIZE = 100;
 
 const props = defineProps<{
   schema: Schema;
@@ -21,32 +21,15 @@ const emit = defineEmits<{
 }>();
 
 const scrollRef = ref<HTMLElement | null>(null);
-const currentPage = ref(0);
 
-const totalPages = computed(() => Math.max(1, Math.ceil(props.rows.length / PAGE_SIZE)));
-const pageStart = computed(() => currentPage.value * PAGE_SIZE);
-const pageEnd = computed(() => Math.min(pageStart.value + PAGE_SIZE, props.rows.length));
-const pageRows = computed(() => props.rows.slice(pageStart.value, pageEnd.value));
-const pageErrors = computed(() => props.errors.slice(pageStart.value, pageEnd.value));
-const showPagination = computed(() => props.rows.length > PAGE_SIZE);
-
-const firstErrorPage = computed(() => {
-  if (!showPagination.value) return -1;
-  for (let i = 0; i < props.errors.length; i++) {
-    if (rowHasErrors(props.errors[i])) return Math.floor(i / PAGE_SIZE);
-  }
-  return -1;
-});
-
-function goPage(p: number) {
-  currentPage.value = Math.max(0, Math.min(p, totalPages.value - 1));
-}
-
-watch(() => props.rows.length, () => {
-  if (currentPage.value >= totalPages.value) {
-    currentPage.value = Math.max(0, totalPages.value - 1);
-  }
-});
+const {
+  currentPage, totalPages, pageStart, pageEnd,
+  pageItems: pageRows, pageErrors,
+  showPagination, firstErrorPage, goPage, globalIdx,
+} = usePaginatedRows(
+  () => props.rows,
+  () => props.errors,
+);
 
 const virtualizer = useVirtualizer(
   computed(() => ({
@@ -58,22 +41,32 @@ const virtualizer = useVirtualizer(
 );
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems());
-const totalHeight = computed(() => virtualizer.value.getTotalSize());
 const padTop = computed(() => (virtualRows.value.length ? virtualRows.value[0].start : 0));
 const padBottom = computed(() => {
   const items = virtualRows.value;
-  return items.length ? totalHeight.value - items[items.length - 1].end : 0;
+  return items.length ? virtualizer.value.getTotalSize() - items[items.length - 1].end : 0;
 });
-
-function globalIdx(localIdx: number): number {
-  return pageStart.value + localIdx;
-}
 
 function patch(idx: number, fn: (r: Row) => Row) {
   emit(
     "update:rows",
     props.rows.map((r, i) => (i === idx ? fn(r) : r)),
   );
+}
+
+function patchGranuleId(localIdx: number, v: string) {
+  patch(globalIdx(localIdx), (row) => ({ ...row, granule_id: v }));
+}
+
+function patchInput(localIdx: number, slot: string, field: string, v: string) {
+  patch(globalIdx(localIdx), (row) => ({
+    ...row,
+    inputs: { ...row.inputs, [slot]: { ...row.inputs[slot], [field]: v } },
+  }));
+}
+
+function patchMeta(localIdx: number, name: string, v: string) {
+  patch(globalIdx(localIdx), (row) => ({ ...row, meta: { ...row.meta, [name]: v } }));
 }
 
 async function addRow() {
@@ -203,7 +196,7 @@ function measureRow(el: unknown) {
             <td class="px-2 py-1">
               <CreateBatchCell
                 :model-value="pageRows[vItem.index].granule_id"
-                @update:model-value="(v) => patch(globalIdx(vItem.index), (row) => ({ ...row, granule_id: v }))"
+                @update:model-value="(v) => patchGranuleId(vItem.index, v)"
                 :error="pageErrors[vItem.index]?.granule_id"
                 placeholder="唯一"
               />
@@ -212,16 +205,7 @@ function measureRow(el: unknown) {
               <td class="px-2 py-1">
                 <CreateBatchCell
                   :model-value="pageRows[vItem.index].inputs[s.name]?.url ?? ''"
-                  @update:model-value="
-                    (v) =>
-                      patch(globalIdx(vItem.index), (row) => ({
-                        ...row,
-                        inputs: {
-                          ...row.inputs,
-                          [s.name]: { ...row.inputs[s.name], url: v },
-                        },
-                      }))
-                  "
+                  @update:model-value="(v) => patchInput(vItem.index, s.name, 'url', v)"
                   :error="pageErrors[vItem.index]?.inputs[s.name]?.url"
                   placeholder="https://…"
                   mono
@@ -230,16 +214,7 @@ function measureRow(el: unknown) {
               <td class="px-2 py-1">
                 <CreateBatchCell
                   :model-value="pageRows[vItem.index].inputs[s.name]?.filename ?? ''"
-                  @update:model-value="
-                    (v) =>
-                      patch(globalIdx(vItem.index), (row) => ({
-                        ...row,
-                        inputs: {
-                          ...row.inputs,
-                          [s.name]: { ...row.inputs[s.name], filename: v },
-                        },
-                      }))
-                  "
+                  @update:model-value="(v) => patchInput(vItem.index, s.name, 'filename', v)"
                   :error="pageErrors[vItem.index]?.inputs[s.name]?.filename"
                   placeholder="留空=自动"
                   mono
@@ -248,16 +223,7 @@ function measureRow(el: unknown) {
               <td v-if="!s.credential" class="px-2 py-1">
                 <CreateBatchCell
                   :model-value="pageRows[vItem.index].inputs[s.name]?.credential ?? ''"
-                  @update:model-value="
-                    (v) =>
-                      patch(globalIdx(vItem.index), (row) => ({
-                        ...row,
-                        inputs: {
-                          ...row.inputs,
-                          [s.name]: { ...row.inputs[s.name], credential: v },
-                        },
-                      }))
-                  "
+                  @update:model-value="(v) => patchInput(vItem.index, s.name, 'credential', v)"
                   placeholder="凭证名（可空）"
                 />
               </td>
@@ -265,10 +231,7 @@ function measureRow(el: unknown) {
             <td v-for="m in schema.metaFields" :key="`meta-${vItem.index}-${m.name}`" class="px-2 py-1">
               <CreateBatchCell
                 :model-value="pageRows[vItem.index].meta[m.name] ?? ''"
-                @update:model-value="
-                  (v) =>
-                    patch(globalIdx(vItem.index), (row) => ({ ...row, meta: { ...row.meta, [m.name]: v } }))
-                "
+                @update:model-value="(v) => patchMeta(vItem.index, m.name, v)"
                 :error="pageErrors[vItem.index]?.meta[m.name]"
                 :placeholder="m.pattern ?? ''"
               />

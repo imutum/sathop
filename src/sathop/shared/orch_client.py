@@ -19,6 +19,12 @@ class AuthTokenInvalid(BaseException):
     """
 
 
+class VersionTooOld(BaseException):
+    """Orchestrator rejected agent with HTTP 426 (Upgrade Required).
+    Same BaseException pattern as AuthTokenInvalid — `run_agent()` logs the
+    upgrade instructions and exits."""
+
+
 class OrchClient:
     """Bearer-authed httpx wrapper for orchestrator endpoints. Every call
     raises AuthTokenInvalid on 401 and raise_for_status on other non-2xx;
@@ -53,4 +59,7 @@ class OrchClient:
     def _check(r: httpx.Response, path: str) -> None:
         if r.status_code == 401:
             raise AuthTokenInvalid(f"orch {path} returned 401 — SATHOP_TOKEN mismatch")
+        if r.status_code == 426:
+            detail = r.json().get("detail", "") if r.headers.get("content-type", "").startswith("application/json") else r.text
+            raise VersionTooOld(detail)
         r.raise_for_status()

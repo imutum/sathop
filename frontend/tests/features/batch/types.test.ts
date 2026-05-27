@@ -1,16 +1,8 @@
 import { describe, it, expect } from "vitest";
-import {
-  type Schema,
-  type Row,
-  credDraftToApi,
-  emptyCred,
-  emptyRow,
-  filenameFromUrl,
-  hasAnyInput,
-  rowHasErrors,
-  rowToGranule,
-  validateRow,
-} from "@/features/batch/types";
+import { type Schema, type Row, emptyRow, filenameFromUrl, hasAnyInput } from "@/features/batch/types";
+import { credDraftToApi, emptyCred } from "@/features/batch/credentials";
+import { rowToGranule } from "@/features/batch/serialization";
+import { rowHasErrors, validateRow } from "@/features/batch/validation";
 
 const schema: Schema = {
   slots: [
