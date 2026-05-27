@@ -927,7 +927,9 @@ orchestrator = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 receiver = [
+    { name = "fastapi" },
     { name = "minio" },
+    { name = "uvicorn" },
 ]
 worker = [
     { name = "aria2p" },
@@ -952,6 +954,7 @@ requires-dist = [
     { name = "aria2p", marker = "extra == 'worker'", specifier = ">=0.12" },
     { name = "cryptography", marker = "extra == 'worker'", specifier = ">=43" },
     { name = "fastapi", marker = "extra == 'orchestrator'", specifier = ">=0.115" },
+    { name = "fastapi", marker = "extra == 'receiver'", specifier = ">=0.115" },
     { name = "fastapi", marker = "extra == 'worker'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "minio", marker = "extra == 'orchestrator'", specifier = ">=7.2" },
@@ -963,6 +966,7 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'orchestrator'", specifier = ">=0.0.12" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlalchemy", marker = "extra == 'orchestrator'", specifier = ">=2.0" },
+    { name = "uvicorn", marker = "extra == 'receiver'", specifier = ">=0.30" },
     { name = "uvicorn", marker = "extra == 'worker'", specifier = ">=0.30" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'orchestrator'", specifier = ">=0.30" },
     { name = "watchdog", marker = "extra == 'worker'", specifier = ">=5.0" },
