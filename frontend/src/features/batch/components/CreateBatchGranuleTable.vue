@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { type Row, type RowErrors, type Schema, emptyRow } from "@/features/batch/types";
+import { computed, nextTick, ref, watch } from "vue";
+import { useVirtualizer } from "@tanstack/vue-virtual";
+import { type Row, type RowErrors, type Schema, emptyRow, rowHasErrors } from "@/features/batch/types";
 import { requestConfirm } from "@/composables/useConfirm";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/Icon";
 import CreateBatchCell from "@/features/batch/components/CreateBatchCell.vue";
+
+const ROW_HEIGHT = 38;
+const PAGE_SIZE = 100;
 
 const props = defineProps<{
   schema: Schema;
@@ -15,6 +20,55 @@ const emit = defineEmits<{
   openCsv: [];
 }>();
 
+const scrollRef = ref<HTMLElement | null>(null);
+const currentPage = ref(0);
+
+const totalPages = computed(() => Math.max(1, Math.ceil(props.rows.length / PAGE_SIZE)));
+const pageStart = computed(() => currentPage.value * PAGE_SIZE);
+const pageEnd = computed(() => Math.min(pageStart.value + PAGE_SIZE, props.rows.length));
+const pageRows = computed(() => props.rows.slice(pageStart.value, pageEnd.value));
+const pageErrors = computed(() => props.errors.slice(pageStart.value, pageEnd.value));
+const showPagination = computed(() => props.rows.length > PAGE_SIZE);
+
+const firstErrorPage = computed(() => {
+  if (!showPagination.value) return -1;
+  for (let i = 0; i < props.errors.length; i++) {
+    if (rowHasErrors(props.errors[i])) return Math.floor(i / PAGE_SIZE);
+  }
+  return -1;
+});
+
+function goPage(p: number) {
+  currentPage.value = Math.max(0, Math.min(p, totalPages.value - 1));
+}
+
+watch(() => props.rows.length, () => {
+  if (currentPage.value >= totalPages.value) {
+    currentPage.value = Math.max(0, totalPages.value - 1);
+  }
+});
+
+const virtualizer = useVirtualizer(
+  computed(() => ({
+    count: pageRows.value.length,
+    getScrollElement: () => scrollRef.value,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 8,
+  })),
+);
+
+const virtualRows = computed(() => virtualizer.value.getVirtualItems());
+const totalHeight = computed(() => virtualizer.value.getTotalSize());
+const padTop = computed(() => (virtualRows.value.length ? virtualRows.value[0].start : 0));
+const padBottom = computed(() => {
+  const items = virtualRows.value;
+  return items.length ? totalHeight.value - items[items.length - 1].end : 0;
+});
+
+function globalIdx(localIdx: number): number {
+  return pageStart.value + localIdx;
+}
+
 function patch(idx: number, fn: (r: Row) => Row) {
   emit(
     "update:rows",
@@ -22,8 +76,12 @@ function patch(idx: number, fn: (r: Row) => Row) {
   );
 }
 
-function addRow() {
+async function addRow() {
   emit("update:rows", [...props.rows, emptyRow(props.schema.slots)]);
+  await nextTick();
+  goPage(totalPages.value - 1);
+  await nextTick();
+  virtualizer.value.scrollToIndex(pageRows.value.length - 1, { align: "end" });
 }
 
 async function removeRow(idx: number) {
@@ -47,13 +105,24 @@ async function removeRow(idx: number) {
     "update:rows",
     props.rows.filter((_, i) => i !== idx),
   );
+  await nextTick();
+  if (currentPage.value >= totalPages.value) {
+    goPage(totalPages.value - 1);
+  }
+}
+
+function measureRow(el: unknown) {
+  if (el instanceof Element) virtualizer.value.measureElement(el);
 }
 </script>
 
 <template>
   <div>
     <div class="mb-2 flex items-center justify-between">
-      <span class="text-xs text-muted-foreground">数据粒 · {{ rows.length }} 条</span>
+      <span class="text-xs text-muted-foreground">
+        数据粒 · {{ rows.length }} 条
+        <template v-if="showPagination">（显示 {{ pageStart + 1 }}–{{ pageEnd }}）</template>
+      </span>
       <div class="flex gap-1.5">
         <Button
           type="button"
@@ -62,7 +131,7 @@ async function removeRow(idx: number) {
           class="text-muted-foreground hover:text-foreground"
           @click="emit('openCsv')"
         >
-          粘贴 CSV
+          导入 CSV
         </Button>
         <Button
           type="button"
@@ -76,9 +145,12 @@ async function removeRow(idx: number) {
         </Button>
       </div>
     </div>
-    <div class="overflow-x-auto rounded-lg border border-border">
+    <div
+      ref="scrollRef"
+      class="max-h-[420px] overflow-auto rounded-lg border border-border"
+    >
       <table class="w-full text-xs">
-        <thead class="bg-muted/60 text-left text-mini font-semibold tracking-label text-muted-foreground">
+        <thead class="sticky top-0 z-10 bg-muted text-left text-mini font-semibold tracking-label text-muted-foreground">
           <tr>
             <th class="px-2 py-1.5">granule_id</th>
             <th
@@ -118,26 +190,31 @@ async function removeRow(idx: number) {
           </tr>
         </thead>
         <tbody>
+          <tr v-if="padTop > 0" aria-hidden="true">
+            <td colspan="99" :style="{ height: `${padTop}px`, padding: 0 }"></td>
+          </tr>
           <tr
-            v-for="(r, idx) in rows"
-            :key="idx"
+            v-for="vItem in virtualRows"
+            :key="vItem.index"
+            :data-index="vItem.index"
+            :ref="measureRow"
             class="border-t border-border align-top"
           >
             <td class="px-2 py-1">
               <CreateBatchCell
-                :model-value="r.granule_id"
-                @update:model-value="(v) => patch(idx, (row) => ({ ...row, granule_id: v }))"
-                :error="errors[idx]?.granule_id"
+                :model-value="pageRows[vItem.index].granule_id"
+                @update:model-value="(v) => patch(globalIdx(vItem.index), (row) => ({ ...row, granule_id: v }))"
+                :error="pageErrors[vItem.index]?.granule_id"
                 placeholder="唯一"
               />
             </td>
-            <template v-for="s in schema.slots" :key="`cells-${idx}-${s.name}`">
+            <template v-for="s in schema.slots" :key="`cells-${vItem.index}-${s.name}`">
               <td class="px-2 py-1">
                 <CreateBatchCell
-                  :model-value="r.inputs[s.name]?.url ?? ''"
+                  :model-value="pageRows[vItem.index].inputs[s.name]?.url ?? ''"
                   @update:model-value="
                     (v) =>
-                      patch(idx, (row) => ({
+                      patch(globalIdx(vItem.index), (row) => ({
                         ...row,
                         inputs: {
                           ...row.inputs,
@@ -145,17 +222,17 @@ async function removeRow(idx: number) {
                         },
                       }))
                   "
-                  :error="errors[idx]?.inputs[s.name]?.url"
+                  :error="pageErrors[vItem.index]?.inputs[s.name]?.url"
                   placeholder="https://…"
                   mono
                 />
               </td>
               <td class="px-2 py-1">
                 <CreateBatchCell
-                  :model-value="r.inputs[s.name]?.filename ?? ''"
+                  :model-value="pageRows[vItem.index].inputs[s.name]?.filename ?? ''"
                   @update:model-value="
                     (v) =>
-                      patch(idx, (row) => ({
+                      patch(globalIdx(vItem.index), (row) => ({
                         ...row,
                         inputs: {
                           ...row.inputs,
@@ -163,17 +240,17 @@ async function removeRow(idx: number) {
                         },
                       }))
                   "
-                  :error="errors[idx]?.inputs[s.name]?.filename"
+                  :error="pageErrors[vItem.index]?.inputs[s.name]?.filename"
                   placeholder="留空=自动"
                   mono
                 />
               </td>
               <td v-if="!s.credential" class="px-2 py-1">
                 <CreateBatchCell
-                  :model-value="r.inputs[s.name]?.credential ?? ''"
+                  :model-value="pageRows[vItem.index].inputs[s.name]?.credential ?? ''"
                   @update:model-value="
                     (v) =>
-                      patch(idx, (row) => ({
+                      patch(globalIdx(vItem.index), (row) => ({
                         ...row,
                         inputs: {
                           ...row.inputs,
@@ -185,14 +262,14 @@ async function removeRow(idx: number) {
                 />
               </td>
             </template>
-            <td v-for="m in schema.metaFields" :key="`meta-${idx}-${m.name}`" class="px-2 py-1">
+            <td v-for="m in schema.metaFields" :key="`meta-${vItem.index}-${m.name}`" class="px-2 py-1">
               <CreateBatchCell
-                :model-value="r.meta[m.name] ?? ''"
+                :model-value="pageRows[vItem.index].meta[m.name] ?? ''"
                 @update:model-value="
                   (v) =>
-                    patch(idx, (row) => ({ ...row, meta: { ...row.meta, [m.name]: v } }))
+                    patch(globalIdx(vItem.index), (row) => ({ ...row, meta: { ...row.meta, [m.name]: v } }))
                 "
-                :error="errors[idx]?.meta[m.name]"
+                :error="pageErrors[vItem.index]?.meta[m.name]"
                 :placeholder="m.pattern ?? ''"
               />
             </td>
@@ -204,19 +281,57 @@ async function removeRow(idx: number) {
                 aria-label="删除该行"
                 title="删除该行"
                 class="h-6 w-6 text-muted-foreground hover:bg-danger/10 hover:text-danger"
-                @click="removeRow(idx)"
+                @click="removeRow(globalIdx(vItem.index))"
               >
                 <Icon name="x" :size="12" :stroke-width="2.4" />
               </Button>
             </td>
           </tr>
+          <tr v-if="padBottom > 0" aria-hidden="true">
+            <td colspan="99" :style="{ height: `${padBottom}px`, padding: 0 }"></td>
+          </tr>
           <tr v-if="rows.length === 0">
-            <td :colspan="99" class="px-4 py-4 text-center text-muted-foreground">
-              还没有数据粒。点击 "+ 添加行" 或 "粘贴 CSV"。
+            <td colspan="99" class="px-4 py-4 text-center text-muted-foreground">
+              还没有数据粒。点击 "+ 添加行" 或 "导入 CSV"。
             </td>
           </tr>
         </tbody>
       </table>
+    </div>
+    <div v-if="showPagination" class="mt-2 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        :disabled="currentPage === 0"
+        aria-label="上一页"
+        @click="goPage(currentPage - 1)"
+      >
+        <Icon name="chevronLeft" :size="14" />
+      </Button>
+      <span class="tabular-nums">
+        第 {{ currentPage + 1 }} / {{ totalPages }} 页
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        :disabled="currentPage >= totalPages - 1"
+        aria-label="下一页"
+        @click="goPage(currentPage + 1)"
+      >
+        <Icon name="chevronRight" :size="14" />
+      </Button>
+      <Button
+        v-if="firstErrorPage >= 0 && firstErrorPage !== currentPage"
+        type="button"
+        variant="outline"
+        size="xs"
+        class="ml-2 text-danger hover:text-danger"
+        @click="goPage(firstErrorPage)"
+      >
+        第 {{ firstErrorPage + 1 }} 页有错误
+      </Button>
     </div>
   </div>
 </template>

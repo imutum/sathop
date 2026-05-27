@@ -8,9 +8,12 @@ import { createBatchHeaderSchema } from "@/features/batch/schemas";
 import { clearCred, hasCred, loadCred, saveCred } from "@/credCache";
 import { useToast } from "@/composables/useToast";
 import {
+  type CompiledSchema,
   type CredDraft,
   type Row,
+  type RowErrors,
   type Schema,
+  compileSchema,
   credentialsAreValid,
   credentialsHaveDraftContent,
   credentialsPayload,
@@ -120,11 +123,29 @@ watch(
 
 const parsedEnv = computed(() => parseExecutionEnv(headerValues.envText));
 
-const rowErrors = computed(() =>
-  schema.value
-    ? rows.value.map((r) => validateRow(r, schema.value!.slots, schema.value!.metaFields))
-    : [],
+const compiledSchema = computed<CompiledSchema | null>(() =>
+  schema.value ? compileSchema(schema.value) : null,
 );
+
+let _valCache = new WeakMap<Row, RowErrors>();
+let _lastCompiled: CompiledSchema | null = null;
+
+const rowErrors = computed<RowErrors[]>(() => {
+  const c = compiledSchema.value;
+  if (!c) return [];
+  if (c !== _lastCompiled) {
+    _valCache = new WeakMap();
+    _lastCompiled = c;
+  }
+  return rows.value.map((r) => {
+    let cached = _valCache.get(r);
+    if (!cached) {
+      cached = validateRow(r, c);
+      _valCache.set(r, cached);
+    }
+    return cached;
+  });
+});
 const allRowsOk = computed(
   () => !!schema.value && rows.value.length > 0 && rowErrors.value.every((e) => !rowHasErrors(e)),
 );

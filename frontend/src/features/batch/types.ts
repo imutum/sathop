@@ -11,6 +11,47 @@ export type MetaSpec = { name: string; pattern?: string };
 
 export type Schema = { slots: SlotSpec[]; metaFields: MetaSpec[] };
 
+export type CompiledSlot = {
+  name: string;
+  product: string;
+  filename_pattern?: string;
+  filename_re: RegExp | null;
+  credential?: string;
+};
+
+export type CompiledMeta = {
+  name: string;
+  re: RegExp | null;
+  pattern?: string;
+};
+
+export type CompiledSchema = { slots: CompiledSlot[]; metaFields: CompiledMeta[] };
+
+function safeRegExp(pattern: string): RegExp | null {
+  try {
+    return new RegExp(pattern);
+  } catch {
+    return null;
+  }
+}
+
+export function compileSchema(schema: Schema): CompiledSchema {
+  return {
+    slots: schema.slots.map((s) => ({
+      name: s.name,
+      product: s.product,
+      credential: s.credential,
+      filename_pattern: s.filename_pattern,
+      filename_re: s.filename_pattern ? safeRegExp(s.filename_pattern) : null,
+    })),
+    metaFields: schema.metaFields.map((m) => ({
+      name: m.name,
+      pattern: m.pattern,
+      re: m.pattern ? safeRegExp(m.pattern) : null,
+    })),
+  };
+}
+
 export type Row = {
   granule_id: string;
   inputs: Record<
@@ -86,21 +127,27 @@ export function rowToGranule(row: Row, slots: SlotSpec[]) {
   return { granule_id: row.granule_id, inputs, meta: row.meta };
 }
 
-export function validateRow(row: Row, slots: SlotSpec[], metaFields: MetaSpec[]): RowErrors {
+export function validateRow(row: Row, compiled: CompiledSchema): RowErrors;
+export function validateRow(row: Row, slots: SlotSpec[], metaFields: MetaSpec[]): RowErrors;
+export function validateRow(
+  row: Row,
+  slotsOrCompiled: SlotSpec[] | CompiledSchema,
+  metaFields?: MetaSpec[],
+): RowErrors {
+  const c: CompiledSchema = Array.isArray(slotsOrCompiled)
+    ? compileSchema({ slots: slotsOrCompiled, metaFields: metaFields! })
+    : slotsOrCompiled;
+
   const e: RowErrors = { inputs: {}, meta: {} };
   if (!row.granule_id.trim()) e.granule_id = "必填";
-  for (const s of slots) {
+  for (const s of c.slots) {
     const rec: { url?: string; filename?: string; size?: string; checksum?: string } = {};
     const i = row.inputs[s.name];
     if (!i.url.trim()) rec.url = "必填";
-    if (s.filename_pattern) {
+    if (s.filename_re) {
       const fname = i.filename || filenameFromUrl(i.url);
-      try {
-        const re = new RegExp(s.filename_pattern);
-        if (fname && !re.test(fname)) rec.filename = `应匹配 /${s.filename_pattern}/`;
-      } catch {
-        /* server-side regex; ignore on client */
-      }
+      if (fname && !s.filename_re.test(fname))
+        rec.filename = `应匹配 /${s.filename_pattern}/`;
     }
     const sizeStr = i.size.trim();
     if (sizeStr) {
@@ -113,20 +160,13 @@ export function validateRow(row: Row, slots: SlotSpec[], metaFields: MetaSpec[])
     }
     if (Object.keys(rec).length) e.inputs[s.name] = rec;
   }
-  for (const m of metaFields) {
+  for (const m of c.metaFields) {
     const v = row.meta[m.name] ?? "";
     if (!v.trim()) {
       e.meta[m.name] = "必填";
       continue;
     }
-    if (m.pattern) {
-      try {
-        const re = new RegExp(m.pattern);
-        if (!re.test(v)) e.meta[m.name] = `应匹配 /${m.pattern}/`;
-      } catch {
-        /* ignore */
-      }
-    }
+    if (m.re && !m.re.test(v)) e.meta[m.name] = `应匹配 /${m.pattern}/`;
   }
   return e;
 }
