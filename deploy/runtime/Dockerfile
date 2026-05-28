@@ -30,14 +30,9 @@ RUN sha256sum uv.lock > /app/.uv-lock-hash \
     && rm -rf /app/.venv
 
 # --- non-root user ---------------------------------------------------------
-RUN groupadd --gid 10001 sathop \
-    && useradd --uid 10001 --gid 10001 --home-dir /home/sathop --create-home --shell /sbin/nologin sathop \
-    && mkdir -p /app/data /app/repo /data/archive \
-    && chown -R sathop:sathop /app /data
+RUN mkdir -p /app/data /app/repo /data/archive
 
 COPY deploy/runtime/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
-
-USER sathop
 
 ENTRYPOINT ["/app/entrypoint.sh"]
