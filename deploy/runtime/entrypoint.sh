@@ -21,6 +21,7 @@ fi
 if [ -d "$REPO_DIR/.git" ]; then
   echo "[entrypoint] Pulling $GIT_REF ..."
   cd "$REPO_DIR"
+  git remote set-url origin "$GIT_REPO"
   git fetch origin "$GIT_REF" --depth=1 --quiet
   git checkout FETCH_HEAD --quiet
   git clean -fd --quiet
@@ -58,7 +59,7 @@ with open('pyproject.toml','rb') as f:
 
   if [ -n "$FRONTEND_URL" ]; then
     echo "[entrypoint] Downloading frontend from release ..."
-    if curl -fsSL "$FRONTEND_URL" | tar -xz -C "$REPO_DIR/frontend/" 2>/dev/null; then
+    if curl -fsSL "$FRONTEND_URL" | tar -xz -C "$REPO_DIR/frontend/"; then
       echo "[entrypoint] Frontend ready."
     else
       echo "[entrypoint] Frontend download failed — running without Web UI."
@@ -69,6 +70,11 @@ with open('pyproject.toml','rb') as f:
 fi
 
 # ── Launch ────────────────────────────────────────────────────────────
+# CWD must be /app (not /app/repo) so that config defaults using relative
+# paths like ./data/orchestrator.db resolve to the bind-mounted /app/data,
+# not /app/repo/data on the ephemeral repo volume. Python finds the source
+# tree via __file__ (absolute path from editable install), not CWD.
 echo "[entrypoint] Starting sathop.$ROLE ..."
 export PATH="$REPO_DIR/.venv/bin:$PATH"
+cd /app
 exec python -m "sathop.$ROLE.main"
