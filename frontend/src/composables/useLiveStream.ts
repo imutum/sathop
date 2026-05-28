@@ -2,25 +2,8 @@ import { ref, watchEffect } from "vue";
 import { useQueryClient } from "@tanstack/vue-query";
 
 import { getToken } from "@/apiClient";
-
-type Scope =
-  | "batches"
-  | "workers"
-  | "receivers"
-  | "events"
-  | "progress"
-  | "bundles"
-  | "shared";
-
-const SCOPE_TO_KEYS: Record<Scope, string[][]> = {
-  batches: [["batches"], ["overview"], ["batch"], ["granules"], ["in-flight"], ["stuck"]],
-  workers: [["workers"], ["overview"]],
-  receivers: [["receivers"], ["overview"]],
-  events: [["events"], ["overview"], ["batch-events"], ["granule-events"]],
-  progress: [["granule-progress"], ["batch-progress-latest"]],
-  bundles: [["bundles"], ["bundle-detail"]],
-  shared: [["shared-files"]],
-};
+import type { Scope } from "@/apiTypes";
+import { SCOPE_KEYS } from "@/queryKeys";
 
 export function useLiveStream() {
   const qc = useQueryClient();
@@ -40,9 +23,9 @@ export function useLiveStream() {
     es.onmessage = (e) => {
       try {
         const evt = JSON.parse(e.data) as { scope?: Scope };
-        if (evt.scope && evt.scope in SCOPE_TO_KEYS) {
-          for (const key of SCOPE_TO_KEYS[evt.scope]) {
-            qc.invalidateQueries({ queryKey: key });
+        if (evt.scope && evt.scope in SCOPE_KEYS) {
+          for (const key of SCOPE_KEYS[evt.scope]) {
+            qc.invalidateQueries({ queryKey: [...key] });
           }
         }
       } catch {

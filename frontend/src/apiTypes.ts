@@ -1,5 +1,14 @@
 // Shared types that mirror the backend protocol models.
 
+export type Scope =
+  | "batches"
+  | "workers"
+  | "receivers"
+  | "events"
+  | "progress"
+  | "bundles"
+  | "shared";
+
 export type GranuleState =
   | "pending"
   | "queued"
