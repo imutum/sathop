@@ -27,8 +27,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.state_machine import NON_TERMINAL_STATES, GranuleState
 
+from .. import event_store, telemetry
 from ..config import require_token_or_query
-from ..db import Batch, Event, Granule, Receiver, Worker, session
+from ..db import Batch, Granule, Receiver, Worker, session
 
 router = APIRouter(tags=["metrics"], dependencies=[Depends(require_token_or_query)])
 
@@ -131,37 +132,32 @@ async def _collect(s: AsyncSession) -> bytes:
     g_workers.labels(enabled="true").set(sum(1 for w in workers if w.enabled))
     g_workers.labels(enabled="false").set(sum(1 for w in workers if not w.enabled))
     for w in workers:
-        g_hb_worker.labels(worker_id=w.worker_id).set(_age_seconds(now, w.last_seen))
-        g_disk_used.labels(worker_id=w.worker_id).set(w.disk_used_gb * GB)
-        g_disk_total.labels(worker_id=w.worker_id).set(w.disk_total_gb * GB)
-        ratio = (w.disk_used_gb / w.disk_total_gb) if w.disk_total_gb > 0 else 0.0
+        wt = telemetry.get_worker(w.worker_id) or w
+        g_hb_worker.labels(worker_id=w.worker_id).set(_age_seconds(now, wt.last_seen))
+        g_disk_used.labels(worker_id=w.worker_id).set(wt.disk_used_gb * GB)
+        g_disk_total.labels(worker_id=w.worker_id).set(wt.disk_total_gb * GB)
+        ratio = (wt.disk_used_gb / wt.disk_total_gb) if wt.disk_total_gb > 0 else 0.0
         g_disk_pct.labels(worker_id=w.worker_id).set(ratio)
-        g_queue.labels(worker_id=w.worker_id, stage="pending_download").set(w.queue_pending_download or 0)
-        g_queue.labels(worker_id=w.worker_id, stage="downloading").set(w.queue_downloading)
-        g_queue.labels(worker_id=w.worker_id, stage="pending_processing").set(w.queue_pending_processing or 0)
-        g_queue.labels(worker_id=w.worker_id, stage="processing").set(w.queue_processing)
-        g_queue.labels(worker_id=w.worker_id, stage="pending_upload").set(w.queue_pending_upload or 0)
-        g_queue.labels(worker_id=w.worker_id, stage="uploading").set(w.queue_uploading)
-        g_egress.labels(worker_id=w.worker_id).set(w.monthly_egress_gb * GB)
+        g_queue.labels(worker_id=w.worker_id, stage="pending_download").set(wt.queue_pending_download or 0)
+        g_queue.labels(worker_id=w.worker_id, stage="downloading").set(wt.queue_downloading)
+        g_queue.labels(worker_id=w.worker_id, stage="pending_processing").set(wt.queue_pending_processing or 0)
+        g_queue.labels(worker_id=w.worker_id, stage="processing").set(wt.queue_processing)
+        g_queue.labels(worker_id=w.worker_id, stage="pending_upload").set(wt.queue_pending_upload or 0)
+        g_queue.labels(worker_id=w.worker_id, stage="uploading").set(wt.queue_uploading)
+        g_egress.labels(worker_id=w.worker_id).set(wt.monthly_egress_gb * GB)
 
     receivers = (await s.execute(select(Receiver))).scalars().all()
     g_receivers.labels(enabled="true").set(sum(1 for r in receivers if r.enabled))
     g_receivers.labels(enabled="false").set(sum(1 for r in receivers if not r.enabled))
     for r in receivers:
-        g_hb_receiver.labels(receiver_id=r.receiver_id).set(_age_seconds(now, r.last_seen))
-        g_recv_free.labels(receiver_id=r.receiver_id).set(r.disk_free_gb * GB)
-        g_recv_pulling.labels(receiver_id=r.receiver_id).set(r.queue_pulling or 0)
-        g_recv_bps.labels(receiver_id=r.receiver_id).set(r.recent_pull_bps or 0)
+        rt = telemetry.get_receiver(r.receiver_id) or r
+        g_hb_receiver.labels(receiver_id=r.receiver_id).set(_age_seconds(now, rt.last_seen))
+        g_recv_free.labels(receiver_id=r.receiver_id).set(rt.disk_free_gb * GB)
+        g_recv_pulling.labels(receiver_id=r.receiver_id).set(rt.queue_pulling or 0)
+        g_recv_bps.labels(receiver_id=r.receiver_id).set(rt.recent_pull_bps or 0)
 
     day_ago = now - timedelta(hours=24)
-    ev_counts: dict[str, int] = {
-        level: count
-        for level, count in (
-            await s.execute(
-                select(Event.level, func.count(Event.id)).where(Event.ts >= day_ago).group_by(Event.level)
-            )
-        ).all()
-    }
+    ev_counts = event_store.count_by_level_since(day_ago)
     for level in ("info", "warn", "error"):
         g_events24.labels(level=level).set(ev_counts.get(level, 0))
 

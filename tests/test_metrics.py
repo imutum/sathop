@@ -9,7 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.db import Batch, Event, Granule, Receiver, Worker, utcnow
+from sathop.orchestrator import event_store
+from sathop.orchestrator.db import Batch, Granule, Receiver, Worker, utcnow
 from sathop.orchestrator.main import app
 from sathop.shared.protocol import GranuleState
 
@@ -58,9 +59,10 @@ async def test_metrics_exposes_expected_series(client):
                 recent_pull_bps=4096,
             )
         )
-        s.add(Event(ts=now - timedelta(minutes=5), source="t", level="warn", message="recent"))
-        s.add(Event(ts=now - timedelta(days=2), source="t", level="info", message="old"))  # outside 24h
         await s.commit()
+    # Oldest first — event_store.count_by_level_since assumes chronological order.
+    event_store.append(ts=now - timedelta(days=2), source="t", level="info", message="old")  # outside 24h
+    event_store.append(ts=now - timedelta(minutes=5), source="t", level="warn", message="recent")
 
     resp = client.get("/api/metrics")
     assert resp.status_code == 200

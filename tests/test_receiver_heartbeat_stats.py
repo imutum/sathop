@@ -181,6 +181,8 @@ async def client(tmp_path, patch_settings):
 
 
 async def test_heartbeat_persists_queue_pulling_and_throughput(client):
+    from sathop.orchestrator import telemetry
+
     client.post("/api/receivers/register", json={"receiver_id": "r1", "version": "t", "platform": "linux"})
     r = client.post(
         "/api/receivers/heartbeat",
@@ -193,10 +195,10 @@ async def test_heartbeat_persists_queue_pulling_and_throughput(client):
     )
     assert r.status_code == 200
 
-    async with orch_db._session_maker() as s:
-        row = await s.get(Receiver, "r1")
-        assert row.queue_pulling == 3
-        assert row.recent_pull_bps == 1_500_000
+    t = telemetry.get_receiver("r1")
+    assert t is not None
+    assert t.queue_pulling == 3
+    assert t.recent_pull_bps == 1_500_000
 
 
 async def test_list_receivers_returns_new_fields(client):

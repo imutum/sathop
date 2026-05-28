@@ -8,9 +8,10 @@ from sqlalchemy import delete, select, update
 from sathop.shared.periodic import run_periodic
 from sathop.shared.state_machine import LEASED_STATES, GranuleState, Scope
 
+from . import event_store
 from .api.progress import evict_granule_ids
 from .config import settings
-from .db import Event, Granule, GranuleObject, GranuleStageTiming, get_session_maker, utcnow
+from .db import Granule, GranuleObject, GranuleStageTiming, get_session_maker, utcnow
 from .pubsub import commit_and_publish, log_event, publish
 
 _log = logging.getLogger("sathop.orch.background")
@@ -75,12 +76,11 @@ async def sweep_retention(
     now = utcnow()
     out = {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0}
 
-    async with get_session_maker()() as s:
-        if ev_days > 0:
-            cutoff = now - timedelta(days=ev_days)
-            r = await s.execute(delete(Event).where(Event.ts < cutoff))
-            out["events"] = getattr(r, "rowcount", 0) or 0
+    if ev_days > 0:
+        cutoff = now - timedelta(days=ev_days)
+        out["events"] = event_store.prune_before(cutoff)
 
+    async with get_session_maker()() as s:
         if del_days > 0:
             cutoff = now - timedelta(days=del_days)
             r = await s.execute(

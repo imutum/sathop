@@ -1,4 +1,4 @@
-"""/api/events: verify the batch_id join — events tied to a granule carry the
+"""/api/events: verify the batch_id field — events tied to a granule carry the
 parent batch_id so the UI can deep-link straight to the batch-detail page."""
 
 from __future__ import annotations
@@ -7,9 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.db import Batch, Event, Granule
+from sathop.orchestrator import event_store
+from sathop.orchestrator.db import utcnow
 from sathop.orchestrator.main import app
-from sathop.shared.protocol import GranuleState
 
 
 @pytest.fixture
@@ -26,17 +26,13 @@ async def client(tmp_path, patch_settings):
 
 
 async def test_event_with_granule_carries_batch_id(client):
-    async with orch_db._session_maker() as s:
-        s.add(Batch(batch_id="b1", name="n", bundle_ref="local:x"))
-        s.add(Granule(granule_id="g1", batch_id="b1", state=GranuleState.FAILED.value, inputs=[]))
-        s.add(Event(source="worker-a", level="error", granule_id="g1", message="oops"))
-        s.add(Event(source="orchestrator", level="info", granule_id=None, message="started"))
-        await s.commit()
+    now = utcnow()
+    event_store.append(ts=now, source="worker-a", level="error", granule_id="g1", batch_id="b1", message="oops")
+    event_store.append(ts=now, source="orchestrator", level="info", message="started")
 
     r = client.get("/api/events")
     assert r.status_code == 200
     data = r.json()
-    # Sorted desc by id — info (id=2) first, error (id=1) second
     by_msg = {e["message"]: e for e in data}
 
     assert by_msg["oops"]["granule_id"] == "g1"
@@ -48,9 +44,7 @@ async def test_event_with_granule_carries_batch_id(client):
 
 async def test_event_with_orphaned_granule_has_null_batch_id(client):
     """Event references a granule_id whose row was pruned — batch_id is null."""
-    async with orch_db._session_maker() as s:
-        s.add(Event(source="old", level="warn", granule_id="long-gone", message="stale ref"))
-        await s.commit()
+    event_store.append(ts=utcnow(), source="old", level="warn", granule_id="long-gone", message="stale ref")
 
     r = client.get("/api/events")
     assert r.status_code == 200
@@ -60,11 +54,9 @@ async def test_event_with_orphaned_granule_has_null_batch_id(client):
 
 
 async def test_since_id_and_limit_still_work(client):
-    async with orch_db._session_maker() as s:
-        s.add(Batch(batch_id="b1", name="n", bundle_ref="local:x"))
-        for i in range(5):
-            s.add(Event(source="t", level="info", granule_id=None, message=f"e{i}"))
-        await s.commit()
+    now = utcnow()
+    for i in range(5):
+        event_store.append(ts=now, source="t", level="info", message=f"e{i}")
 
     r = client.get("/api/events?limit=2")
     assert len(r.json()) == 2
@@ -77,29 +69,23 @@ async def test_since_id_and_limit_still_work(client):
 
 async def test_granule_id_filter_isolates_one_granule(client):
     """BatchDetail's expanded-row events panel relies on granule_id= filter."""
-    async with orch_db._session_maker() as s:
-        s.add(Batch(batch_id="b1", name="n", bundle_ref="local:x"))
-        s.add(Granule(granule_id="b1:g-a", batch_id="b1", state=GranuleState.FAILED.value, inputs=[]))
-        s.add(Granule(granule_id="b1:g-b", batch_id="b1", state=GranuleState.ACKED.value, inputs=[]))
-        for i in range(3):
-            s.add(Event(source="w", level="error", granule_id="b1:g-a", message=f"a-err-{i}"))
-        s.add(Event(source="w", level="info", granule_id="b1:g-b", message="b-ok"))
-        s.add(Event(source="o", level="info", granule_id=None, message="orchestrator-noise"))
-        await s.commit()
+    now = utcnow()
+    for i in range(3):
+        event_store.append(ts=now, source="w", level="error", granule_id="b1:g-a", batch_id="b1", message=f"a-err-{i}")
+    event_store.append(ts=now, source="w", level="info", granule_id="b1:g-b", batch_id="b1", message="b-ok")
+    event_store.append(ts=now, source="o", level="info", message="orchestrator-noise")
 
     r = client.get("/api/events?granule_id=b1:g-a")
     msgs = sorted(e["message"] for e in r.json())
     assert msgs == ["a-err-0", "a-err-1", "a-err-2"]
-    # All carry the parent batch_id via the outer join
     assert all(e["batch_id"] == "b1" for e in r.json())
 
 
 async def test_before_id_pages_backward(client):
     """before_id lets the UI load older events past the rolling 500-row window."""
-    async with orch_db._session_maker() as s:
-        for i in range(10):
-            s.add(Event(source="t", level="info", granule_id=None, message=f"e{i}"))
-        await s.commit()
+    now = utcnow()
+    for i in range(10):
+        event_store.append(ts=now, source="t", level="info", message=f"e{i}")
 
     # First page: latest 3 → ids 10,9,8 (1-indexed)
     page1 = client.get("/api/events?limit=3").json()
@@ -112,9 +98,7 @@ async def test_before_id_pages_backward(client):
     assert [e["message"] for e in page2] == ["e6", "e5", "e4"]
 
     # before_id combines with level filter
-    async with orch_db._session_maker() as s:
-        s.add(Event(source="t", level="error", granule_id=None, message="boom"))
-        await s.commit()
+    event_store.append(ts=now, source="t", level="error", message="boom")
     boom_id = client.get("/api/events?level=error&limit=1").json()[0]["id"]
     older_errs = client.get(f"/api/events?level=error&before_id={boom_id}").json()
     assert older_errs == []

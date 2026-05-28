@@ -27,6 +27,7 @@ from sathop.shared.state_machine import (
 )
 from sathop.shared.versioning import parse_version
 
+from .. import telemetry
 from ..config import require_token, settings
 from ..db import Granule, GranuleObject, Worker, session, utcnow
 from ..pubsub import commit_and_publish
@@ -116,14 +117,14 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     _check_worker_version(req.version, req.worker_id)
     w = await get_or_404(s, Worker, req.worker_id, "worker not registered")
     now = utcnow()
-    await record_version_flap(s, w, new_version=req.version, source=req.worker_id, kind="worker")
-    apply_worker_heartbeat(w, req, now)
-    await renew_worker_leases(s, req.worker_id, now)
 
-    # Diff worker's active set vs. DB; any mismatch becomes a cancellation
-    # instruction in this heartbeat response.
+    # In-memory telemetry — no DB write
+    apply_worker_heartbeat(req.worker_id, req, now)
+
+    # DB ops below only dirty the session on real state changes (rare)
+    flapped = await record_version_flap(s, w, new_version=req.version, source=req.worker_id, kind="worker")
+    renewed = await renew_worker_leases(s, req.worker_id, now)
     revoked = await revoked_active_granules(s, req)
-
     restart_requested = await consume_one_shot_signal(
         s, w, "restart_requested_at", source=w.worker_id, message="restart signal delivered to worker"
     )
@@ -131,7 +132,9 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         s, w, "gc_requested_at", source=w.worker_id, message="cache GC signal delivered to worker"
     )
 
-    await commit_and_publish(s, Scope.WORKERS)
+    if flapped or renewed or restart_requested or gc_requested:
+        await commit_and_publish(s, Scope.WORKERS)
+
     return WorkerHeartbeatResponse(
         desired_capacity=w.desired_capacity,
         revoked_granule_ids=revoked,
@@ -162,7 +165,7 @@ async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
     items = await claim_pending_granules(s, req.worker_id, limit, now, expires)
     if items:
         await log(s, req.worker_id, f"leased {len(items)} granules")
-    await commit_and_publish(s, Scope.BATCHES if items else None)
+        await commit_and_publish(s, Scope.BATCHES)
     return LeaseResponse(items=items, lease_expires_at=expires)
 
 
@@ -185,6 +188,7 @@ async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) ->
             event.worker_id,
             f"uploaded {len(event.objects)} objects",
             granule_id=g.granule_id,
+            batch_id=g.batch_id,
         )
     elif isinstance(event, ProcessingFailed):
         evict_granule(g.granule_id, g.batch_id)
@@ -194,6 +198,7 @@ async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) ->
             f"processing failed (exit={event.exit_code}) retry={g.retry_count}",
             level="error" if g.state == GranuleState.BLACKLISTED.value else "warn",
             granule_id=g.granule_id,
+            batch_id=g.batch_id,
         )
     await commit_and_publish(s, result.publish_scope)
     return {"ok": True, "state": g.state}
@@ -364,4 +369,5 @@ async def forget_worker(
     await s.delete(w)
     await log(s, worker_id, f"worker forgotten (row deleted, force={force})")
     await commit_and_publish(s, Scope.WORKERS, Scope.BATCHES)
+    telemetry.evict_worker(worker_id)
     return {"ok": True}

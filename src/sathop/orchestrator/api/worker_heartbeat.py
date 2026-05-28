@@ -2,29 +2,37 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import WorkerHeartbeat
 from sathop.shared.state_machine import LEASED_STATES
 
-from ..db import Granule, Worker
+from ..db import Granule
+from ..telemetry import WorkerTelemetry, update_worker
 
 
-def apply_worker_heartbeat(worker: Worker, req: WorkerHeartbeat, now) -> None:
-    worker.last_seen = now
-    worker.disk_used_gb = req.disk_used_gb
-    worker.disk_total_gb = req.disk_total_gb
-    worker.cpu_percent = req.cpu_percent
-    worker.mem_percent = req.mem_percent
-    worker.monthly_egress_gb = req.monthly_egress_gb
-    worker.queue_pending_download = req.queue_pending_download
-    worker.queue_downloading = req.queue_downloading
-    worker.queue_pending_processing = req.queue_pending_processing
-    worker.queue_processing = req.queue_processing
-    worker.queue_pending_upload = req.queue_pending_upload
-    worker.queue_uploading = req.queue_uploading
-    worker.paused = req.paused
+def apply_worker_heartbeat(worker_id: str, req: WorkerHeartbeat, now: datetime) -> None:
+    update_worker(
+        worker_id,
+        WorkerTelemetry(
+            last_seen=now,
+            disk_used_gb=req.disk_used_gb,
+            disk_total_gb=req.disk_total_gb,
+            cpu_percent=req.cpu_percent,
+            mem_percent=req.mem_percent,
+            monthly_egress_gb=req.monthly_egress_gb,
+            queue_pending_download=req.queue_pending_download or 0,
+            queue_downloading=req.queue_downloading,
+            queue_pending_processing=req.queue_pending_processing or 0,
+            queue_processing=req.queue_processing,
+            queue_pending_upload=req.queue_pending_upload or 0,
+            queue_uploading=req.queue_uploading,
+            paused=req.paused,
+        ),
+    )
 
 
 async def revoked_active_granules(s: AsyncSession, req: WorkerHeartbeat) -> list[str]:

@@ -22,6 +22,7 @@ from sathop.shared.state_machine import (
     Scope,
 )
 
+from .. import telemetry
 from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, Receiver, Worker, session, utcnow
 from ..pubsub import commit_and_publish
@@ -51,19 +52,26 @@ async def register(req: ReceiverRegister, s: AsyncSession = Depends(session)) ->
 @router.post("/heartbeat", response_model=ReceiverHeartbeatResponse)
 async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) -> ReceiverHeartbeatResponse:
     r = await get_or_404(s, Receiver, req.receiver_id, "receiver not registered")
-    # Version flap detection — see workers.heartbeat for the rationale. Same
-    # orphan-container symptom on the receiver side: pulls split between two
-    # processes, half failing on stale TLS trust / fixed `.part` filename.
-    await record_version_flap(s, r, new_version=req.version, source=req.receiver_id, kind="receiver")
-    r.last_seen = utcnow()
-    r.disk_free_gb = req.disk_free_gb
-    r.queue_pulling = req.queue_pulling
-    r.recent_pull_bps = req.recent_pull_bps
+    now = utcnow()
 
+    telemetry.update_receiver(
+        req.receiver_id,
+        telemetry.ReceiverTelemetry(
+            last_seen=now,
+            disk_free_gb=req.disk_free_gb,
+            queue_pulling=req.queue_pulling or 0,
+            recent_pull_bps=req.recent_pull_bps or 0,
+        ),
+    )
+
+    flapped = await record_version_flap(s, r, new_version=req.version, source=req.receiver_id, kind="receiver")
     restart_requested = await consume_one_shot_signal(
         s, r, "restart_requested_at", source=req.receiver_id, message="restart signal delivered to receiver"
     )
-    await commit_and_publish(s, Scope.RECEIVERS)
+
+    if flapped or restart_requested:
+        await commit_and_publish(s, Scope.RECEIVERS)
+
     return ReceiverHeartbeatResponse(restart_requested=restart_requested)
 
 
@@ -103,6 +111,8 @@ async def pull(req: PullRequest, s: AsyncSession = Depends(session)) -> PullResp
 @router.post("/ack")
 async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
     obj = await get_or_404(s, GranuleObject, req.object_id, "object not found")
+    g = await s.get(Granule, obj.granule_id)
+    bid = g.batch_id if g else None
 
     if not req.success:
         new_failed = (obj.failed_pulls or 0) + 1
@@ -115,6 +125,7 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
             + (" — giving up, no further offers" if exhausted else ""),
             level="error" if exhausted else "warn",
             granule_id=obj.granule_id,
+            batch_id=bid,
         )
         await commit_and_publish(s)
         return {"ok": True, "retried": not exhausted, "failed_pulls": obj.failed_pulls}
@@ -126,6 +137,7 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
             f"sha256 mismatch object_id={req.object_id}",
             level="error",
             granule_id=obj.granule_id,
+            batch_id=bid,
         )
         raise HTTPException(400, "sha256 mismatch")
 
@@ -138,20 +150,15 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
         .scalars()
         .all()
     )
-    if all(o.acked_at is not None for o in siblings):
-        g = await s.get(Granule, obj.granule_id)
-        if g is not None:
-            # Granule may have been cancelled / deleted between upload and
-            # final ack — the receiver's bookkeeping wins for the object itself,
-            # but the granule transition is dropped silently.
-            await apply_transition(
-                s,
-                g,
-                ObjectAcked(granule_id=g.granule_id),
-                now=now,
-                on_conflict="skip",
-            )
-    await log(s, req.receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id)
+    if g is not None and all(o.acked_at is not None for o in siblings):
+        await apply_transition(
+            s,
+            g,
+            ObjectAcked(granule_id=g.granule_id),
+            now=now,
+            on_conflict="skip",
+        )
+    await log(s, req.receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id, batch_id=bid)
     await commit_and_publish(s, Scope.BATCHES)
     return {"ok": True}
 
@@ -209,4 +216,5 @@ async def forget_receiver(receiver_id: str, s: AsyncSession = Depends(session)) 
     await s.delete(r)
     await log(s, receiver_id, "receiver forgotten (row deleted)")
     await commit_and_publish(s, Scope.RECEIVERS)
+    telemetry.evict_receiver(receiver_id)
     return {"ok": True}

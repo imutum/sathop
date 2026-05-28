@@ -26,12 +26,12 @@ from sathop.shared.state_machine import (
     Scope,
 )
 
+from .. import event_store
 from ..bundle_schema import validate_granule
 from ..config import require_token
 from ..db import (
     Batch,
     Bundle,
-    Event,
     Granule,
     GranuleObject,
     GranuleProgress,
@@ -288,7 +288,7 @@ async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depen
         conflict_message=lambda g, _e: f"cannot cancel granule in state {g.state!r}",
     )
     evict_granule(granule_id, batch_id)
-    await log(s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id)
+    await log(s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id, batch_id=batch_id)
     await commit_and_publish(s, Scope.BATCHES)
     return {"ok": True, "state": g.state}
 
@@ -303,7 +303,7 @@ async def retry_granule(batch_id: str, granule_id: str, s: AsyncSession = Depend
         now=utcnow(),
         conflict_message=lambda g, _e: f"cannot retry granule in state {g.state!r}",
     )
-    await log(s, "admin", f"retried granule {granule_id}", granule_id=granule_id)
+    await log(s, "admin", f"retried granule {granule_id}", granule_id=granule_id, batch_id=batch_id)
     await commit_and_publish(s, Scope.BATCHES)
     return {"ok": True, "state": g.state}
 
@@ -375,13 +375,10 @@ async def delete_batch(
 
     counts = {"granules": 0, "objects": 0, "progress": 0, "stage_timings": 0, "events": 0}
     if granule_ids:
-        # Children before parent to keep FK refs consistent (SQLite doesn't
-        # enforce them, but the retention sweeper relies on the same order).
         for table, key in (
             (GranuleObject, "objects"),
             (GranuleProgress, "progress"),
             (GranuleStageTiming, "stage_timings"),
-            (Event, "events"),
         ):
             r = await s.execute(delete(table).where(table.granule_id.in_(granule_ids)))
             counts[key] = getattr(r, "rowcount", 0) or 0
@@ -395,5 +392,7 @@ async def delete_batch(
         f"deleted batch {batch_id} (force={force}, {counts})",
         level="warn",
     )
-    await commit_and_publish(s, Scope.BATCHES, Scope.EVENTS if counts["events"] else None)
+    await commit_and_publish(s, Scope.BATCHES)
+    if granule_ids:
+        counts["events"] = event_store.evict_by_granule_ids(set(granule_ids))
     return {"ok": True, **counts}

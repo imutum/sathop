@@ -85,15 +85,16 @@ async def record_version_flap(
     new_version: str,
     source: str,
     kind: str,
-) -> None:
+) -> bool:
     """Warn-log + update if `new_version` differs from the stored one.
 
     Empty `new_version` (old client) is treated as no-info — never a flap.
     `kind` is the noun for the log line ("worker" / "receiver"); the orphan-
     container guidance text is the same across agents.
+    Returns True when a version change was recorded (session is dirty).
     """
     if not new_version or new_version == entity.version:
-        return
+        return False
     await log(
         s,
         source,
@@ -102,3 +103,4 @@ async def record_version_flap(
         level="warn",
     )
     entity.version = new_version
+    return True

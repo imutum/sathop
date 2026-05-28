@@ -10,9 +10,10 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       staleTime: 30_000,
-      // SSE drives most refreshes; window-focus + reconnect cover the rest.
-      // Long interval is a safety net only when the stream is dead.
-      refetchInterval: 5 * 60_000,
+      // SSE (throttled to 2s) drives most refreshes; this interval is the
+      // fallback for queries not covered by SSE scopes (inflight, stuck)
+      // and a safety net when the stream is dead.
+      refetchInterval: 60_000,
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
     },

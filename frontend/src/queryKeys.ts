@@ -26,10 +26,10 @@ export const K = {
 } as const;
 
 export const SCOPE_KEYS: Record<Scope, readonly (readonly string[])[]> = {
-  batches: [K.batches, K.overview, K.batch, K.granules, K.inflight, K.stuck],
+  batches: [K.batches, K.overview, K.batch, K.granules],
   workers: [K.workers, K.overview],
-  receivers: [K.receivers, K.overview],
-  events: [K.events, K.overview, K.batchEvents, K.granuleEvents],
+  receivers: [K.receivers],
+  events: [K.events, K.batchEvents, K.granuleEvents],
   progress: [K.granuleProgress, K.batchProgressLatest],
   bundles: [K.bundles, K.bundleDetail],
   shared: [K.sharedFiles],

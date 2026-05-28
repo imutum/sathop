@@ -9,7 +9,8 @@ import pytest
 
 from sathop.orchestrator import background as retention
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.db import Batch, Event, Granule, GranuleObject, GranuleStageTiming, utcnow
+from sathop.orchestrator import event_store
+from sathop.orchestrator.db import Batch, Granule, GranuleObject, GranuleStageTiming, utcnow
 from sathop.shared.protocol import GranuleState
 
 
@@ -26,19 +27,16 @@ async def orch_session(tmp_path, patch_settings):
 
 async def test_prunes_old_events_keeps_recent(orch_session):
     now = utcnow()
-    async with orch_session() as s:
-        s.add(Event(ts=now - timedelta(days=30), source="t", message="old"))
-        s.add(Event(ts=now - timedelta(days=1), source="t", message="new"))
-        await s.commit()
+    event_store.append(ts=now - timedelta(days=30), source="t", level="info", message="old")
+    event_store.append(ts=now - timedelta(days=1), source="t", level="info", message="new")
 
     counts = await retention.sweep_retention(events_days=7, deleted_days=0)
     assert counts["events"] == 1
     assert counts["granules"] == 0
 
-    async with orch_session() as s:
-        remaining = (await s.execute(Event.__table__.select())).all()
-        assert len(remaining) == 1
-        assert remaining[0].message == "new"
+    remaining = event_store.query(limit=10000)
+    assert len(remaining) == 1
+    assert remaining[0]["message"] == "new"
 
 
 async def test_prunes_aged_deleted_granules_and_objects(orch_session):
@@ -160,12 +158,9 @@ async def test_prunes_stage_timing_with_granule(orch_session):
 
 
 async def test_zero_retention_days_skips_prune(orch_session):
-    async with orch_session() as s:
-        s.add(Event(ts=utcnow() - timedelta(days=365), source="t", message="ancient"))
-        await s.commit()
+    event_store.append(ts=utcnow() - timedelta(days=365), source="t", level="info", message="ancient")
 
     counts = await retention.sweep_retention(events_days=0, deleted_days=0)
     assert counts == {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0}
 
-    async with orch_session() as s:
-        assert len((await s.execute(Event.__table__.select())).all()) == 1
+    assert len(event_store.query(limit=10000)) == 1

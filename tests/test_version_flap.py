@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.db import Event, Receiver, Worker
+from sathop.orchestrator import event_store
+from sathop.orchestrator.db import Receiver, Worker
 from sathop.orchestrator.main import app
 
 
@@ -35,10 +35,11 @@ async def client(tmp_path, patch_settings):
         await orch_db.shutdown_db()
 
 
-async def _events_matching(needle: str) -> list[str]:
-    async with orch_db._session_maker() as s:
-        rows = (await s.execute(select(Event).order_by(Event.id))).scalars().all()
-    return [e.message for e in rows if needle in (e.message or "")]
+def _events_matching(needle: str) -> list[str]:
+    rows = event_store.query(limit=10000)
+    # query returns newest-first; reverse to get chronological order
+    rows.reverse()
+    return [e["message"] for e in rows if needle in (e["message"] or "")]
 
 
 # ─── worker ────────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ async def test_worker_heartbeat_updates_version_silently_when_unchanged(client):
     await _seed_worker("0.3.7")
     r = client.post("/api/workers/heartbeat", json=_worker_heartbeat("0.3.7"))
     assert r.status_code == 200
-    assert await _events_matching("version changed") == []
+    assert _events_matching("version changed") == []
 
 
 async def test_worker_heartbeat_logs_warn_on_version_flap(client):
@@ -66,7 +67,7 @@ async def test_worker_heartbeat_logs_warn_on_version_flap(client):
     worker_id is the orphan signal we want to make visible."""
     await _seed_worker("0.3.7")
     client.post("/api/workers/heartbeat", json=_worker_heartbeat("0.3.3"))
-    flaps = await _events_matching("version changed")
+    flaps = _events_matching("version changed")
     assert len(flaps) == 1
     assert "'0.3.7' → '0.3.3'" in flaps[0]
     # And the DB now reflects the latest reporter (next reporter will also flag
@@ -83,7 +84,7 @@ async def test_worker_heartbeat_empty_version_is_ignored(client):
     await _seed_worker("0.3.7")
     r = client.post("/api/workers/heartbeat", json=_worker_heartbeat(""))
     assert r.status_code == 200
-    assert await _events_matching("version changed") == []
+    assert _events_matching("version changed") == []
     async with orch_db._session_maker() as s:
         w = await s.get(Worker, "w1")
         assert w.version == "0.3.7"  # untouched
@@ -105,7 +106,7 @@ def _receiver_heartbeat(version: str) -> dict:
 async def test_receiver_heartbeat_logs_warn_on_version_flap(client):
     await _seed_receiver("0.3.7")
     client.post("/api/receivers/heartbeat", json=_receiver_heartbeat("0.3.3"))
-    flaps = await _events_matching("version changed")
+    flaps = _events_matching("version changed")
     assert len(flaps) == 1
     assert "'0.3.7' → '0.3.3'" in flaps[0]
 
@@ -114,4 +115,4 @@ async def test_receiver_heartbeat_empty_version_is_ignored(client):
     await _seed_receiver("0.3.7")
     r = client.post("/api/receivers/heartbeat", json=_receiver_heartbeat(""))
     assert r.status_code == 200
-    assert await _events_matching("version changed") == []
+    assert _events_matching("version changed") == []

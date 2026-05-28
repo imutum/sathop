@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.state_machine import ACTIVE_STATES, NON_TERMINAL_STATES
 
-from ..db import Event, Granule
+from .. import event_store
+from ..db import Granule
 
 NON_TERMINAL = set(NON_TERMINAL_STATES)
 ACTIVE = set(ACTIVE_STATES)
@@ -23,16 +24,6 @@ def clamp_limit(limit: int, *, min_value: int = 1, max_value: int = 200) -> int:
 
 def stuck_threshold(now: datetime) -> datetime:
     return now - timedelta(hours=STUCK_AGE_HOURS)
-
-
-def event_summary(event: Event) -> dict[str, Any]:
-    return {
-        "id": event.id,
-        "ts": event.ts.isoformat(),
-        "level": event.level,
-        "source": event.source,
-        "message": event.message,
-    }
 
 
 def granule_activity_row(granule: Granule) -> dict[str, Any]:
@@ -72,12 +63,11 @@ async def admin_overview(s: AsyncSession, *, now: datetime) -> dict[str, Any]:
             )
         ).all()
     }
-    last_events = (await s.execute(select(Event).order_by(Event.id.desc()).limit(10))).scalars().all()
     return {
         "state_counts": state_counts,
         "stuck_over_hours": STUCK_AGE_HOURS,
         "stuck_by_state": stuck,
-        "last_events": [event_summary(e) for e in last_events],
+        "last_events": event_store.last_n(10),
     }
 
 

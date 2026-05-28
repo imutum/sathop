@@ -170,14 +170,15 @@ async def held_granule_sample(s: AsyncSession, worker_id: str, limit: int = 5) -
     return list({*leased, *uploaded})[:limit]
 
 
-async def renew_worker_leases(s: AsyncSession, worker_id: str, now) -> None:
-    await s.execute(
+async def renew_worker_leases(s: AsyncSession, worker_id: str, now) -> int:
+    result = await s.execute(
         update(Granule)
         .where(Granule.leased_by == worker_id)
         .where(Granule.state.in_(LEASED_STATES))
         .where(Granule.lease_expires_at < now + LEASE_DURATION / 2)
         .values(lease_expires_at=now + LEASE_DURATION)
     )
+    return result.rowcount or 0
 
 
 async def revoke_worker_leases(s: AsyncSession, worker_id: str, now) -> int:

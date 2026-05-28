@@ -13,9 +13,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
+from sathop.orchestrator import event_store
 from sathop.orchestrator.db import (
     Batch,
-    Event,
     Granule,
     GranuleObject,
     GranuleProgress,
@@ -70,8 +70,8 @@ async def _seed_full_batch(batch_id: str = "b") -> None:
                 duration_ms=100,
             )
         )
-        s.add(Event(level="info", source="x", granule_id=g1, message="hello"))
         await s.commit()
+    event_store.append(ts=utcnow(), level="info", source="x", granule_id=g1, message="hello")
 
 
 async def _counts() -> dict[str, int]:
@@ -85,9 +85,7 @@ async def _counts() -> dict[str, int]:
             "objects": (await s.execute(select(func.count(GranuleObject.id)))).scalar_one(),
             "progress": (await s.execute(select(func.count(GranuleProgress.id)))).scalar_one(),
             "timings": (await s.execute(select(func.count(GranuleStageTiming.id)))).scalar_one(),
-            "events_with_gid": (
-                await s.execute(select(func.count(Event.id)).where(Event.granule_id.is_not(None)))
-            ).scalar_one(),
+            "events_with_gid": sum(1 for e in event_store.query(limit=10000) if e["granule_id"]),
         }
 
 

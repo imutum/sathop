@@ -48,11 +48,15 @@ sync_deps() {
   uv sync --frozen --extra "$ROLE" --quiet
 }
 
-# ── Helper: frontend (orchestrator, on version mismatch only) ────────
+# ── Helper: frontend (orchestrator, first boot only) ────────────────
+# Subsequent updates are operator-triggered via Settings → "更新并重启".
 fetch_frontend() {
   [ "$ROLE" = "orchestrator" ] || return 0
 
-  STAMP="$REPO_DIR/frontend/dist/.version"
+  if [ -f "$REPO_DIR/frontend/dist/index.html" ]; then
+    return 0
+  fi
+
   VERSION=$("$REPO_DIR/.venv/bin/python" -c "
 import tomllib
 with open('$REPO_DIR/pyproject.toml','rb') as f:
@@ -60,10 +64,6 @@ with open('$REPO_DIR/pyproject.toml','rb') as f:
 " 2>/dev/null || echo "")
 
   [ -n "$VERSION" ] || return 0
-
-  if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$VERSION" ]; then
-    return 0
-  fi
 
   CLEAN_REPO=$(echo "${SATHOP_GIT_REPO:-https://github.com/imutum/sathop.git}" | sed 's|\.git$||')
   FRONTEND_URL="${SATHOP_FRONTEND_URL:-${CLEAN_REPO}/releases/download/v${VERSION}/frontend-dist.tar.gz}"
@@ -73,12 +73,12 @@ with open('$REPO_DIR/pyproject.toml','rb') as f:
     CURL_OPTS+=(-H "Authorization: token ${SATHOP_GIT_TOKEN}")
   fi
 
-  echo "[entrypoint] Downloading frontend v${VERSION} ..."
+  echo "[entrypoint] First boot — downloading frontend v${VERSION} ..."
   if curl "${CURL_OPTS[@]}" "$FRONTEND_URL" | tar -xz -C "$REPO_DIR/frontend/"; then
     echo "$VERSION" > "$REPO_DIR/frontend/dist/.version"
     echo "[entrypoint] Frontend ready."
   else
-    echo "[entrypoint] Frontend download failed — use Web API to retry."
+    echo "[entrypoint] Frontend download failed — use Settings UI to retry."
   fi
 }
 

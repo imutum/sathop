@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.state_machine import Scope
 
-from .db import Event
+from . import event_store
+from .db import utcnow
 
 log = logging.getLogger("sathop.pubsub")
 
@@ -47,13 +48,16 @@ def subscriber_count() -> int:
     return len(_subscribers)
 
 
+_PENDING_EVENTS = "sathop_pending_events"
+
+
 def publish_scopes(s: AsyncSession, *scopes: Scope | None) -> None:
-    """Emit deduplicated SSE nudges, folding in any ``Scope.EVENTS`` that prior
-    ``log_event()`` calls on this session deferred. ``commit_and_publish()``
-    wraps ``s.commit()`` + this; reach for this directly only when something
-    must run between commit and publish (e.g. shared-file delete: commit →
-    unlink blob → publish)."""
-    extra: tuple[Scope, ...] = (Scope.EVENTS,) if s.info.pop(_LOG_EVENT_PENDING, False) else ()
+    pending = s.info.pop(_PENDING_EVENTS, ())
+    if pending:
+        now = utcnow()
+        for e in pending:
+            event_store.append(ts=now, **e)
+    extra: tuple[Scope, ...] = (Scope.EVENTS,) if pending else ()
     for scope in dict.fromkeys(filter(None, (*scopes, *extra))):
         publish({"scope": scope.value})
 
@@ -63,19 +67,20 @@ async def commit_and_publish(s: AsyncSession, *scopes: Scope | None) -> None:
     publish_scopes(s, *scopes)
 
 
-_LOG_EVENT_PENDING = "sathop_log_event_pending"
-
-
 async def log_event(
     s: AsyncSession,
     source: str,
     message: str,
     level: str = "info",
     granule_id: str | None = None,
+    batch_id: str | None = None,
 ) -> None:
-    """Stage an Event row and mark this session for an 'events' SSE nudge —
-    the nudge fires only after the caller commits via ``commit_and_publish``
-    (or ``publish_scopes``), so SSE consumers never see a phantom event that
-    later rolls back."""
-    s.add(Event(source=source, message=message, level=level, granule_id=granule_id))
-    s.info[_LOG_EVENT_PENDING] = True
+    """Stage an event for in-memory persistence after commit.
+
+    Events are buffered on ``s.info`` and flushed by ``publish_scopes`` (called
+    from ``commit_and_publish``) so a rolled-back transaction discards its
+    events — no phantom entries in the event feed."""
+    s.info.setdefault(_PENDING_EVENTS, []).append(
+        dict(source=source, message=message, level=level,
+             granule_id=granule_id, batch_id=batch_id)
+    )
