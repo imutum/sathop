@@ -9,6 +9,7 @@ from sathop.shared.periodic import run_periodic
 from sathop.shared.state_machine import LEASED_STATES, GranuleState, Scope
 
 from .config import settings
+from .api.progress import evict_granule_ids
 from .db import Event, Granule, GranuleObject, GranuleStageTiming, get_session_maker, utcnow
 from .pubsub import commit_and_publish, log_event, publish
 
@@ -49,6 +50,7 @@ async def sweep_expired_leases() -> int:
         actually_reclaimed = getattr(result, "rowcount", 0) or 0
         if actually_reclaimed == 0:
             return 0
+        evict_granule_ids(list(ids))
         await log_event(s, "scheduler", f"reclaimed {actually_reclaimed} expired leases", level="warn")
         await commit_and_publish(s, Scope.BATCHES)
         return actually_reclaimed

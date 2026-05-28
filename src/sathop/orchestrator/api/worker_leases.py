@@ -35,6 +35,7 @@ from sathop.shared.state_machine import (
 from ..config import settings
 from ..db import Batch, Granule, GranuleObject, Worker
 from ._transition import apply_transition
+from .progress import evict_granule
 
 LEASE_DURATION = timedelta(minutes=30)
 
@@ -198,4 +199,5 @@ async def revoke_worker_leases(s: AsyncSession, worker_id: str, now) -> int:
             RevokedByOperator(granule_id=granule.granule_id),
             now=now,
         )
+        evict_granule(granule.granule_id, granule.batch_id)
     return len(rows)

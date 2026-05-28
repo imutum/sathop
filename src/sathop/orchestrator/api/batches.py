@@ -44,6 +44,7 @@ from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import get_or_404, object_is_exhausted
 from ._transition import apply_transition
+from .progress import evict_granule
 from .batch_readmodels import (
     granule_rows,
     state_counts,
@@ -286,6 +287,7 @@ async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depen
         now=utcnow(),
         conflict_message=lambda g, _e: f"cannot cancel granule in state {g.state!r}",
     )
+    evict_granule(granule_id, batch_id)
     await log(s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id)
     await commit_and_publish(s, Scope.BATCHES)
     return {"ok": True, "state": g.state}
@@ -330,6 +332,7 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
             now=now,
             on_conflict="skip",
         )
+        evict_granule(g.granule_id, batch_id)
     if rows:
         await log(s, "admin", f"cancelled batch {batch_id}: {len(rows)} granules blacklisted", level="warn")
     await commit_and_publish(s, Scope.BATCHES if rows else None)

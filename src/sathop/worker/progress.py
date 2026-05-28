@@ -28,23 +28,20 @@ class ProgressServer:
         self._client = client
         self._port = port
         self._host = host
-        self._tokens: dict[str, str] = {}  # nonce → granule_id
+        self._tokens: dict[str, tuple[str, str]] = {}  # nonce → (granule_id, batch_id)
         self.base_url = f"http://{host}:{port}"
         self.app = FastAPI()
 
-        # /health is unauthenticated by design — bound to 127.0.0.1 only, used
-        # by docker healthcheck (curl from inside the container) and operators
-        # poking the worker locally. No DB call, no I/O — must stay cheap so a
-        # 1s healthcheck interval can't pile up backlog.
         @self.app.get("/health")
         async def health() -> dict:
             return {"status": "ok"}
 
         @self.app.post("/progress/{nonce}")
         async def progress(nonce: str, req: Request) -> dict:
-            gid = self._tokens.get(nonce)
-            if gid is None:
+            ids = self._tokens.get(nonce)
+            if ids is None:
                 raise HTTPException(404, "unknown or expired progress token")
+            gid, batch_id = ids
             try:
                 body = await req.json()
             except Exception as e:
@@ -53,16 +50,16 @@ class ProgressServer:
                 event = ProgressEvent.model_validate(body)
             except Exception as e:
                 raise HTTPException(422, f"bad event shape: {e}")
+            event.batch_id = batch_id
             try:
                 await self._client.report_progress(gid, event)
             except Exception as e:
-                # Upstream failure is not the bundle's problem.
                 log.warning("forward progress for %s failed: %s", gid, e)
             return {"ok": True}
 
-    def issue(self, granule_id: str) -> tuple[str, str]:
+    def issue(self, granule_id: str, batch_id: str) -> tuple[str, str]:
         nonce = secrets.token_urlsafe(16)
-        self._tokens[nonce] = granule_id
+        self._tokens[nonce] = (granule_id, batch_id)
         return nonce, f"{self.base_url}/progress/{nonce}"
 
     def revoke(self, nonce: str) -> None:

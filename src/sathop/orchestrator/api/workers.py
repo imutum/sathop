@@ -35,6 +35,7 @@ from ..pubsub import log_event as log
 from ._helpers import get_or_404
 from ._transition import apply_transition
 from .one_shot import consume_one_shot_signal, record_version_flap, signal_one_shot
+from .progress import evict_granule
 from .worker_heartbeat import (
     apply_worker_heartbeat,
     revoked_active_granules,
@@ -179,6 +180,7 @@ async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) ->
         raise HTTPException(409, "granule not leased by this worker")
     result = await apply_transition(s, g, event, now=utcnow())
     if isinstance(event, UploadCompleted):
+        evict_granule(g.granule_id, g.batch_id)
         await log(
             s,
             event.worker_id,
@@ -186,6 +188,7 @@ async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) ->
             granule_id=g.granule_id,
         )
     elif isinstance(event, ProcessingFailed):
+        evict_granule(g.granule_id, g.batch_id)
         await log(
             s,
             event.worker_id,

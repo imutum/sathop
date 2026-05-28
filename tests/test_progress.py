@@ -1,15 +1,21 @@
-"""Granule progress ingress + timeline query on the orchestrator side."""
+"""Granule progress ingress + timeline query — in-memory store."""
 
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.db import Batch, Granule, GranuleProgress
+from sathop.orchestrator.api.progress import _clear as clear_progress, evict_granule
+from sathop.orchestrator.db import Batch, Granule
 from sathop.orchestrator.main import app
 from sathop.shared.protocol import GranuleState
+
+
+@pytest.fixture(autouse=True)
+def _isolate_progress():
+    yield
+    clear_progress()
 
 
 @pytest.fixture
@@ -39,40 +45,35 @@ async def _seed_batch_and_granule(batch_id: str, granule_id: str) -> None:
         await s.commit()
 
 
-async def test_ingress_persists_row_and_backfills_batch_id(client):
+async def test_ingress_stores_in_memory(client):
     await _seed_batch_and_granule("b1", "g1")
     r = client.post(
         "/api/granules/g1/progress",
-        json={"step": "read", "pct": 20, "detail": "loading hdf"},
+        json={"step": "read", "pct": 20, "detail": "loading hdf", "batch_id": "b1"},
     )
     assert r.status_code == 200
 
-    async with orch_db._session_maker() as s:
-        rows = (await s.execute(select(GranuleProgress))).scalars().all()
-        assert len(rows) == 1
-        assert rows[0].granule_id == "g1"
-        assert rows[0].batch_id == "b1"  # denormalized
-        assert rows[0].step == "read"
-        assert rows[0].pct == 20
-        assert rows[0].detail == "loading hdf"
+    r = client.get("/api/granules/g1/progress")
+    rows = r.json()
+    assert len(rows) == 1
+    assert rows[0]["granule_id"] == "g1"
+    assert rows[0]["batch_id"] == "b1"
+    assert rows[0]["step"] == "read"
+    assert rows[0]["pct"] == 20
+    assert rows[0]["detail"] == "loading hdf"
 
 
-async def test_ingress_unknown_granule_returns_404(client):
-    r = client.post("/api/granules/nope/progress", json={"step": "read"})
-    assert r.status_code == 404
-
-
-async def test_ingress_rejects_malformed_body(client):
-    await _seed_batch_and_granule("b1", "g1")
-    # missing required "step"
-    r = client.post("/api/granules/g1/progress", json={"pct": 10})
-    assert r.status_code == 422
+async def test_ingress_without_batch_id_still_works(client):
+    r = client.post("/api/granules/g1/progress", json={"step": "read"})
+    assert r.status_code == 200
+    rows = client.get("/api/granules/g1/progress").json()
+    assert len(rows) == 1
+    assert rows[0]["batch_id"] == ""
 
 
 async def test_timeline_returns_rows_in_insertion_order(client):
-    await _seed_batch_and_granule("b1", "g1")
     for step, pct in [("a", 10), ("b", 50), ("c", 90)]:
-        client.post("/api/granules/g1/progress", json={"step": step, "pct": pct})
+        client.post("/api/granules/g1/progress", json={"step": step, "pct": pct, "batch_id": "b1"})
 
     r = client.get("/api/granules/g1/progress")
     assert r.status_code == 200
@@ -82,24 +83,10 @@ async def test_timeline_returns_rows_in_insertion_order(client):
 
 
 async def test_batch_latest_returns_last_row_per_granule(client):
-    async with orch_db._session_maker() as s:
-        s.add(Batch(batch_id="b1", name="t", bundle_ref="local:x"))
-        for gid in ("g1", "g2"):
-            s.add(
-                Granule(
-                    granule_id=gid,
-                    batch_id="b1",
-                    state=GranuleState.PROCESSING.value,
-                    inputs=[],
-                )
-            )
-        await s.commit()
-
-    # g1: 3 steps, g2: 1 step
-    client.post("/api/granules/g1/progress", json={"step": "a"})
-    client.post("/api/granules/g1/progress", json={"step": "b"})
-    client.post("/api/granules/g1/progress", json={"step": "c"})
-    client.post("/api/granules/g2/progress", json={"step": "x"})
+    client.post("/api/granules/g1/progress", json={"step": "a", "batch_id": "b1"})
+    client.post("/api/granules/g1/progress", json={"step": "b", "batch_id": "b1"})
+    client.post("/api/granules/g1/progress", json={"step": "c", "batch_id": "b1"})
+    client.post("/api/granules/g2/progress", json={"step": "x", "batch_id": "b1"})
 
     r = client.get("/api/batches/b1/progress/latest")
     assert r.status_code == 200
@@ -109,6 +96,15 @@ async def test_batch_latest_returns_last_row_per_granule(client):
     assert latest["g2"]["step"] == "x"
 
 
-async def test_batch_latest_unknown_batch_404(client):
+async def test_batch_latest_unknown_batch_returns_empty(client):
     r = client.get("/api/batches/nope/progress/latest")
-    assert r.status_code == 404
+    assert r.status_code == 200
+    assert r.json() == {}
+
+
+async def test_evict_clears_progress(client):
+    client.post("/api/granules/g1/progress", json={"step": "a", "batch_id": "b1"})
+    assert len(client.get("/api/granules/g1/progress").json()) == 1
+    evict_granule("g1", "b1")
+    assert len(client.get("/api/granules/g1/progress").json()) == 0
+    assert client.get("/api/batches/b1/progress/latest").json() == {}

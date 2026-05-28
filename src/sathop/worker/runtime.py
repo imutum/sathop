@@ -295,7 +295,7 @@ class Worker:
         work_dir.mkdir(parents=True, exist_ok=True)
         input_dir = work_dir / "input"
         input_dir.mkdir()
-        nonce, progress_url = self.progress.issue(gid)
+        nonce, progress_url = self.progress.issue(gid, item.batch_id)
 
         stage = self.stages.tracker()
         try:
@@ -328,7 +328,7 @@ class Worker:
             for spec in item.inputs:
                 dst = safe_join(input_dir, spec.filename)
                 auth = auth_for(item.credentials, spec.credential, gid, log)
-                cb = self._make_download_progress_cb(gid, spec.filename)
+                cb = self._make_download_progress_cb(gid, item.batch_id, spec.filename)
                 await self.downloader.fetch(spec.url, dst, auth=auth, progress_cb=cb)
                 if spec.checksum:
                     await downloader.verify_sha256(dst, spec.checksum)
@@ -421,7 +421,7 @@ class Worker:
         except Exception as e:
             log.warning("[%s] emit %s failed: %s", event.granule_id, event.kind, e)
 
-    def _make_download_progress_cb(self, gid: str, filename: str) -> downloader.ProgressCb:
+    def _make_download_progress_cb(self, gid: str, batch_id: str, filename: str) -> downloader.ProgressCb:
         last_pct = -1.0
         last_ts = 0.0
         done = False
@@ -448,6 +448,7 @@ class Worker:
                         step=f"download:{filename}",
                         pct=pct,
                         detail=downloader.progress_detail(downloaded, total),
+                        batch_id=batch_id,
                     ),
                 )
             except Exception as e:

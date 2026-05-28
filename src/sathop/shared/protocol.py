@@ -321,3 +321,4 @@ class ProgressEvent(BaseModel):
     pct: float | None = None
     detail: str | None = None
     ts: datetime | None = None
+    batch_id: str | None = None

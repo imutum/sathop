@@ -1,84 +1,83 @@
-"""Granule progress timeline: worker → orchestrator ingress + UI queries."""
+"""Granule progress: in-memory store with SSE push.
+
+Progress checkpoints are ephemeral telemetry — useful for ~5 seconds while a
+download or processing step is active, then superseded by stage-timing rows.
+Storing them in SQLite was the original design; this revision keeps them purely
+in RAM to eliminate ~50% of all orchestrator DB writes under load.
+
+Trade-off: progress history does not survive orchestrator restart. Workers
+re-report on their next callback, so the UI recovers within seconds.
+"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Depends
 
 from sathop.shared.protocol import ProgressEvent
 
 from ..config import require_token
-from ..db import Batch, Granule, GranuleProgress, session, utcnow
+from ..db import utcnow
 from ..pubsub import publish
-from ._helpers import get_or_404
 
 router = APIRouter(tags=["progress"], dependencies=[Depends(require_token)])
 
+_MAX_ENTRIES_PER_GRANULE = 200
+_by_granule: dict[str, list[dict]] = {}
+_latest_by_batch: dict[str, dict[str, dict]] = {}
+
+
+def _make_entry(granule_id: str, batch_id: str, event: ProgressEvent) -> dict:
+    return {
+        "granule_id": granule_id,
+        "batch_id": batch_id,
+        "ts": (event.ts or utcnow()).isoformat(),
+        "step": event.step,
+        "pct": event.pct,
+        "detail": event.detail,
+    }
+
+
+def evict_granule(granule_id: str, batch_id: str) -> None:
+    _by_granule.pop(granule_id, None)
+    batch_map = _latest_by_batch.get(batch_id)
+    if batch_map is not None:
+        batch_map.pop(granule_id, None)
+        if not batch_map:
+            del _latest_by_batch[batch_id]
+
+
+def evict_granule_ids(granule_ids: list[str]) -> None:
+    for gid in granule_ids:
+        entries = _by_granule.get(gid)
+        evict_granule(gid, entries[0].get("batch_id", "") if entries else "")
+
+
+def _clear() -> None:
+    _by_granule.clear()
+    _latest_by_batch.clear()
+
 
 @router.post("/granules/{granule_id}/progress")
-async def ingress(granule_id: str, event: ProgressEvent, s: AsyncSession = Depends(session)) -> dict:
-    g = await get_or_404(s, Granule, granule_id, "granule not found")
-    s.add(
-        GranuleProgress(
-            granule_id=granule_id,
-            batch_id=g.batch_id,
-            ts=event.ts or utcnow(),
-            step=event.step,
-            pct=event.pct,
-            detail=event.detail,
-        )
-    )
-    await s.commit()
-    publish({"scope": "progress", "granule_id": granule_id, "batch_id": g.batch_id})
+async def ingress(granule_id: str, event: ProgressEvent) -> dict:
+    batch_id = event.batch_id or ""
+    entry = _make_entry(granule_id, batch_id, event)
+    timeline = _by_granule.setdefault(granule_id, [])
+    if len(timeline) < _MAX_ENTRIES_PER_GRANULE:
+        timeline.append(entry)
+    else:
+        timeline[-1] = entry
+    if batch_id:
+        _latest_by_batch.setdefault(batch_id, {})[granule_id] = entry
+    publish({"scope": "progress", "granule_id": granule_id, "batch_id": batch_id})
     return {"ok": True}
 
 
 @router.get("/granules/{granule_id}/progress")
-async def granule_timeline(
-    granule_id: str,
-    limit: int = Query(default=200, ge=1, le=2000),
-    s: AsyncSession = Depends(session),
-) -> list[dict]:
-    rows = (
-        (
-            await s.execute(
-                select(GranuleProgress)
-                .where(GranuleProgress.granule_id == granule_id)
-                .order_by(GranuleProgress.id.asc())
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return [_row(r) for r in rows]
+async def granule_timeline(granule_id: str) -> list[dict]:
+    return list(_by_granule.get(granule_id, []))
 
 
 @router.get("/batches/{batch_id}/progress/latest")
-async def batch_latest(batch_id: str, s: AsyncSession = Depends(session)) -> dict[str, dict]:
-    """Latest checkpoint per granule in this batch — powers the batch-level
-    "每个数据粒最近在做什么" view without pulling every row."""
-    await get_or_404(s, Batch, batch_id, "batch not found")
-    sub = (
-        select(func.max(GranuleProgress.id).label("mid"))
-        .where(GranuleProgress.batch_id == batch_id)
-        .group_by(GranuleProgress.granule_id)
-        .subquery()
-    )
-    rows = (
-        (await s.execute(select(GranuleProgress).join(sub, GranuleProgress.id == sub.c.mid))).scalars().all()
-    )
-    return {r.granule_id: _row(r) for r in rows}
-
-
-def _row(r: GranuleProgress) -> dict:
-    return {
-        "id": r.id,
-        "granule_id": r.granule_id,
-        "batch_id": r.batch_id,
-        "ts": r.ts.isoformat(),
-        "step": r.step,
-        "pct": r.pct,
-        "detail": r.detail,
-    }
+async def batch_latest(batch_id: str) -> dict[str, dict]:
+    batch_map = _latest_by_batch.get(batch_id)
+    return dict(batch_map) if batch_map else {}

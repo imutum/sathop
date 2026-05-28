@@ -27,7 +27,7 @@ def _server(client=None) -> tuple[ProgressServer, TestClient]:
 
 def test_valid_nonce_forwards_event():
     srv, tc = _server()
-    _, url = srv.issue("g-abc")
+    _, url = srv.issue("g-abc", "b1")
     nonce = url.rsplit("/", 1)[-1]
 
     r = tc.post(f"/progress/{nonce}", json={"step": "read", "pct": 20})
@@ -48,7 +48,7 @@ def test_unknown_nonce_returns_404():
 
 def test_revoked_nonce_returns_404():
     srv, tc = _server()
-    nonce, url = srv.issue("g-abc")
+    nonce, url = srv.issue("g-abc", "b1")
     srv.revoke(nonce)
     r = tc.post(f"/progress/{nonce}", json={"step": "read"})
     assert r.status_code == 404
@@ -56,7 +56,7 @@ def test_revoked_nonce_returns_404():
 
 def test_bad_json_returns_400():
     srv, tc = _server()
-    _, url = srv.issue("g-abc")
+    _, url = srv.issue("g-abc", "b1")
     nonce = url.rsplit("/", 1)[-1]
     r = tc.post(
         f"/progress/{nonce}",
@@ -68,7 +68,7 @@ def test_bad_json_returns_400():
 
 def test_missing_step_returns_422():
     srv, tc = _server()
-    _, url = srv.issue("g-abc")
+    _, url = srv.issue("g-abc", "b1")
     nonce = url.rsplit("/", 1)[-1]
     r = tc.post(f"/progress/{nonce}", json={"pct": 10})
     assert r.status_code == 422
@@ -78,7 +78,7 @@ def test_upstream_failure_still_returns_200():
     """Bundle's progress report must NOT fail because orchestrator is briefly down —
     that would corrupt the bundle's own error handling."""
     srv, tc = _server(client=_FakeClient(fail=True))
-    _, url = srv.issue("g-abc")
+    _, url = srv.issue("g-abc", "b1")
     nonce = url.rsplit("/", 1)[-1]
     r = tc.post(f"/progress/{nonce}", json={"step": "read"})
     assert r.status_code == 200
@@ -86,8 +86,8 @@ def test_upstream_failure_still_returns_200():
 
 def test_multiple_granules_get_distinct_nonces():
     srv, _ = _server()
-    n1, _ = srv.issue("g1")
-    n2, _ = srv.issue("g2")
+    n1, _ = srv.issue("g1", "b1")
+    n2, _ = srv.issue("g2", "b1")
     assert n1 != n2
-    assert srv._tokens[n1] == "g1"
-    assert srv._tokens[n2] == "g2"
+    assert srv._tokens[n1] == ("g1", "b1")
+    assert srv._tokens[n2] == ("g2", "b1")
