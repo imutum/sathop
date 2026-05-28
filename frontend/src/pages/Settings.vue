@@ -1,18 +1,44 @@
 <script setup lang="ts">
-import { useQuery } from "@tanstack/vue-query";
+import { useQuery, useMutation } from "@tanstack/vue-query";
 import { API } from "@/api";
 import { K } from "@/queryKeys";
+import { requestConfirm } from "@/composables/useConfirm";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import CardSection from "@/components/CardSection.vue";
 import Field from "@/components/Field.vue";
 import PageHeader from "@/components/PageHeader.vue";
 
 const info = useQuery({ queryKey: [...K.orchInfo], queryFn: API.orchestratorInfo });
+
+const restart = useMutation({ mutationFn: API.restartOrchestrator });
+
+async function confirmRestart() {
+  const ok = await requestConfirm({
+    title: "更新并重启 Orchestrator？",
+    description: "将拉取最新代码并重启 Orchestrator 进程。期间服务短暂不可用（约 3-5 秒）。",
+    confirmText: "确认重启",
+    tone: "danger",
+  });
+  if (ok) restart.mutate();
+}
 </script>
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="设置" description="Orchestrator 当前运行时配置（只读）" />
+    <PageHeader title="设置" description="Orchestrator 当前运行时配置（只读）">
+      <template #actions>
+        <Button
+          variant="outline"
+          size="sm"
+          :pending="restart.isPending.value"
+          pending-label="重启中…"
+          @click="confirmRestart"
+        >
+          更新并重启
+        </Button>
+      </template>
+    </PageHeader>
 
     <Alert v-if="info.data.value?.auth_open" variant="warning">
       <AlertDescription>

@@ -61,6 +61,7 @@ const adminApi = {
   inFlight: (limit = 50) => getJson<InFlightRow[]>(`/api/admin/in-flight?limit=${limit}`),
   stuck: (limit = 50) => getJson<StuckGranule[]>(`/api/admin/stuck?limit=${limit}`),
   orchestratorInfo: () => getJson<OrchestratorInfo>("/api/admin/settings/info"),
+  restartOrchestrator: () => postJson<{ ok: boolean }>("/api/admin/restart"),
 };
 
 const nodeApi = {

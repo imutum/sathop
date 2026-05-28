@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import platform
+import signal
 import sys
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -169,6 +171,19 @@ async def _gc_apply(s: AsyncSession, candidates: list[Bundle]) -> dict[str, Any]
             unlinked.append(sha)
 
     return {"deleted": deleted_meta, "freed_bytes": freed, "unlinked_blobs": len(unlinked)}
+
+
+@router.post("/restart")
+async def restart_orchestrator(s: AsyncSession = Depends(session)) -> dict:
+    """Self-restart: log, respond, then SIGTERM self. The entrypoint supervisor
+    loop catches the exit, does git pull, and restarts with new code."""
+    await log(s, "orchestrator", "restart requested via UI")
+    await commit_and_publish(s, Scope.EVENTS)
+
+    import asyncio
+
+    asyncio.get_event_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    return {"ok": True}
 
 
 @router.get("/settings/info", response_model=OrchestratorInfo)
