@@ -306,6 +306,13 @@ async function confirmDelete() {
       </div>
     </Card>
 
+    <BatchTimingCard
+      :batch-id="batchId"
+      :remaining="inflightCount"
+      :eta-seconds="b?.eta_seconds ?? null"
+      :eta-realtime="b?.eta_realtime ?? null"
+    />
+
     <CardSection
       title="数据粒"
       description="按状态筛选 · 点击行展开阶段计时 / 进度时间线 / 该粒事件"
@@ -343,13 +350,6 @@ async function confirmDelete() {
         </div>
       </div>
     </CardSection>
-
-    <BatchTimingCard
-      :batch-id="batchId"
-      :remaining="inflightCount"
-      :eta-seconds="b?.eta_seconds ?? null"
-      :eta-realtime="b?.eta_realtime ?? null"
-    />
 
     <CardSection
       title="日志"
