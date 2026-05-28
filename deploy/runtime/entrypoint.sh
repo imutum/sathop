@@ -63,20 +63,39 @@ with open('pyproject.toml','rb') as f:
     return 0
   fi
 
+  # Cooldown: skip if last attempt was <10 min ago (avoid rate-limit loop)
+  FAIL_STAMP="/tmp/.sathop-frontend-fail"
+  if [ -f "$FAIL_STAMP" ]; then
+    LAST_FAIL=$(cat "$FAIL_STAMP")
+    NOW=$(date +%s)
+    if [ $((NOW - LAST_FAIL)) -lt 600 ]; then
+      echo "[entrypoint] Frontend download on cooldown — skipping."
+      return 0
+    fi
+  fi
+
   FRONTEND_URL="${SATHOP_FRONTEND_URL:-}"
   if [ -z "$FRONTEND_URL" ] && [ -n "$VERSION" ]; then
     CLEAN_REPO=$(echo "${SATHOP_GIT_REPO:-https://github.com/imutum/sathop.git}" | sed 's|\.git$||')
     FRONTEND_URL="${CLEAN_REPO}/releases/download/v${VERSION}/frontend-dist.tar.gz"
   fi
 
+  # Use git token for authenticated GitHub API access (5000 req/h vs 60)
+  CURL_OPTS=(-fsSL)
+  if [ -n "${SATHOP_GIT_TOKEN:-}" ] && echo "$FRONTEND_URL" | grep -q "github.com"; then
+    CURL_OPTS+=(-H "Authorization: token ${SATHOP_GIT_TOKEN}")
+  fi
+
   if [ -n "$FRONTEND_URL" ]; then
     echo "[entrypoint] Downloading frontend v${VERSION} ..."
     rm -rf "$REPO_DIR/frontend/dist"
-    if curl -fsSL "$FRONTEND_URL" | tar -xz -C "$REPO_DIR/frontend/"; then
+    if curl "${CURL_OPTS[@]}" "$FRONTEND_URL" | tar -xz -C "$REPO_DIR/frontend/"; then
       echo "$VERSION" > "$STAMP"
+      rm -f "$FAIL_STAMP"
       echo "[entrypoint] Frontend ready."
     else
-      echo "[entrypoint] Frontend download failed — running without Web UI."
+      date +%s > "$FAIL_STAMP"
+      echo "[entrypoint] Frontend download failed — running without Web UI (retry in 10 min)."
     fi
   else
     echo "[entrypoint] No frontend dist — running without Web UI."
