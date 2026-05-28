@@ -22,7 +22,6 @@ export const K = {
   bundleFile: ["bundle-file"],
   sharedFiles: ["shared-files"],
   orchInfo: ["orch-info"],
-  orchestratorInfo: ["orchestrator-info"],
   githubRelease: ["github-latest-release"],
 } as const;
 

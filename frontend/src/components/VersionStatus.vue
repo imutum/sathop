@@ -33,7 +33,7 @@ function compareSemver(a: string, b: string): number {
 }
 
 const info = useQuery({
-  queryKey: [...K.orchestratorInfo],
+  queryKey: [...K.orchInfo],
   queryFn: API.orchestratorInfo,
   staleTime: 60 * 60 * 1000,
 });
