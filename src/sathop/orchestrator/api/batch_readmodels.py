@@ -14,7 +14,7 @@ Two layers of public entry:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -138,9 +138,7 @@ async def eta_realtime(
     if not counts_map:
         return {}
     batch_ids = list(counts_map)
-    from datetime import timedelta
-
-    cutoff_start = datetime.now(timezone.utc) - timedelta(seconds=window_sec)
+    cutoff_start = datetime.now(UTC) - timedelta(seconds=window_sec)
 
     rows = (
         await s.execute(

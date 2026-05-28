@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
@@ -354,11 +354,12 @@ async def forget_worker(
         )
     if force:
         await revoke_worker_leases(s, worker_id, utcnow())
+        now = utcnow()
         await s.execute(
-            GranuleObject.__table__.update()
+            update(GranuleObject)
             .where(GranuleObject.worker_id == worker_id)
             .where(GranuleObject.deleted_at.is_(None))
-            .values(deleted_at=utcnow())
+            .values(deleted_at=now)
         )
     await s.delete(w)
     await log(s, worker_id, f"worker forgotten (row deleted, force={force})")
