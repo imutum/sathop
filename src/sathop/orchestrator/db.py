@@ -274,10 +274,13 @@ async def init_db() -> None:
 
 
 def _ensure_columns(sync_conn) -> None:
-    """Add any columns declared on the model but missing on the live table.
-    Only handles additive (new nullable) columns — drops and type changes need
-    a real migration tool. Existing rows get NULL for the new column; reading
-    code should treat NULL as the model default."""
+    """Reconcile each model table with the live schema: ADD columns the model
+    declares but the table lacks, and DROP columns the table still has but the
+    model removed. The drop half matters because a leftover NOT NULL column
+    (e.g. ``workers.enabled``, dropped in the lifecycle redesign) makes every
+    INSERT that omits it fail — new workers could no longer register. Type
+    changes still need a real migration tool; added columns are nullable, so
+    reading code should treat NULL as the model default."""
     from sqlalchemy import inspect as sa_inspect
     from sqlalchemy import text
 
@@ -287,6 +290,7 @@ def _ensure_columns(sync_conn) -> None:
         if table_name not in insp.get_table_names():
             continue
         existing = {c["name"] for c in insp.get_columns(table_name)}
+        model_cols = {c.name for c in table.columns}
         for col in table.columns:
             if col.name in existing:
                 continue
@@ -303,6 +307,15 @@ def _ensure_columns(sync_conn) -> None:
                 raise RuntimeError(
                     f"failed to add column {col.name!r} ({col_type}) to table {table_name!r}: {e}"
                 ) from e
+        for name in existing - model_cols:
+            try:
+                sync_conn.execute(text(f'ALTER TABLE "{table_name}" DROP COLUMN "{name}"'))
+                log.info("dropped obsolete column %s.%s", table_name, name)
+            except Exception:
+                # A leftover NOT NULL column still blocks inserts, but a failed
+                # drop shouldn't crash-loop the orchestrator — surface it so the
+                # operator can drop it by hand.
+                log.exception("failed to drop obsolete column %s.%s", table_name, name)
 
 
 async def shutdown_db() -> None:
