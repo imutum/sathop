@@ -48,16 +48,20 @@ sync_deps() {
   uv sync --frozen --extra "$ROLE" --quiet
 }
 
-# ── Helper: frontend (orchestrator only, first time) ─────────────────
+# ── Helper: frontend (orchestrator only) ─────────────────────────────
 fetch_frontend() {
   [ "$ROLE" = "orchestrator" ] || return 0
-  [ ! -d "$REPO_DIR/frontend/dist" ] || return 0
 
   VERSION=$(python -c "
 import tomllib
 with open('pyproject.toml','rb') as f:
     print(tomllib.load(f)['project']['version'])
 " 2>/dev/null || echo "")
+
+  STAMP="$REPO_DIR/frontend/dist/.version"
+  if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$VERSION" ]; then
+    return 0
+  fi
 
   FRONTEND_URL="${SATHOP_FRONTEND_URL:-}"
   if [ -z "$FRONTEND_URL" ] && [ -n "$VERSION" ]; then
@@ -66,8 +70,10 @@ with open('pyproject.toml','rb') as f:
   fi
 
   if [ -n "$FRONTEND_URL" ]; then
-    echo "[entrypoint] Downloading frontend from release ..."
+    echo "[entrypoint] Downloading frontend v${VERSION} ..."
+    rm -rf "$REPO_DIR/frontend/dist"
     if curl -fsSL "$FRONTEND_URL" | tar -xz -C "$REPO_DIR/frontend/"; then
+      echo "$VERSION" > "$STAMP"
       echo "[entrypoint] Frontend ready."
     else
       echo "[entrypoint] Frontend download failed — running without Web UI."
