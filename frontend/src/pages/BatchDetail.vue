@@ -61,7 +61,7 @@ const { cancel, retry, retryAll, cancelAll, resetExhausted, deleteBatch } =
 const highlight = computed(() => (route.query.granule as string | undefined) ?? null);
 
 const filter = ref<GranuleState | "all">("all");
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 10;
 const page = ref(0);
 const logLevel = ref<"all" | "warn" | "error">("all");
 const expanded = ref<string | null>(null);
