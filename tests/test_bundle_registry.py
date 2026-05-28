@@ -23,6 +23,7 @@ async def client(tmp_path, patch_settings):
         db_path=tmp_path / "test.db",
         token="",
         bundle_storage=tmp_path / "bundles",
+        shared_storage=tmp_path / "shared",
     )
     await orch_db.init_db()
     try:
