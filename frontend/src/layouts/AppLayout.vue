@@ -6,10 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Icon, type IconName } from "@/components/Icon";
 import HintTip from "@/components/HintTip.vue";
-import VersionStatus from "@/components/VersionStatus.vue";
+import SidebarContent from "@/layouts/SidebarContent.vue";
 import { useTheme } from "@/composables/useTheme";
 import { useLiveStream } from "@/composables/useLiveStream";
-import { logout } from "@/composables/useAuthGate";
 
 const { connected } = useLiveStream();
 const route = useRoute();
@@ -31,8 +30,6 @@ const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === "1");
 watch(collapsed, (v) => localStorage.setItem(COLLAPSE_KEY, v ? "1" : "0"));
 
 const mobileOpen = ref(false);
-// Close the mobile drawer whenever the route changes (link clicks, browser
-// back/forward, programmatic navigations all share this signal).
 watch(() => route.fullPath, () => {
   mobileOpen.value = false;
 });
@@ -56,75 +53,7 @@ const isDark = computed(() => effective.value === "dark");
       ]"
       aria-label="主导航"
     >
-      <div class="flex h-16 items-center gap-3 border-b border-border px-4">
-        <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-background text-foreground shadow-soft">
-          <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3" />
-            <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
-          </svg>
-        </div>
-        <div v-if="!collapsed" class="min-w-0">
-          <div class="text-[15px] font-semibold leading-none">SatHop</div>
-          <div class="mt-1 text-mini uppercase tracking-brand text-muted-foreground">控制面板</div>
-        </div>
-      </div>
-
-      <nav class="flex-1 overflow-y-auto px-3 py-3">
-        <ul class="space-y-0.5">
-          <li v-for="n in NAV" :key="n.to">
-            <RouterLink
-              v-slot="{ isActive, isExactActive, navigate, href }"
-              :to="n.to"
-              custom
-            >
-              <a
-                :href="href"
-                @click="navigate"
-                :title="collapsed ? n.label : undefined"
-                :class="[
-                  'group relative flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors outline-none',
-                  (n.end ? isExactActive : isActive)
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                  collapsed ? 'justify-center' : '',
-                ]"
-              >
-                <span
-                  :class="[
-                    'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full transition-colors',
-                    (n.end ? isExactActive : isActive) ? 'bg-foreground' : 'bg-transparent',
-                  ]"
-                  aria-hidden
-                />
-                <Icon
-                  :name="n.icon"
-                  :class="[
-                    'shrink-0 transition-colors',
-                    (n.end ? isExactActive : isActive) ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground',
-                  ]"
-                />
-                <span v-if="!collapsed" class="truncate">{{ n.label }}</span>
-              </a>
-            </RouterLink>
-          </li>
-        </ul>
-      </nav>
-
-      <div class="space-y-1 border-t border-border p-3">
-        <VersionStatus :collapsed="collapsed" />
-        <button
-          type="button"
-          @click="logout"
-          :title="collapsed ? '退出登录' : undefined"
-          :class="[
-            'flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-            collapsed ? 'justify-center' : '',
-          ]"
-        >
-          <Icon name="logout" class="shrink-0" />
-          <span v-if="!collapsed">退出登录</span>
-        </button>
-      </div>
+      <SidebarContent :nav="NAV" :collapsed="collapsed" />
 
       <button
         type="button"
@@ -139,54 +68,7 @@ const isDark = computed(() => effective.value === "dark");
 
     <Sheet v-model:open="mobileOpen">
       <SheetContent side="left" class="w-72 max-w-[80vw] gap-0 p-0">
-        <div class="flex h-16 items-center gap-3 border-b border-border px-4">
-          <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border bg-background text-foreground shadow-soft">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3" />
-              <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
-            </svg>
-          </div>
-          <div class="min-w-0">
-            <div class="text-[15px] font-semibold leading-none">SatHop</div>
-            <div class="mt-1 text-mini uppercase tracking-brand text-muted-foreground">控制面板</div>
-          </div>
-        </div>
-        <nav class="flex-1 overflow-y-auto px-3 py-3">
-          <ul class="space-y-0.5">
-            <li v-for="n in NAV" :key="n.to">
-              <RouterLink
-                v-slot="{ isActive, isExactActive, navigate, href }"
-                :to="n.to"
-                custom
-              >
-                <a
-                  :href="href"
-                  @click="navigate"
-                  :class="[
-                    'flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors outline-none',
-                    (n.end ? isExactActive : isActive)
-                      ? 'bg-muted text-foreground'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                  ]"
-                >
-                  <Icon :name="n.icon" class="shrink-0" />
-                  <span class="truncate">{{ n.label }}</span>
-                </a>
-              </RouterLink>
-            </li>
-          </ul>
-        </nav>
-        <div class="space-y-1 border-t border-border p-3">
-          <VersionStatus />
-          <button
-            type="button"
-            @click="logout"
-            class="flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <Icon name="logout" class="shrink-0" />
-            <span>退出登录</span>
-          </button>
-        </div>
+        <SidebarContent :nav="NAV" />
       </SheetContent>
     </Sheet>
 
@@ -246,9 +128,17 @@ const isDark = computed(() => effective.value === "dark");
 
       <main id="main-content" class="flex-1 overflow-auto">
         <div class="mx-auto w-full max-w-[1480px] px-4 py-5 md:px-6 md:py-6 lg:px-8 lg:py-8">
-          <div class="animate-fade-in">
-            <RouterView />
-          </div>
+          <RouterView v-slot="{ Component }">
+            <Transition
+              mode="out-in"
+              enter-active-class="transition-opacity duration-150"
+              leave-active-class="transition-opacity duration-100"
+              enter-from-class="opacity-0"
+              leave-to-class="opacity-0"
+            >
+              <component :is="Component" :key="$route.path" />
+            </Transition>
+          </RouterView>
         </div>
       </main>
     </div>
