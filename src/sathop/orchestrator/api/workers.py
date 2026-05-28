@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -332,22 +332,35 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
 
 
 @router.delete("/{worker_id}")
-async def forget_worker(worker_id: str, s: AsyncSession = Depends(session)) -> dict:
+async def forget_worker(
+    worker_id: str,
+    force: bool = Query(default=False),
+    s: AsyncSession = Depends(session),
+) -> dict:
     """Permanently remove a decommissioned worker row. Refuses if the worker is
     still enabled or still holding any granule storage — operator must disable
-    and let it drain first."""
+    and let it drain first. Pass ?force=true to orphan remaining objects and
+    delete anyway (objects become unreachable until re-uploaded)."""
     w = await get_or_404(s, Worker, worker_id, "worker not found")
     if w.enabled:
         raise HTTPException(409, "worker is still enabled — disable it first")
     inflight = await count_worker_inflight(s, worker_id)
-    if inflight > 0:
+    if inflight > 0 and not force:
         sample = await held_granule_sample(s, worker_id)
         more = f" (+{inflight - len(sample)} more)" if inflight > len(sample) else ""
         raise HTTPException(
             409,
-            f"worker still holds {inflight} granule(s): {', '.join(sample)}{more}; wait for drain",
+            f"worker still holds {inflight} granule(s): {', '.join(sample)}{more}; wait for drain (or ?force=true)",
+        )
+    if force:
+        await revoke_worker_leases(s, worker_id, utcnow())
+        await s.execute(
+            GranuleObject.__table__.update()
+            .where(GranuleObject.worker_id == worker_id)
+            .where(GranuleObject.deleted_at.is_(None))
+            .values(deleted_at=utcnow())
         )
     await s.delete(w)
-    await log(s, worker_id, "worker forgotten (row deleted)")
-    await commit_and_publish(s, Scope.WORKERS)
+    await log(s, worker_id, f"worker forgotten (row deleted, force={force})")
+    await commit_and_publish(s, Scope.WORKERS, Scope.BATCHES)
     return {"ok": True}
