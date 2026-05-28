@@ -212,6 +212,7 @@ class BatchSummary(BaseModel):
     # Wall-clock-extrapolated remaining seconds; None when sample <3 uploads
     # or no in-flight granules.
     eta_seconds: int | None = None
+    eta_realtime: int | None = None
 
 
 class GranuleBulkAdd(BaseModel):

@@ -1,16 +1,23 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { fmtDuration } from "@/i18n";
 import ProgressBar from "@/components/ProgressBar.vue";
 
-defineProps<{
+const props = defineProps<{
   done: number;
   total: number;
   pct: number;
   etaSeconds: number | null;
+  etaRealtime: number | null;
   inFlight: number;
   errors: number;
   exhausted: number;
 }>();
+
+const bestEta = computed(() => props.etaRealtime ?? props.etaSeconds);
+const etaHint = computed(() =>
+  props.etaRealtime != null ? "按最近 1 分钟吞吐外推" : "按历史平均吞吐外推",
+);
 </script>
 
 <template>
@@ -23,11 +30,11 @@ defineProps<{
       </span>
       <span class="flex items-center gap-2">
         <span
-          v-if="etaSeconds != null"
+          v-if="bestEta != null"
           class="text-muted-foreground tabular-nums"
-          :title="`按当前吞吐外推剩余 ${inFlight} 条`"
+          :title="`${etaHint}，剩余 ${inFlight} 条`"
         >
-          ≈ {{ fmtDuration(etaSeconds * 1000) }}
+          ≈ {{ fmtDuration(bestEta * 1000) }}
         </span>
         <span v-if="errors > 0" class="text-danger">失败 {{ errors }}</span>
         <span

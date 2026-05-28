@@ -269,11 +269,11 @@ async function confirmDelete() {
           <span class="text-xs">{{ fmtAge(b.created_at) }}</span>
         </Field>
         <Field
-          v-if="b.eta_seconds != null"
+          v-if="b.eta_realtime != null || b.eta_seconds != null"
           label="预计剩余"
-          hint="按当前吞吐外推"
+          :hint="b.eta_realtime != null ? '按最近 1 分钟吞吐' : '按历史平均吞吐'"
         >
-          <span class="text-xs tabular-nums">≈ {{ fmtDuration(b.eta_seconds * 1000) }}</span>
+          <span class="text-xs tabular-nums">≈ {{ fmtDuration((b.eta_realtime ?? b.eta_seconds!) * 1000) }}</span>
         </Field>
         <Field v-else label="状态">
           <span class="text-xs">{{ b.status }}</span>
@@ -316,6 +316,7 @@ async function confirmDelete() {
       :batch-id="batchId"
       :remaining="inflightCount"
       :eta-seconds="b?.eta_seconds ?? null"
+      :eta-realtime="b?.eta_realtime ?? null"
     />
 
     <CardSection

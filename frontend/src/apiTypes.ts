@@ -54,6 +54,7 @@ export type BatchSummary = {
   counts: Partial<Record<GranuleState, number>>;
   objects_exhausted: number;
   eta_seconds: number | null;
+  eta_realtime: number | null;
 };
 
 export type WorkerInfo = {

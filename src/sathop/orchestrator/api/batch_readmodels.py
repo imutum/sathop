@@ -14,6 +14,8 @@ Two layers of public entry:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,12 +38,14 @@ async def summaries(s: AsyncSession, batches: list[Batch]) -> list[BatchSummary]
     counts_map = await state_counts(s, ids)
     exh_map = await _exhausted_by_batch(s, ids)
     eta_map = await eta_seconds(s, counts_map)
+    eta_rt_map = await eta_realtime(s, counts_map)
     return [
         _build_summary(
             b,
             counts=counts_map.get(b.batch_id, {}),
             objects_exhausted=exh_map.get(b.batch_id, 0),
             eta_seconds=eta_map.get(b.batch_id),
+            eta_realtime=eta_rt_map.get(b.batch_id),
         )
         for b in batches
     ]
@@ -56,7 +60,7 @@ def summary_just_created(batch: Batch, *, counts: dict[str, int]) -> BatchSummar
     """Fresh-from-create view: skips the exhausted/ETA queries because a
     just-committed Batch has neither. Caller supplies the counts (typically
     `await state_counts(s, [batch.batch_id])[batch.batch_id]`)."""
-    return _build_summary(batch, counts=counts, objects_exhausted=0, eta_seconds=None)
+    return _build_summary(batch, counts=counts, objects_exhausted=0, eta_seconds=None, eta_realtime=None)
 
 
 async def granule_rows(s: AsyncSession, granules: list[Granule]) -> list[GranuleRow]:
@@ -125,12 +129,50 @@ async def eta_seconds(
     return out
 
 
+async def eta_realtime(
+    s: AsyncSession,
+    counts_map: dict[str, dict[str, int]],
+    window_sec: int = 60,
+) -> dict[str, int | None]:
+    """ETA from recent throughput: uploads finished in the last `window_sec`."""
+    if not counts_map:
+        return {}
+    batch_ids = list(counts_map)
+    from datetime import timedelta
+
+    cutoff_start = datetime.now(timezone.utc) - timedelta(seconds=window_sec)
+
+    rows = (
+        await s.execute(
+            select(
+                GranuleStageTiming.batch_id,
+                func.count(),
+            )
+            .where(GranuleStageTiming.batch_id.in_(batch_ids))
+            .where(GranuleStageTiming.stage == "upload")
+            .where(GranuleStageTiming.finished_at >= cutoff_start)
+            .group_by(GranuleStageTiming.batch_id)
+        )
+    ).all()
+
+    out: dict[str, int | None] = dict.fromkeys(batch_ids, None)
+    for batch_id, recent_done in rows:
+        if recent_done <= 0:
+            continue
+        remaining = sum(counts_map[batch_id].get(st, 0) for st in IN_FLIGHT_STATES)
+        if remaining <= 0:
+            continue
+        out[batch_id] = int(remaining * window_sec / recent_done)
+    return out
+
+
 def _build_summary(
     batch: Batch,
     *,
     counts: dict[str, int],
     objects_exhausted: int,
     eta_seconds: int | None,
+    eta_realtime: int | None,
 ) -> BatchSummary:
     return BatchSummary(
         batch_id=batch.batch_id,
@@ -142,6 +184,7 @@ def _build_summary(
         counts=counts,
         objects_exhausted=objects_exhausted,
         eta_seconds=eta_seconds,
+        eta_realtime=eta_realtime,
     )
 
 
