@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, type BatchSummary } from "@/api";
-import { fmtAge, fmtDuration } from "@/i18n";
+import { fmtAge } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -23,7 +23,7 @@ import {
 import CopyButton from "@/components/CopyButton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
-import ProgressBar from "@/components/ProgressBar.vue";
+import BatchProgressCell from "@/features/batch/components/BatchProgressCell.vue";
 import QueryState from "@/components/QueryState.vue";
 import RowActions from "@/components/RowActions.vue";
 import Segmented from "@/components/Segmented.vue";
@@ -310,37 +310,15 @@ function onCreated() {
               <div v-else class="truncate font-mono text-2xs text-muted-foreground">
                 {{ r.b.bundle_ref }}
               </div>
-              <div>
-                <div class="mb-1 flex flex-wrap items-center justify-between gap-2 text-cell">
-                  <span class="tabular-nums">
-                    <span class="font-medium text-foreground">{{ r.done }}</span>
-                    <span class="text-muted-foreground"> / {{ r.total }}</span>
-                    <span class="ml-1 text-muted-foreground">({{ r.pct }}%)</span>
-                  </span>
-                  <span class="flex items-center gap-2">
-                    <span
-                      v-if="r.b.eta_seconds != null"
-                      class="text-muted-foreground tabular-nums"
-                      :title="`按当前吞吐外推剩余 ${r.inFlight} 条`"
-                    >
-                      ≈ {{ fmtDuration(r.b.eta_seconds * 1000) }}
-                    </span>
-                    <span v-if="r.errors > 0" class="text-danger">失败 {{ r.errors }}</span>
-                    <span
-                      v-if="r.b.objects_exhausted > 0"
-                      class="text-danger"
-                      title="该批次有产物已超 receiver 拉取重试上限，停止派发"
-                    >
-                      已放弃 {{ r.b.objects_exhausted }}
-                    </span>
-                  </span>
-                </div>
-                <ProgressBar
-                  :value="r.done"
-                  :max="r.total"
-                  :tone="r.errors > 0 || r.b.objects_exhausted > 0 ? 'warn' : 'good'"
-                />
-              </div>
+              <BatchProgressCell
+                :done="r.done"
+                :total="r.total"
+                :pct="r.pct"
+                :eta-seconds="r.b.eta_seconds ?? null"
+                :in-flight="r.inFlight"
+                :errors="r.errors"
+                :exhausted="r.b.objects_exhausted"
+              />
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="text-2xs text-muted-foreground">{{ fmtAge(r.b.created_at) }}</span>
                 <RowActions>
@@ -417,34 +395,14 @@ function onCreated() {
                     <Badge tone="info">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
                   </TableCell>
                   <TableCell class="w-[280px] py-3.5">
-                    <div class="mb-1 flex items-center justify-between text-cell">
-                      <span class="tabular-nums">
-                        <span class="font-medium text-foreground">{{ r.done }}</span>
-                        <span class="text-muted-foreground"> / {{ r.total }}</span>
-                        <span class="ml-1 text-muted-foreground">({{ r.pct }}%)</span>
-                      </span>
-                      <span class="flex items-center gap-2">
-                        <span
-                          v-if="r.b.eta_seconds != null"
-                          class="text-muted-foreground tabular-nums"
-                          :title="`按当前吞吐外推剩余 ${r.inFlight} 条`"
-                        >
-                          ≈ {{ fmtDuration(r.b.eta_seconds * 1000) }}
-                        </span>
-                        <span v-if="r.errors > 0" class="text-danger">失败 {{ r.errors }}</span>
-                        <span
-                          v-if="r.b.objects_exhausted > 0"
-                          class="text-danger"
-                          title="该批次有产物已超 receiver 拉取重试上限，停止派发"
-                        >
-                          已放弃 {{ r.b.objects_exhausted }}
-                        </span>
-                      </span>
-                    </div>
-                    <ProgressBar
-                      :value="r.done"
-                      :max="r.total"
-                      :tone="r.errors > 0 || r.b.objects_exhausted > 0 ? 'warn' : 'good'"
+                    <BatchProgressCell
+                      :done="r.done"
+                      :total="r.total"
+                      :pct="r.pct"
+                      :eta-seconds="r.b.eta_seconds ?? null"
+                      :in-flight="r.inFlight"
+                      :errors="r.errors"
+                      :exhausted="r.b.objects_exhausted"
                     />
                   </TableCell>
                   <TableCell class="py-3.5 text-cell text-muted-foreground">{{ fmtAge(r.b.created_at) }}</TableCell>

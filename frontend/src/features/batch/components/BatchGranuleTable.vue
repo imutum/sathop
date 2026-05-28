@@ -15,10 +15,8 @@ import EmptyState from "@/components/EmptyState.vue";
 import { Icon } from "@/components/Icon";
 import { stripBatchPrefix } from "@/lib/utils";
 import ErrorCell from "@/features/batch/components/ErrorCell.vue";
-import GranuleEvents from "@/features/batch/components/GranuleEvents.vue";
+import GranuleExpandedDetail from "@/features/batch/components/GranuleExpandedDetail.vue";
 import LatestProgressLine from "@/features/batch/components/LatestProgressLine.vue";
-import ProgressTimeline from "@/features/batch/components/ProgressTimeline.vue";
-import StageTimingStrip from "@/features/batch/components/StageTimingStrip.vue";
 
 const props = defineProps<{
   rows: GranuleRow[];
@@ -136,11 +134,12 @@ const emit = defineEmits<{
             重试
           </Button>
         </div>
-        <div v-if="expanded === g.granule_id" class="space-y-3 rounded-md bg-muted/40 p-3">
-          <StageTimingStrip :granule-id="g.granule_id" />
-          <ProgressTimeline :granule-id="g.granule_id" />
-          <GranuleEvents :granule-id="g.granule_id" :batch-id="batchId" />
-        </div>
+        <GranuleExpandedDetail
+          v-if="expanded === g.granule_id"
+          :granule-id="g.granule_id"
+          :batch-id="batchId"
+          class="rounded-md bg-muted/40 p-3"
+        />
       </li>
     </template>
   </ul>
@@ -239,10 +238,8 @@ const emit = defineEmits<{
             </TableCell>
           </TableRow>
           <TableRow v-if="expanded === g.granule_id" class="bg-muted/40">
-            <TableCell colspan="7" class="space-y-3 px-5 py-3">
-              <StageTimingStrip :granule-id="g.granule_id" />
-              <ProgressTimeline :granule-id="g.granule_id" />
-              <GranuleEvents :granule-id="g.granule_id" :batch-id="batchId" />
+            <TableCell colspan="7" class="px-5 py-3">
+              <GranuleExpandedDetail :granule-id="g.granule_id" :batch-id="batchId" />
             </TableCell>
           </TableRow>
         </template>
