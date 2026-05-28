@@ -31,7 +31,7 @@ RUN sha256sum uv.lock > /app/.uv-lock-hash \
 
 # --- non-root user ---------------------------------------------------------
 RUN groupadd --gid 10001 sathop \
-    && useradd --uid 10001 --gid 10001 --no-create-home --shell /sbin/nologin sathop \
+    && useradd --uid 10001 --gid 10001 --home-dir /home/sathop --create-home --shell /sbin/nologin sathop \
     && mkdir -p /app/data /app/repo /data/archive \
     && chown -R sathop:sathop /app /data
 
