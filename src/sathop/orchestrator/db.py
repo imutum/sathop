@@ -272,8 +272,9 @@ def _url() -> str:
 
 def _set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
     dbapi_connection.execute("PRAGMA journal_mode=WAL")
-    dbapi_connection.execute("PRAGMA synchronous=NORMAL")
+    dbapi_connection.execute("PRAGMA synchronous=OFF")
     dbapi_connection.execute("PRAGMA busy_timeout=5000")
+    dbapi_connection.execute("PRAGMA wal_autocheckpoint=1000")
 
 
 async def init_db() -> None:
