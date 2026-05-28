@@ -10,10 +10,10 @@ class Settings:
     host: str = os.getenv("SATHOP_HOST", "0.0.0.0")
     port: int = int(os.getenv("SATHOP_PORT", "8000"))
     dev: bool = os.getenv("SATHOP_DEV", "0") == "1"
-    db_path: Path = Path(os.getenv("SATHOP_DB", "./data/orchestrator.db"))
+    db_path: Path = Path(os.getenv("SATHOP_DB", "/app/data/orchestrator.db"))
     token: str = os.getenv("SATHOP_TOKEN", "")
-    bundle_storage: Path = Path(os.getenv("SATHOP_BUNDLES", "./data/bundles"))
-    shared_storage: Path = Path(os.getenv("SATHOP_SHARED", "./data/shared"))
+    bundle_storage: Path = Path(os.getenv("SATHOP_BUNDLES", "/app/data/bundles"))
+    shared_storage: Path = Path(os.getenv("SATHOP_SHARED", "/app/data/shared"))
     retain_events_days: int = int(os.getenv("SATHOP_RETAIN_EVENTS_DAYS", "30"))
     retain_deleted_days: int = int(os.getenv("SATHOP_RETAIN_DELETED_DAYS", "7"))
     retention_sweep_sec: int = int(os.getenv("SATHOP_RETENTION_SWEEP_SEC", "3600"))
