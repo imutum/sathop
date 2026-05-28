@@ -1,18 +1,16 @@
 <script setup lang="ts">
+const model = defineModel<string>({ required: true });
 defineProps<{
-  modelValue: string;
   error?: string;
   placeholder?: string;
   mono?: boolean;
 }>();
-defineEmits<{ "update:modelValue": [v: string] }>();
 </script>
 
 <template>
   <div>
     <input
-      :value="modelValue"
-      @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+      v-model="model"
       :placeholder="placeholder"
       :title="error"
       :class="[

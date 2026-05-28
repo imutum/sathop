@@ -10,17 +10,16 @@ import { computed, ref } from "vue";
 // faithful mapping. Arrow keys move the focused radio; Home/End jump to
 // extremes; only the checked option is in the tab order (roving tabindex).
 
+const model = defineModel<string>({ required: true });
+
 const props = withDefaults(
   defineProps<{
-    modelValue: string;
     options: { value: string; label: string; count?: number; dim?: boolean }[];
     size?: "sm" | "md";
     ariaLabel?: string;
   }>(),
   { size: "md" },
 );
-
-const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 
 const heightCls = computed(() =>
   props.size === "sm" ? "h-7 text-2xs px-2.5" : "h-8 text-xs px-3",
@@ -29,7 +28,7 @@ const heightCls = computed(() =>
 const refs = ref<Array<HTMLButtonElement | null>>([]);
 
 function activeIndex(): number {
-  const i = props.options.findIndex((o) => o.value === props.modelValue);
+  const i = props.options.findIndex((o) => o.value === model.value);
   return i >= 0 ? i : 0;
 }
 
@@ -46,7 +45,7 @@ function onKeydown(e: KeyboardEvent, i: number) {
   else if (e.key === "End") next = last;
   if (next === null) return;
   e.preventDefault();
-  emit("update:modelValue", props.options[next].value);
+  model.value = props.options[next].value;
   void Promise.resolve().then(() => focusAt(next!));
 }
 </script>
@@ -63,14 +62,14 @@ function onKeydown(e: KeyboardEvent, i: number) {
       :ref="(el) => (refs[i] = el as HTMLButtonElement | null)"
       type="button"
       role="radio"
-      :aria-checked="o.value === modelValue"
-      :tabindex="o.value === modelValue || (i === activeIndex()) ? 0 : -1"
-      @click="emit('update:modelValue', o.value)"
+      :aria-checked="o.value === model"
+      :tabindex="o.value === model || (i === activeIndex()) ? 0 : -1"
+      @click="model = o.value"
       @keydown="onKeydown($event, i)"
       :class="[
         heightCls,
         'inline-flex items-center gap-1.5 rounded-md font-medium transition-colors',
-        o.value === modelValue
+        o.value === model
           ? 'bg-background text-foreground shadow-soft'
           : o.dim
             ? 'text-muted-foreground/50 hover:text-muted-foreground'
@@ -82,7 +81,7 @@ function onKeydown(e: KeyboardEvent, i: number) {
         v-if="o.count !== undefined"
         :class="[
           'tabular-nums text-mini',
-          o.value === modelValue ? 'text-muted-foreground' : 'text-muted-foreground/70',
+          o.value === model ? 'text-muted-foreground' : 'text-muted-foreground/70',
         ]"
       >
         {{ o.count }}

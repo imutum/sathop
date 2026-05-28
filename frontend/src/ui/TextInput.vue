@@ -3,13 +3,11 @@ import { ref } from "vue";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
+const model = defineModel<string>({ required: true });
 defineProps<{
-  modelValue: string;
   placeholder?: string;
   ariaLabel?: string;
 }>();
-
-defineEmits<{ "update:modelValue": [value: string] }>();
 defineOptions({ inheritAttrs: false });
 
 const inputRef = ref<{ $el?: HTMLInputElement } | null>(null);
@@ -27,8 +25,7 @@ defineExpose({ focus: () => inputRef.value?.$el?.focus?.() });
     <Input
       ref="inputRef"
       v-bind="$attrs"
-      :model-value="modelValue"
-      @update:model-value="$emit('update:modelValue', String($event))"
+      v-model="model"
       :placeholder="placeholder"
       :aria-label="ariaLabel"
       :class="cn($slots.leftIcon ? 'pl-8' : '')"
