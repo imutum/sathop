@@ -18,6 +18,8 @@ if [ -n "${SATHOP_GIT_TOKEN:-}" ]; then
 fi
 
 # ── Clone or pull ─────────────────────────────────────────────────────
+git config --global --add safe.directory "$REPO_DIR"
+
 if [ -d "$REPO_DIR/.git" ]; then
   echo "[entrypoint] Pulling $GIT_REF ..."
   cd "$REPO_DIR"
