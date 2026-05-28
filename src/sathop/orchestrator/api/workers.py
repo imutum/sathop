@@ -34,7 +34,7 @@ from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import get_or_404
 from ._transition import apply_transition
-from .one_shot import consume_one_shot_signal, record_version_flap, request_one_shot_signal
+from .one_shot import consume_one_shot_signal, record_version_flap, signal_one_shot
 from .worker_heartbeat import (
     apply_worker_heartbeat,
     revoked_active_granules,
@@ -252,16 +252,10 @@ async def request_restart(worker_id: str, s: AsyncSession = Depends(session)) ->
     """Operator-triggered restart. Sets a one-shot flag the worker picks up on
     its next heartbeat and exits 0 on. Idempotent — re-clicks while a previous
     request hasn't been consumed just refresh the timestamp."""
-    w = await get_or_404(s, Worker, worker_id, "worker not found")
-    await request_one_shot_signal(
-        s,
-        w,
-        "restart_requested_at",
-        source=worker_id,
-        message="restart requested via UI",
-        scope=Scope.WORKERS,
+    return await signal_one_shot(
+        s, Worker, worker_id, "restart_requested_at",
+        scope=Scope.WORKERS, message="restart requested via UI",
     )
-    return {"ok": True}
 
 
 @router.put("/{worker_id}/enabled")
@@ -320,16 +314,10 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
     """Operator-triggered remote GC. Same one-shot pattern as restart: orch
     sets a timestamp, next heartbeat reply forwards it, worker runs prune_caches
     out-of-band of its periodic loop."""
-    w = await get_or_404(s, Worker, worker_id, "worker not found")
-    await request_one_shot_signal(
-        s,
-        w,
-        "gc_requested_at",
-        source=worker_id,
-        message="cache GC requested via UI",
-        scope=Scope.WORKERS,
+    return await signal_one_shot(
+        s, Worker, worker_id, "gc_requested_at",
+        scope=Scope.WORKERS, message="cache GC requested via UI",
     )
-    return {"ok": True}
 
 
 @router.delete("/{worker_id}")

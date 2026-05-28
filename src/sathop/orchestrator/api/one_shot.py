@@ -9,6 +9,8 @@ grow sibling boilerplate.
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.state_machine import Scope
@@ -16,11 +18,8 @@ from sathop.shared.state_machine import Scope
 from ..db import Receiver, Worker, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from ._helpers import get_or_404
 
-# Versioned heartbeat agents. Explicit union (not a Protocol) because
-# SQLAlchemy's `Mapped[str]` descriptor doesn't satisfy a `version: str`
-# Protocol under pyright's invariance rules — and the two concrete agents
-# are the only callers anyway, so naming them is accurate, not constraining.
 _VersionedAgent = Worker | Receiver
 
 
@@ -40,6 +39,25 @@ async def request_one_shot_signal(
     setattr(entity, attr, utcnow())
     await log(s, source, message)
     await commit_and_publish(s, scope)
+
+
+async def signal_one_shot(
+    s: AsyncSession,
+    model: type,
+    entity_id: Any,
+    attr: str,
+    *,
+    scope: Scope,
+    message: str,
+) -> dict:
+    """End-to-end handler helper: look up entity, stamp, commit, publish.
+
+    All operator-triggered one-shot endpoints (restart, GC, …) follow the
+    same get_or_404 → request_one_shot_signal dance. This helper collapses
+    the three-line pattern into one call; handlers become one-liners."""
+    entity = await get_or_404(s, model, entity_id, f"{model.__tablename__[:-1]} not found")
+    await request_one_shot_signal(s, entity, attr, source=entity_id, message=message, scope=scope)
+    return {"ok": True}
 
 
 async def consume_one_shot_signal(
