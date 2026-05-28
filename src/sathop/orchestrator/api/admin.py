@@ -175,8 +175,14 @@ async def _gc_apply(s: AsyncSession, candidates: list[Bundle]) -> dict[str, Any]
 
 @router.post("/update-frontend")
 async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
-    """Download frontend dist from GitHub Release matching current version.
-    Idempotent: skips if already up to date. Triggered manually from UI."""
+    """Download the frontend dist from the GitHub Release matching the running
+    version. Freshness is content-based: the release asset is sha256'd and
+    compared against the deployed stamp, so a same-version-but-rebuilt asset
+    (tag published before its dist was finalized) is still detected and
+    refreshed — a version-string check cannot tell those apart. The asset is
+    tiny and this is operator-triggered, so always fetching to hash it is
+    cheap. Triggered manually from the UI."""
+    import hashlib
     import shutil
     import tarfile
     from io import BytesIO
@@ -186,10 +192,7 @@ async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
 
     repo_dir = Path(__file__).resolve().parents[4]
     dist_dir = repo_dir / "frontend" / "dist"
-    stamp = dist_dir / ".version"
-
-    if stamp.is_file() and stamp.read_text().strip() == __version__:
-        return {"ok": True, "version": __version__, "action": "already_up_to_date"}
+    stamp = dist_dir / ".sha256"
 
     git_repo = os.environ.get("SATHOP_GIT_REPO", "https://github.com/imutum/sathop.git")
     clean_repo = git_repo.removesuffix(".git")
@@ -198,9 +201,6 @@ async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
         f"{clean_repo}/releases/download/v{__version__}/frontend-dist.tar.gz",
     )
 
-    await log(s, "orchestrator", f"downloading frontend v{__version__}")
-    await commit_and_publish(s, Scope.EVENTS)
-
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
             r = await client.get(url)
@@ -208,13 +208,19 @@ async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
     except Exception as e:
         raise HTTPException(502, f"frontend download failed: {e}")
 
+    digest = hashlib.sha256(r.content).hexdigest()
+    if stamp.is_file() and stamp.read_text().strip() == digest:
+        return {"ok": True, "version": __version__, "action": "already_up_to_date"}
+
+    await log(s, "orchestrator", f"updating frontend → {digest[:12]}")
+    await commit_and_publish(s, Scope.EVENTS)
+
     tmp_dir = dist_dir.parent / ".dist-tmp"
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir)
     tmp_dir.mkdir(parents=True)
 
-    buf = BytesIO(r.content)
-    with tarfile.open(fileobj=buf, mode="r:gz") as tf:
+    with tarfile.open(fileobj=BytesIO(r.content), mode="r:gz") as tf:
         tf.extractall(tmp_dir)
 
     extracted_dist = tmp_dir / "dist"
@@ -227,8 +233,8 @@ async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
     extracted_dist.rename(dist_dir)
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    stamp.write_text(__version__)
-    await log(s, "orchestrator", f"frontend v{__version__} ready")
+    stamp.write_text(digest)
+    await log(s, "orchestrator", f"frontend updated ({digest[:12]})")
     await commit_and_publish(s, Scope.EVENTS)
     return {"ok": True, "version": __version__, "action": "downloaded"}
 
