@@ -1,7 +1,4 @@
-// SSE live updates: one EventSource → fan out scope nudges to TanStack Query
-// cache keys, plus expose connection state for the topbar's live badge.
-
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { ref, watchEffect } from "vue";
 import { useQueryClient } from "@tanstack/vue-query";
 
 import { getToken } from "@/apiClient";
@@ -28,14 +25,13 @@ const SCOPE_TO_KEYS: Record<Scope, string[][]> = {
 export function useLiveStream() {
   const qc = useQueryClient();
   const connected = ref(false);
-  let es: EventSource | null = null;
-  let reconnectTimer: number | null = null;
-  let stopped = false;
+  const reconnect = ref(0);
 
-  function open() {
-    if (stopped) return;
+  watchEffect((onCleanup) => {
+    void reconnect.value;
     const token = encodeURIComponent(getToken());
-    es = new EventSource(`/api/stream?token=${token}`);
+    const es = new EventSource(`/api/stream?token=${token}`);
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     es.onopen = () => {
       connected.value = true;
@@ -44,30 +40,29 @@ export function useLiveStream() {
     es.onmessage = (e) => {
       try {
         const evt = JSON.parse(e.data) as { scope?: Scope };
-        if (!evt.scope || !(evt.scope in SCOPE_TO_KEYS)) return;
-        for (const key of SCOPE_TO_KEYS[evt.scope]) {
-          qc.invalidateQueries({ queryKey: key });
+        if (evt.scope && evt.scope in SCOPE_TO_KEYS) {
+          for (const key of SCOPE_TO_KEYS[evt.scope]) {
+            qc.invalidateQueries({ queryKey: key });
+          }
         }
       } catch {
-        // ignore malformed events
+        // malformed SSE payload
       }
     };
 
     es.onerror = () => {
       connected.value = false;
-      es?.close();
-      es = null;
-      if (stopped) return;
-      // Browser sometimes closes after a proxy timeout; back off and reopen.
-      reconnectTimer = window.setTimeout(open, 3000);
+      es.close();
+      timer = setTimeout(() => {
+        reconnect.value++;
+      }, 3000);
     };
-  }
 
-  onMounted(open);
-  onBeforeUnmount(() => {
-    stopped = true;
-    if (reconnectTimer) window.clearTimeout(reconnectTimer);
-    es?.close();
+    onCleanup(() => {
+      if (timer) clearTimeout(timer);
+      es.close();
+      connected.value = false;
+    });
   });
 
   return { connected };
