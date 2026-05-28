@@ -107,8 +107,8 @@ const batchApi = {
   createBatch: (body: unknown) =>
     postJson<BatchSummary>("/api/batches", body),
   batch: (id: string) => getJson<BatchSummary>(`/api/batches/${id}`),
-  granules: (batchId: string, state?: string, limit = 200) => {
-    const qs = new URLSearchParams({ limit: String(limit) });
+  granules: (batchId: string, state?: string, limit = 100, offset = 0) => {
+    const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (state) qs.set("state", state);
     return getJson<GranuleRow[]>(`/api/batches/${batchId}/granules?${qs}`);
   },

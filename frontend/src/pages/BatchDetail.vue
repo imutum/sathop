@@ -61,6 +61,8 @@ const { cancel, retry, retryAll, cancelAll, resetExhausted, deleteBatch } =
 const highlight = computed(() => (route.query.granule as string | undefined) ?? null);
 
 const filter = ref<GranuleState | "all">("all");
+const PAGE_SIZE = 100;
+const page = ref(0);
 const logLevel = ref<"all" | "warn" | "error">("all");
 const expanded = ref<string | null>(null);
 const rowRefs = ref<Record<string, HTMLElement | null>>({});
@@ -76,9 +78,17 @@ const batch = useQuery({
   enabled: computed(() => !!batchId.value),
 });
 
+watch(filter, () => { page.value = 0; });
+
 const granules = useQuery({
-  queryKey: computed(() => [...K.granules, batchId.value, filter.value]),
-  queryFn: () => API.granules(batchId.value, filter.value === "all" ? undefined : filter.value),
+  queryKey: computed(() => [...K.granules, batchId.value, filter.value, page.value]),
+  queryFn: () =>
+    API.granules(
+      batchId.value,
+      filter.value === "all" ? undefined : filter.value,
+      PAGE_SIZE,
+      page.value * PAGE_SIZE,
+    ),
   enabled: computed(() => !!batchId.value),
 });
 
@@ -100,6 +110,15 @@ const b = computed(() => batch.data.value);
 const rows = computed(() => granules.data.value ?? []);
 const batchEvents = computed(() => events.data.value ?? []);
 const progressByGranule = computed(() => latestProgress.data.value ?? {});
+const filteredTotal = computed(() => {
+  if (!b.value) return 0;
+  if (filter.value === "all") return totalCount(b.value.counts);
+  return b.value.counts[filter.value as GranuleState] ?? 0;
+});
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredTotal.value / PAGE_SIZE)));
+const hasPrev = computed(() => page.value > 0);
+const hasNext = computed(() => page.value < totalPages.value - 1);
+
 const failedCount = computed(() => (b.value ? errorTotal(b.value) : 0));
 // Server-authoritative; for batches with >200 granules the per-row sum from
 // the granules query would underreport.
@@ -310,6 +329,19 @@ async function confirmDelete() {
         @cancel="confirmCancel"
         @retry="(id) => retry.mutate(id)"
       />
+      <div
+        v-if="totalPages > 1"
+        class="flex items-center justify-between border-t border-border/60 px-5 py-3 text-cell"
+      >
+        <span class="tabular-nums text-muted-foreground">
+          {{ page * PAGE_SIZE + 1 }}–{{ Math.min((page + 1) * PAGE_SIZE, filteredTotal) }} / {{ filteredTotal }}
+        </span>
+        <div class="flex items-center gap-2">
+          <Button size="sm" variant="outline" :disabled="!hasPrev" @click="page--">上一页</Button>
+          <span class="tabular-nums text-muted-foreground">{{ page + 1 }} / {{ totalPages }}</span>
+          <Button size="sm" variant="outline" :disabled="!hasNext" @click="page++">下一页</Button>
+        </div>
+      </div>
     </CardSection>
 
     <BatchTimingCard
