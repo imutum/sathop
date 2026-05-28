@@ -9,7 +9,7 @@ _NUM_PREFIX = re.compile(r"^(\d+)")
 
 def parse_version(v: str) -> tuple[int, int, int]:
     parts: list[int] = []
-    for seg in v.strip().split(".")[:3]:
+    for seg in v.strip().lstrip("v").split(".")[:3]:
         m = _NUM_PREFIX.match(seg)
         parts.append(int(m.group(1)) if m else 0)
     while len(parts) < 3:
