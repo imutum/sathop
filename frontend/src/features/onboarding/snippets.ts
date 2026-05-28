@@ -10,10 +10,7 @@
 
 // ─── Common helpers ────────────────────────────────────────────────────
 
-export const RECEIVER_IMAGE = "ghcr.io/imutum/sathop/receiver:latest";
-export const WORKER_IMAGE = "ghcr.io/imutum/sathop/worker:latest";
-// Caddy is still used for caddy mode (public domain + ACME). selfsigned mode
-// no longer needs caddy — worker handles internal TLS itself via cryptography.
+export const RUNTIME_IMAGE = "ghcr.io/imutum/sathop/runtime:latest";
 export const CADDY_IMAGE = "caddy:2-alpine";
 export const DEFAULT_GIT_REPO = "https://github.com/imutum/sathop.git";
 
@@ -102,9 +99,11 @@ export function receiverDockerRun(cfg: ReceiverConfig): string {
     "--name sathop-receiver",
     "--restart unless-stopped",
     "--user $(id -u):$(id -g)",
+    `-e SATHOP_ROLE="receiver"`,
     ...receiverEnv(cfg, sathopUrl).map(([k, v]) => `-e ${k}="${v}"`),
     `-v ${mountSrc(cfg.outputDir)}:/data/archive`,
-    RECEIVER_IMAGE,
+    "-v sathop-repo:/app/repo",
+    RUNTIME_IMAGE,
   ];
   return joinDockerArgs(lines);
 }
@@ -116,13 +115,18 @@ export function receiverDockerCompose(cfg: ReceiverConfig): string {
     .join("\n");
   return `services:
   receiver:
-    image: ${RECEIVER_IMAGE}
+    image: ${RUNTIME_IMAGE}
     restart: unless-stopped
     user: "\${UID:-1000}:\${GID:-1000}"
     environment:
+      SATHOP_ROLE: "receiver"
 ${envLines}
     volumes:
       - ${cfg.outputDir}:/data/archive
+      - sathop-repo:/app/repo
+
+volumes:
+  sathop-repo:
 `;
 }
 
@@ -275,10 +279,12 @@ export function workerDockerRun(cfg: WorkerConfig): string {
     "--name sathop-worker",
     "--restart unless-stopped",
     "--user $(id -u):$(id -g)",
+    `-e SATHOP_ROLE="worker"`,
     ...workerEnv(cfg, sathopUrl).map(([k, v]) => `-e ${k}="${v}"`),
     `-p ${hostPortFor(cfg)}:${cfg.storagePort}`,
     `-v ${mountSrc(cfg.dataDir)}:/app/data`,
-    WORKER_IMAGE,
+    "-v sathop-repo:/app/repo",
+    RUNTIME_IMAGE,
   ];
   const worker = "# --- Worker ---\n" + joinDockerArgs(workerLines);
 
@@ -315,13 +321,15 @@ export function workerDockerCompose(cfg: WorkerConfig): string {
 
   let body = `services:
   worker:
-    image: ${WORKER_IMAGE}
+    image: ${RUNTIME_IMAGE}
     restart: unless-stopped
     user: "\${UID:-1000}:\${GID:-1000}"
     environment:
+      SATHOP_ROLE: "worker"
 ${envLines}
 ${cfg.exposeMode !== "caddy" ? portLine : ""}    volumes:
       - ${cfg.dataDir}:/app/data
+      - sathop-repo:/app/repo
 `;
 
   if (cfg.exposeMode === "caddy") {
@@ -341,8 +349,14 @@ ${cfg.exposeMode !== "caddy" ? portLine : ""}    volumes:
       - worker
 
 volumes:
+  sathop-repo:
   caddy_data:
   caddy_config:
+`;
+  } else {
+    body += `
+volumes:
+  sathop-repo:
 `;
   }
 

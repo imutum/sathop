@@ -1,13 +1,12 @@
 name: Release images
 
-# Builds and pushes the three component images to GHCR. Runs on:
-#   - tag push matching v*    → versioned release (e.g. v1.2.3)
-#   - main branch push         → rolling :main + :sha-<short> tags
-#   - workflow_dispatch        → manual one-off (useful for testing)
+# Builds the unified runtime image and pushes to GHCR. Runs on:
+#   - tag push matching v*    -> versioned release (e.g. v1.2.3)
+#   - main branch push        -> rolling :main + :sha-<short> tags
+#   - workflow_dispatch       -> manual one-off
 #
-# Image names: ghcr.io/<owner>/sathop/{orchestrator,worker,receiver}
+# Image: ghcr.io/<owner>/sathop/runtime
 # Multi-arch: linux/amd64 + linux/arm64 via QEMU + buildx.
-# Cache: GitHub Actions cache (gha) — first build cold, subsequent builds reuse layers.
 
 on:
   push:
@@ -16,7 +15,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 concurrency:
@@ -27,10 +26,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        component: [orchestrator, worker, receiver]
     steps:
       - uses: actions/checkout@v6
 
@@ -43,30 +38,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build frontend/dist/ once for the orchestrator image. Worker /
-      # receiver don't need it; the Dockerfile only COPYs it into the
-      # orchestrator image.
-      - uses: actions/setup-node@v6
-        if: matrix.component == 'orchestrator'
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Build frontend
-        if: matrix.component == 'orchestrator'
-        run: |
-          npm ci
-          npm run build
-        working-directory: frontend
-
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}/${{ matrix.component }}
-          # Tag policy:
-          #   - tag push v1.2.3 → :1.2.3, :1.2, :latest, :sha-<short>
-          #   - main push       → :main, :latest, :sha-<short>
-          #   - dispatch        → :sha-<short>
+          images: ghcr.io/${{ github.repository }}/runtime
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -77,10 +52,27 @@ jobs:
       - uses: docker/build-push-action@v7
         with:
           context: .
-          file: deploy/${{ matrix.component }}/Dockerfile
+          file: deploy/runtime/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.component }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,mode=max,scope=runtime
+
+  upload-frontend:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: frontend
+      - run: tar -czf frontend-dist.tar.gz -C frontend dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: frontend-dist.tar.gz

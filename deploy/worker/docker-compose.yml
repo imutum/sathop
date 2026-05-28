@@ -1,8 +1,4 @@
 services:
-  # Pinned to known-stable releases — :latest can introduce breaking API
-  # changes (MinIO has shipped several over the years). Override per-deploy
-  # via SATHOP_MINIO_TAG / SATHOP_ARIA2_TAG in .env when you've validated
-  # a newer image.
   minio:
     image: minio/minio:${SATHOP_MINIO_TAG:-RELEASE.2024-12-18T13-15-44Z}
     restart: unless-stopped
@@ -28,27 +24,25 @@ services:
       - ./aria2-downloads:/downloads
 
   worker:
-    image: ${SATHOP_IMAGE:-ghcr.io/imutum/sathop}/worker:${SATHOP_TAG:-latest}
+    image: ${SATHOP_IMAGE:-ghcr.io/imutum/sathop}/runtime:${SATHOP_TAG:-latest}
     restart: unless-stopped
     env_file: .env
     depends_on: [minio, aria2c]
-    # Image's baked-in user is UID 10001. Override via SATHOP_UID / SATHOP_GID
-    # in .env when the host's `./data` directory is owned by a different UID.
     user: "${SATHOP_UID:-10001}:${SATHOP_GID:-10001}"
+    environment:
+      SATHOP_ROLE: worker
     volumes:
       - ./data:/app/data
       - ./aria2-downloads:/downloads
-    # SIGTERM ⇒ graceful drain (stop accepting new leases, finish in-flight).
-    # 60s matches the worker's drain watchdog; longer downloads/processes that
-    # don't finish in time get cut off and the orchestrator's lease sweeper
-    # reclaims them on the 30 min lease expiry.
+      - repo:/app/repo
     stop_signal: SIGTERM
     stop_grace_period: 60s
-    # /health is served by the worker's progress server (default 9002, bound
-    # to 127.0.0.1 inside the container). Curl is available in the base image.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9002/health"]
       interval: 15s
       timeout: 3s
       retries: 3
       start_period: 20s
+
+volumes:
+  repo:
