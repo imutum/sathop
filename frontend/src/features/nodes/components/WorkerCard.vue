@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useMutation, useQueryClient } from "@tanstack/vue-query";
 import { API, type WorkerInfo } from "@/api";
+import { K } from "@/queryKeys";
 import { fmtGB, nodeStatusBadge } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
@@ -31,7 +32,7 @@ const toast = useToast();
 
 const lifecycle = useNodeLifecycle<WorkerInfo>({
   id: props.worker.worker_id,
-  queryKey: "workers",
+  queryKey: K.workers,
   getId: (worker) => worker.worker_id,
   setEnabled: (next) => API.setWorkerEnabled(props.worker.worker_id, next),
   forget: () => API.forgetWorker(props.worker.worker_id),
@@ -61,7 +62,7 @@ const lifecycle = useNodeLifecycle<WorkerInfo>({
 const pause = useMutation({
   mutationFn: (next: boolean) => API.setWorkerPaused(props.worker.worker_id, next),
   onSuccess: (_r, next) => {
-    qc.invalidateQueries({ queryKey: ["workers"] });
+    qc.invalidateQueries({ queryKey: [...K.workers] });
     toast.success(next ? "已暂停领新任务（在手任务继续）" : "已恢复");
   },
   onError: (e: Error) => toast.error(`暂停切换失败：${e.message}`),
@@ -70,8 +71,8 @@ const pause = useMutation({
 const revoke = useMutation({
   mutationFn: () => API.revokeWorkerLeases(props.worker.worker_id),
   onSuccess: (r) => {
-    qc.invalidateQueries({ queryKey: ["workers"] });
-    qc.invalidateQueries({ queryKey: ["batches"] });
+    qc.invalidateQueries({ queryKey: [...K.workers] });
+    qc.invalidateQueries({ queryKey: [...K.batches] });
     toast.success(`已释放 ${r.revoked} 条 lease，等待其他 worker 抢占`);
   },
   onError: (e: Error) => toast.error(`释放失败：${e.message}`),
@@ -148,7 +149,7 @@ watch(draft, (v) => {
 const setCap = useMutation({
   mutationFn: (n: number | null) => API.setWorkerCapacity(props.worker.worker_id, n),
   onSuccess: (_r, n) => {
-    qc.invalidateQueries({ queryKey: ["workers"] });
+    qc.invalidateQueries({ queryKey: [...K.workers] });
     toast.success(n == null ? "已清除并发上限" : `已设并发上限 ${n}`);
     draft.value = null;
   },

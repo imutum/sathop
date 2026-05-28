@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
+import { K } from "@/queryKeys";
 import { fmtBytes } from "@/lib/format";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -9,12 +10,12 @@ const props = defineProps<{ name: string; version: string }>();
 const sel = ref("manifest.yaml");
 
 const files = useQuery({
-  queryKey: computed(() => ["bundle-files", props.name, props.version]),
+  queryKey: computed(() => [...K.bundleFiles, props.name, props.version]),
   queryFn: () => API.bundleFiles(props.name, props.version),
 });
 
 const content = useQuery({
-  queryKey: computed(() => ["bundle-file", props.name, props.version, sel.value]),
+  queryKey: computed(() => [...K.bundleFile, props.name, props.version, sel.value]),
   queryFn: () => API.bundleFile(props.name, props.version, sel.value),
   enabled: computed(() => !!sel.value),
 });

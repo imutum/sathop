@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
+import { K } from "@/queryKeys";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import CardSection from "@/components/CardSection.vue";
 import Field from "@/components/Field.vue";
 import PageHeader from "@/components/PageHeader.vue";
 
-const info = useQuery({ queryKey: ["orch-info"], queryFn: API.orchestratorInfo });
+const info = useQuery({ queryKey: [...K.orchInfo], queryFn: API.orchestratorInfo });
 </script>
 
 <template>

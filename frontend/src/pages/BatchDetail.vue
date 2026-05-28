@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { useRoute, useRouter } from "vue-router";
+import { useQuery } from "@tanstack/vue-query";
+import { useRoute } from "vue-router";
 import { API, IN_FLIGHT_STATES, type GranuleRow, type GranuleState } from "@/api";
 import { fmtAge, fmtDuration, stateLabel } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
-import { useToast } from "@/composables/useToast";
+import { K } from "@/queryKeys";
+import { useBatchDetailMutations } from "@/features/batch/useBatchMutations";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,11 +54,10 @@ const LOG_LEVEL_OPTIONS = [
 ];
 
 const route = useRoute();
-const router = useRouter();
-const qc = useQueryClient();
-const toast = useToast();
 
 const batchId = computed(() => (route.params.batchId as string) ?? "");
+const { cancel, retry, retryAll, cancelAll, resetExhausted, deleteBatch } =
+  useBatchDetailMutations(batchId);
 const highlight = computed(() => (route.query.granule as string | undefined) ?? null);
 
 const filter = ref<GranuleState | "all">("all");
@@ -71,110 +71,30 @@ function setRowRef(id: string, el: Element | null) {
 }
 
 const batch = useQuery({
-  queryKey: computed(() => ["batch", batchId.value]),
+  queryKey: computed(() => [...K.batch, batchId.value]),
   queryFn: () => API.batch(batchId.value),
   enabled: computed(() => !!batchId.value),
 });
 
 const granules = useQuery({
-  queryKey: computed(() => ["granules", batchId.value, filter.value]),
+  queryKey: computed(() => [...K.granules, batchId.value, filter.value]),
   queryFn: () => API.granules(batchId.value, filter.value === "all" ? undefined : filter.value),
   enabled: computed(() => !!batchId.value),
 });
 
 const events = useQuery({
-  queryKey: computed(() => ["batch-events", batchId.value, logLevel.value]),
+  queryKey: computed(() => [...K.batchEvents, batchId.value, logLevel.value]),
   queryFn: () =>
     API.batchEvents(batchId.value, logLevel.value === "all" ? undefined : logLevel.value, 200),
   enabled: computed(() => !!batchId.value),
 });
 
 const latestProgress = useQuery({
-  queryKey: computed(() => ["batch-progress-latest", batchId.value]),
+  queryKey: computed(() => [...K.batchProgressLatest, batchId.value]),
   queryFn: () => API.batchProgressLatest(batchId.value),
   enabled: computed(() => !!batchId.value),
 });
 
-function invalidate() {
-  qc.invalidateQueries({ queryKey: ["granules", batchId.value] });
-  qc.invalidateQueries({ queryKey: ["batch", batchId.value] });
-  qc.invalidateQueries({ queryKey: ["batches"] });
-}
-
-const cancel = useMutation({
-  mutationFn: (g: string) => API.cancelGranule(batchId.value, g),
-  onSuccess: (_r, g) => {
-    invalidate();
-    toast.success(`已取消数据粒 ${g}`);
-  },
-  onError: (e: Error, g) => toast.error(`取消 ${g} 失败：${e.message}`),
-});
-
-const retry = useMutation({
-  mutationFn: (g: string) => API.retryGranule(batchId.value, g),
-  onSuccess: (_r, g) => {
-    invalidate();
-    toast.success(`已重试数据粒 ${g}`);
-  },
-  onError: (e: Error, g) => toast.error(`重试 ${g} 失败：${e.message}`),
-});
-
-const retryAll = useMutation({
-  mutationFn: () => API.retryFailed(batchId.value),
-  onSuccess: (res) => {
-    invalidate();
-    toast.success(`已重置 ${res.reset} 条失败数据粒为待处理`);
-  },
-  onError: (e: Error) => toast.error(`重试失败：${e.message}`),
-});
-
-const cancelAll = useMutation({
-  mutationFn: () => API.cancelBatch(batchId.value),
-  onSuccess: (res) => {
-    invalidate();
-    toast.success(`已取消 ${res.cancelled} 条数据粒`);
-  },
-  onError: (e: Error) => toast.error(`取消失败：${e.message}`),
-});
-
-const resetExhausted = useMutation({
-  mutationFn: () => API.resetExhaustedObjects(batchId.value),
-  onSuccess: (res) => {
-    invalidate();
-    if (res.reset > 0) toast.success(`已重置 ${res.reset} 个产物的重试计数，下个 receiver poll 周期会重新派发`);
-    else toast.info("当前批次没有已放弃的产物");
-  },
-  onError: (e: Error) => toast.error(`重置失败：${e.message}`),
-});
-
-const deleteBatch = useMutation({
-  mutationFn: (force: boolean) => API.deleteBatch(batchId.value, force),
-  onSuccess: (res) => {
-    qc.invalidateQueries({ queryKey: ["batches"] });
-    qc.invalidateQueries({ queryKey: ["overview"] });
-    toast.success(
-      `已删除批次：${res.granules} 数据粒 / ${res.objects} 产物 / ${res.events} 事件`,
-    );
-    void router.push("/batches");
-  },
-  onError: async (e: Error) => {
-    if (
-      /mid-flight/.test(e.message) &&
-      (await requestConfirm({
-        title: "强制删除批次？",
-        description:
-          `批次仍有 worker 在处理。\n\n${e.message}\n\n` +
-          "强制删除会让正在处理的 worker 在下次状态汇报时收到 404。",
-        confirmText: "强制删除",
-        tone: "danger",
-      }))
-    ) {
-      deleteBatch.mutate(true);
-      return;
-    }
-    toast.error(`删除失败：${e.message}`);
-  },
-});
 
 const b = computed(() => batch.data.value);
 const rows = computed(() => granules.data.value ?? []);

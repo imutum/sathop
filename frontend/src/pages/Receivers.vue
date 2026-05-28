@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
+import { K } from "@/queryKeys";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -13,7 +14,7 @@ import QueryState from "@/components/QueryState.vue";
 import ReceiverCard from "@/features/nodes/components/ReceiverCard.vue";
 import OnboardReceiverModal from "@/features/onboarding/components/OnboardReceiverModal.vue";
 
-const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
+const receivers = useQuery({ queryKey: [...K.receivers], queryFn: API.receivers });
 const showOnboard = ref(false);
 </script>
 

@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { RouterLink } from "vue-router";
 import { API } from "@/api";
+import { K } from "@/queryKeys";
 import { getToken } from "@/apiClient";
 import { useToast } from "@/composables/useToast";
 import { Icon } from "@/components/Icon";
@@ -86,7 +87,7 @@ const valid = computed(
 // After-copy registration watcher. Shares the global TanStack Query cache,
 // so SSE-driven invalidation (useLiveStream) refetches automatically when
 // the orchestrator publishes a `receivers` scope nudge — no extra polling.
-const receiversQuery = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
+const receiversQuery = useQuery({ queryKey: [...K.receivers], queryFn: API.receivers });
 const registrationWatch = useRegistrationWatch(
   computed(() => cfg.value.receiverId),
   receiversQuery.data,

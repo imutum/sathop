@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
 import { API } from "@/api";
+import { K } from "@/queryKeys";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -14,7 +15,7 @@ import WorkerCard from "@/features/nodes/components/WorkerCard.vue";
 import OnboardWorkerModal from "@/features/onboarding/components/OnboardWorkerModal.vue";
 import { Icon } from "@/components/Icon";
 
-const workers = useQuery({ queryKey: ["workers"], queryFn: API.workers });
+const workers = useQuery({ queryKey: [...K.workers], queryFn: API.workers });
 const list = computed(() => workers.data.value ?? []);
 const showOnboard = ref(false);
 

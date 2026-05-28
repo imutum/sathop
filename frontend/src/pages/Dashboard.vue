@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
 import { API, type GranuleState } from "@/api";
+import { K } from "@/queryKeys";
 import { fmtAge, stateLabel } from "@/i18n";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -29,12 +30,12 @@ import { Icon } from "@/components/Icon";
 
 const router = useRouter();
 
-const overview = useQuery({ queryKey: ["overview"], queryFn: API.overview });
-const workers = useQuery({ queryKey: ["workers"], queryFn: API.workers });
-const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
-const inflight = useQuery({ queryKey: ["in-flight"], queryFn: () => API.inFlight(30) });
+const overview = useQuery({ queryKey: [...K.overview], queryFn: API.overview });
+const workers = useQuery({ queryKey: [...K.workers], queryFn: API.workers });
+const receivers = useQuery({ queryKey: [...K.receivers], queryFn: API.receivers });
+const inflight = useQuery({ queryKey: [...K.inflight], queryFn: () => API.inFlight(30) });
 const stuckList = useQuery({
-  queryKey: ["stuck"],
+  queryKey: [...K.stuck],
   queryFn: () => API.stuck(50),
   enabled: computed(
     () =>

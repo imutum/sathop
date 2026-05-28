@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API, type TimingStage } from "@/api";
+import { K } from "@/queryKeys";
 import { TIMING_STAGE_ZH, fmtDuration, fmtMs, fmtPerMinute } from "@/i18n";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -28,7 +29,7 @@ const STAGE_ORDER: TimingStage[] = [
 ];
 
 const q = useQuery({
-  queryKey: computed(() => ["batch-timing", props.batchId]),
+  queryKey: computed(() => [...K.batchTiming, props.batchId]),
   queryFn: () => API.batchTiming(props.batchId),
   enabled: computed(() => !!props.batchId),
 });

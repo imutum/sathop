@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { API, type ReceiverInfo } from "@/api";
+import { K } from "@/queryKeys";
 import { fmtGB, fmtRate, nodeStatusBadge } from "@/lib/format";
 import { PLATFORM_ZH, fmtAge } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +17,7 @@ const props = defineProps<{ receiver: ReceiverInfo }>();
 
 const lifecycle = useNodeLifecycle<ReceiverInfo>({
   id: props.receiver.receiver_id,
-  queryKey: "receivers",
+  queryKey: K.receivers,
   getId: (receiver) => receiver.receiver_id,
   setEnabled: (next) => API.setReceiverEnabled(props.receiver.receiver_id, next),
   forget: () => API.forgetReceiver(props.receiver.receiver_id),

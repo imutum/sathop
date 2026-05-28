@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
+import { K } from "@/queryKeys";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -32,7 +33,7 @@ function compareSemver(a: string, b: string): number {
 }
 
 const info = useQuery({
-  queryKey: ["orchestrator-info"],
+  queryKey: [...K.orchestratorInfo],
   queryFn: API.orchestratorInfo,
   staleTime: 60 * 60 * 1000,
 });
@@ -58,7 +59,7 @@ async function fetchLatestRelease(): Promise<{ tag: string; htmlUrl: string }> {
 }
 
 const latest = useQuery({
-  queryKey: ["github-latest-release"],
+  queryKey: [...K.githubRelease],
   queryFn: fetchLatestRelease,
   staleTime: 30 * 60 * 1000,
   retry: 1,

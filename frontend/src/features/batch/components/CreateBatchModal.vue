@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/vue-query";
 import { useForm } from "vee-validate";
 import { toTypedSchema } from "@vee-validate/zod";
 import { API } from "@/api";
+import { K } from "@/queryKeys";
 import { createBatchHeaderSchema } from "@/features/batch/schemas";
 import { clearCred, hasCred, loadCred, saveCred } from "@/credCache";
 import { useToast } from "@/composables/useToast";
@@ -57,10 +58,10 @@ const showCsv = ref(false);
 
 const bundleSel = computed(() => headerValues.bundleSel ?? "");
 
-const receivers = useQuery({ queryKey: ["receivers"], queryFn: API.receivers });
-const bundles = useQuery({ queryKey: ["bundles"], queryFn: API.bundles });
+const receivers = useQuery({ queryKey: [...K.receivers], queryFn: API.receivers });
+const bundles = useQuery({ queryKey: [...K.bundles], queryFn: API.bundles });
 const bundleDetail = useQuery({
-  queryKey: computed(() => ["bundle-detail", bundleSel.value]),
+  queryKey: computed(() => [...K.bundleDetail, bundleSel.value]),
   queryFn: () => {
     const [n, v] = bundleSel.value.split("@");
     return API.bundleDetail(n, v);

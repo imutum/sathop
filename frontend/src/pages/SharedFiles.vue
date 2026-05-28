@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { API, type SharedFileInfo } from "@/api";
+import { K } from "@/queryKeys";
 import { fmtBytes } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
@@ -32,12 +33,12 @@ const toast = useToast();
 const showUpload = ref(false);
 const replaceTarget = ref<SharedFileInfo | null>(null);
 
-const list = useQuery({ queryKey: ["shared-files"], queryFn: API.sharedFiles });
+const list = useQuery({ queryKey: [...K.sharedFiles], queryFn: API.sharedFiles });
 
 const del = useMutation({
   mutationFn: (name: string) => API.deleteSharedFile(name),
   onSuccess: (_r, name) => {
-    qc.invalidateQueries({ queryKey: ["shared-files"] });
+    qc.invalidateQueries({ queryKey: [...K.sharedFiles] });
     toast.success(`已删除 ${name}`);
   },
   onError: (e: Error) => toast.error(`删除失败：${e.message}`),
@@ -54,7 +55,7 @@ async function confirmDelete(f: SharedFileInfo) {
 }
 
 function onUploaded() {
-  qc.invalidateQueries({ queryKey: ["shared-files"] });
+  qc.invalidateQueries({ queryKey: [...K.sharedFiles] });
   showUpload.value = false;
   replaceTarget.value = null;
 }

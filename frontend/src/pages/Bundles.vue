@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
 import { API, type BundleDetail, type BundleSummary } from "@/api";
+import { K } from "@/queryKeys";
 import { fmtBytes } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { useToast } from "@/composables/useToast";
@@ -48,9 +49,9 @@ watch(
   },
 );
 
-const list = useQuery({ queryKey: ["bundles"], queryFn: API.bundles });
+const list = useQuery({ queryKey: [...K.bundles], queryFn: API.bundles });
 const detail = useQuery({
-  queryKey: computed(() => ["bundle-detail", selected.value?.name, selected.value?.version]),
+  queryKey: computed(() => [...K.bundleDetail, selected.value?.name, selected.value?.version]),
   queryFn: () => API.bundleDetail(selected.value!.name, selected.value!.version),
   enabled: computed(() => !!selected.value),
 });
@@ -58,7 +59,7 @@ const detail = useQuery({
 const del = useMutation({
   mutationFn: (v: { name: string; version: string }) => API.deleteBundle(v.name, v.version),
   onSuccess: (_r, v) => {
-    qc.invalidateQueries({ queryKey: ["bundles"] });
+    qc.invalidateQueries({ queryKey: [...K.bundles] });
     selected.value = null;
     toast.success(`已删除任务包 ${v.name}@${v.version}`);
   },
@@ -70,7 +71,7 @@ function isActive(b: BundleSummary) {
 }
 
 function onUploaded(d: BundleDetail) {
-  qc.invalidateQueries({ queryKey: ["bundles"] });
+  qc.invalidateQueries({ queryKey: [...K.bundles] });
   selected.value = { name: d.name, version: d.version };
   showUpload.value = false;
 }

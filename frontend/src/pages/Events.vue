@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, type EventRow } from "@/api";
+import { K } from "@/queryKeys";
 import { fmtAge, levelLabel } from "@/i18n";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +60,7 @@ watch(sourceFilter, () => {
 });
 
 const q = useQuery({
-  queryKey: computed(() => ["events", { source: sourceFilter.value }]),
+  queryKey: computed(() => [...K.events, { source: sourceFilter.value }]),
   queryFn: () => API.events(rows.value[0]?.id ?? 0, 200, undefined, sourceFilter.value || undefined),
 });
 

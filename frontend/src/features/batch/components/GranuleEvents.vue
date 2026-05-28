@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
+import { K } from "@/queryKeys";
 import { fmtAge, levelLabel } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
 import { stripBatchPrefix } from "@/lib/utils";
@@ -9,7 +10,7 @@ import { stripBatchPrefix } from "@/lib/utils";
 const props = defineProps<{ granuleId: string; batchId: string }>();
 
 const q = useQuery({
-  queryKey: computed(() => ["granule-events", props.granuleId]),
+  queryKey: computed(() => [...K.granuleEvents, props.granuleId]),
   queryFn: () => API.granuleEvents(props.granuleId, 50),
 });
 

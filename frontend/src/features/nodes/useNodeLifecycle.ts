@@ -9,7 +9,7 @@ type NodeRecord = { enabled: boolean };
 
 type NodeLifecycleConfig<T extends NodeRecord> = {
   id: string;
-  queryKey: string;
+  queryKey: readonly string[];
   getId: (node: T) => string;
   setEnabled: (next: boolean) => Promise<unknown>;
   forget: () => Promise<unknown>;
@@ -25,7 +25,7 @@ type NodeLifecycleConfig<T extends NodeRecord> = {
 export function useNodeLifecycle<T extends NodeRecord>(config: NodeLifecycleConfig<T>) {
   const qc = useQueryClient();
   const toast = useToast();
-  const queryKey = [config.queryKey];
+  const queryKey = [...config.queryKey];
 
   const enable = useMutation({
     mutationFn: config.setEnabled,

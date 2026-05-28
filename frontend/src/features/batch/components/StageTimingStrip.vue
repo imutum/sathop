@@ -2,12 +2,13 @@
 import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
+import { K } from "@/queryKeys";
 import { TIMING_STAGE_ZH, fmtMs } from "@/i18n";
 
 const props = defineProps<{ granuleId: string }>();
 
 const q = useQuery({
-  queryKey: computed(() => ["granule-timing", props.granuleId]),
+  queryKey: computed(() => [...K.granuleTiming, props.granuleId]),
   queryFn: () => API.granuleTiming(props.granuleId),
 });
 

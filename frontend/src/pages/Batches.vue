@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { useQuery } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, type BatchSummary } from "@/api";
 import { fmtAge } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
-import { useToast } from "@/composables/useToast";
+import { K } from "@/queryKeys";
+import { useBatchListMutations } from "@/features/batch/useBatchMutations";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,10 +49,9 @@ type BatchListRow = {
   bundleLink: { name: string; version: string } | null;
 };
 
-const qc = useQueryClient();
-const toast = useToast();
 const route = useRoute();
 const router = useRouter();
+const { retry, cancel, remove, invalidate: invalidateBatches } = useBatchListMutations();
 
 const initialBundle = (route.query.bundle as string | undefined) ?? null;
 const showCreate = ref(!!initialBundle);
@@ -75,7 +75,7 @@ watch([search, scope], ([s, sc]) => {
   router.replace({ query: next });
 });
 
-const batches = useQuery({ queryKey: ["batches"], queryFn: API.batches });
+const batches = useQuery({ queryKey: [...K.batches], queryFn: API.batches });
 const all = computed(() => batches.data.value ?? []);
 const needle = computed(() => search.value.trim().toLowerCase());
 
@@ -110,47 +110,6 @@ const visible = computed(() =>
 const allCount = computed(() => all.value.length);
 const activeCount = computed(() => all.value.filter((b) => !isBatchClosed(b)).length);
 
-const retry = useMutation({
-  mutationFn: (id: string) => API.retryFailed(id),
-  onSuccess: (res) => {
-    qc.invalidateQueries({ queryKey: ["batches"] });
-    toast.success(`已重置 ${res.reset} 条失败数据粒为待处理`);
-  },
-  onError: (e: Error) => toast.error(`重试失败：${e.message}`),
-});
-
-const cancel = useMutation({
-  mutationFn: (id: string) => API.cancelBatch(id),
-  onSuccess: (res) => {
-    qc.invalidateQueries({ queryKey: ["batches"] });
-    toast.success(`已取消 ${res.cancelled} 条数据粒`);
-  },
-  onError: (e: Error) => toast.error(`取消失败：${e.message}`),
-});
-
-const remove = useMutation({
-  mutationFn: ({ id, force }: { id: string; force: boolean }) => API.deleteBatch(id, force),
-  onSuccess: (res) => {
-    qc.invalidateQueries({ queryKey: ["batches"] });
-    qc.invalidateQueries({ queryKey: ["overview"] });
-    toast.success(`已删除批次：${res.granules} 数据粒 / ${res.objects} 产物`);
-  },
-  onError: async (e: Error, vars) => {
-    if (
-      /mid-flight/.test(e.message) &&
-      (await requestConfirm({
-        title: "强制删除批次？",
-        description: `${e.message}\n\n强制删除会让正在处理的 worker 在下次状态汇报时收到 404。`,
-        confirmText: "强制删除",
-        tone: "danger",
-      }))
-    ) {
-      remove.mutate({ id: vars.id, force: true });
-      return;
-    }
-    toast.error(`删除失败：${e.message}`);
-  },
-});
 
 function bundleLink(ref: string): { name: string; version: string } | null {
   if (!ref.startsWith("orch:")) return null;
@@ -192,7 +151,7 @@ function closeCreate() {
 
 function onCreated() {
   closeCreate();
-  qc.invalidateQueries({ queryKey: ["batches"] });
+  invalidateBatches();
 }
 </script>
 
