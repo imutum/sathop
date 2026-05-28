@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
 import { API, IN_FLIGHT_STATES, type GranuleRow, type GranuleState } from "@/api";
-import { fmtAge, fmtDuration, stateLabel } from "@/i18n";
+import { fmtAge, stateLabel } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
 import { K } from "@/queryKeys";
 import { useBatchDetailMutations } from "@/features/batch/useBatchMutations";
@@ -287,22 +287,9 @@ async function confirmDelete() {
         <Field label="创建时间">
           <span class="text-xs">{{ fmtAge(b.created_at) }}</span>
         </Field>
-        <Field
-          v-if="b.eta_realtime != null || b.eta_seconds != null"
-          label="预计剩余"
-          :hint="b.eta_realtime != null ? '按最近 1 分钟吞吐' : '按历史平均吞吐'"
-        >
-          <span class="text-xs tabular-nums">≈ {{ fmtDuration((b.eta_realtime ?? b.eta_seconds!) * 1000) }}</span>
-        </Field>
-        <Field v-else label="状态">
+        <Field label="状态">
           <span class="text-xs">{{ b.status }}</span>
         </Field>
-      </div>
-      <div class="flex flex-wrap gap-1.5 border-t border-border/60 px-5 py-3">
-        <Badge v-for="(n, state) in b.counts" :key="state" :tone="state" dot>
-          {{ stateLabel(state as GranuleState) }}
-          <span class="ml-1 tabular-nums">{{ n }}</span>
-        </Badge>
       </div>
     </Card>
 
