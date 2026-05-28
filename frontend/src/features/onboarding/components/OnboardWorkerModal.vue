@@ -44,9 +44,14 @@ const heartbeat = ref(15);
 const downloadConcurrency = ref(1);
 const showToken = ref(false);
 
-type TabKey = "docker-run" | "compose";
-const activeTab = ref<TabKey>("docker-run");
+type TabKey = "one-click" | "docker-run" | "compose";
+const activeTab = ref<TabKey>("one-click");
 const tabs = computed<Array<{ key: TabKey; label: string; hint: string }>>(() => [
+  {
+    key: "one-click",
+    label: "一键部署",
+    hint: "适合云服务器，自动检测 IP / 端口 / 生成 ID",
+  },
   {
     key: "docker-run",
     label: "Docker Run",
@@ -91,8 +96,18 @@ const directHostInvalid = computed(
 // from a different PWD, invalidating every receiver's trust bundle.
 const dataDirRelative = computed(() => !isAbsolutePath(cfg.value.dataDir));
 
+const oneClickSnippet = computed(() => {
+  const orch = cfg.value.orchUrl || "http://orch.example.com:8000";
+  const tok = cfg.value.token || "YOUR_TOKEN";
+  return `export SATHOP_ORCH_URL="${orch}"
+export SATHOP_TOKEN="${tok}"
+curl -fsSL https://raw.githubusercontent.com/imutum/sathop/main/deploy/worker/setup.sh | bash`;
+});
+
 const snippet = computed(() => {
   switch (activeTab.value) {
+    case "one-click":
+      return oneClickSnippet.value;
     case "docker-run":
       return `${workerDockerRun(cfg.value)}\n\n${workerOpsHint()}`;
     case "compose":
@@ -102,6 +117,7 @@ const snippet = computed(() => {
 });
 
 const valid = computed(() => {
+  if (activeTab.value === "one-click") return !!(cfg.value.token && cfg.value.orchUrl);
   if (!cfg.value.workerId || !cfg.value.token || !cfg.value.orchUrl) return false;
   if (cfg.value.exposeMode === "caddy") return cfg.value.domain.length > 0;
   if (cfg.value.exposeMode === "selfsigned") return cfg.value.ipAddress.length > 0;
@@ -128,16 +144,34 @@ async function copySnippet() {
 <template>
   <Modal width-class="w-[min(880px,95vw)]" @close="$emit('close')">
     <h2 class="mb-1 text-lg font-semibold">接入新工作节点</h2>
-    <p class="mb-5 text-xs text-muted-foreground">
-      填好下面的参数 → 复制下方一段命令到目标机器执行 → Worker 会自动注册并开始领取任务
+    <p class="mb-4 text-xs text-muted-foreground">
+      选择部署方式 → 填参数 → 复制命令到目标机器执行
     </p>
 
+    <Tabs v-model="activeTab" class="mb-4">
+      <TabsList>
+        <TabsTrigger v-for="t in tabs" :key="t.key" :value="t.key">
+          {{ t.label }}
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
+
+    <Alert v-if="activeTab === 'one-click'" class="mb-4">
+      <AlertDescription class="space-y-1 text-2xs">
+        <div class="text-xs font-medium text-foreground">一键部署说明</div>
+        <div>自动检测公网 IP，生成随机 Worker ID，使用自签证书</div>
+        <div>端口自动选择：443 → 8443 → 9443（选第一个空闲的）</div>
+        <div>数据目录：<code class="font-mono">/var/lib/sathop/worker</code></div>
+        <div>只需填写 Orchestrator URL 和 Token，其余全自动</div>
+      </AlertDescription>
+    </Alert>
+
     <div class="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-      <div>
+      <div v-if="activeTab !== 'one-click'">
         <Label for="ow-id">Worker ID</Label>
         <Input id="ow-id" v-model="workerId" placeholder="worker-xxx" class="font-mono text-xs" />
       </div>
-      <div>
+      <div v-if="activeTab !== 'one-click'">
         <Label for="ow-data">数据目录（host 绝对路径）</Label>
         <Input id="ow-data" v-model="dataDir" :placeholder="DEFAULT_WORKER_DIR" class="font-mono text-xs" />
       </div>
@@ -174,7 +208,7 @@ async function copySnippet() {
       </div>
     </div>
 
-    <div class="mt-3">
+    <div v-if="activeTab !== 'one-click'" class="mt-3">
       <Label>暴露方式</Label>
       <div class="mt-1 grid grid-cols-1 gap-1 rounded-md border border-border bg-muted/40 p-0.5 md:grid-cols-3">
         <button
@@ -250,17 +284,17 @@ async function copySnippet() {
       </div>
     </div>
 
-    <Alert v-if="dataDirRelative" variant="destructive" class="mt-3">
+    <Alert v-if="dataDirRelative && activeTab !== 'one-click'" variant="destructive" class="mt-3">
       <AlertDescription class="text-2xs">
         相对路径会被锚定到 <code class="font-mono">docker run</code> 的当前目录——换个目录复制粘贴就会写到别处，<code class="font-mono">data/tls/</code> 下的自签证书也会随之重新生成，所有接收端的信任清单立刻失效。建议使用绝对路径（例如 <code class="font-mono">{{ DEFAULT_WORKER_DIR }}</code>）
       </AlertDescription>
     </Alert>
 
-    <p class="mt-2 text-2xs text-muted-foreground">
+    <p v-if="activeTab !== 'one-click'" class="mt-2 text-2xs text-muted-foreground">
       命令统一假设 bash 兼容 shell（Linux / macOS / WSL / Git Bash）。Windows 用户请在 WSL 或 Git Bash 中执行——<code class="font-mono">$(id -u)</code>、<code class="font-mono">$(pwd)</code>、<code class="font-mono">\</code> 续行均为 bash 语法
     </p>
 
-    <details class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
+    <details v-if="activeTab !== 'one-click'" class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
       <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
         高级：容量 / 心跳 / 并发 / 端口
       </summary>
@@ -327,16 +361,6 @@ async function copySnippet() {
     </div>
 
     <div class="mt-5">
-      <Tabs v-model="activeTab" class="flex flex-wrap items-end justify-between gap-3">
-        <TabsList>
-          <TabsTrigger v-for="t in tabs" :key="t.key" :value="t.key">
-            {{ t.label }}
-          </TabsTrigger>
-        </TabsList>
-        <span class="text-2xs text-muted-foreground">
-          {{ tabs.find((t) => t.key === activeTab)?.hint }}
-        </span>
-      </Tabs>
 
       <div v-if="activeTab === 'docker-run'" class="mt-3">
         <Alert>
