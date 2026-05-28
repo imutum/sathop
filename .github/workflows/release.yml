@@ -7,7 +7,7 @@ name: Release images
 on:
   push:
     branches: [main]
-    paths: [uv.lock]
+    paths: [uv.lock, "deploy/runtime/**"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -31,7 +31,7 @@ jobs:
           fetch-depth: 2
       - id: diff
         run: |
-          if git diff HEAD~1 --name-only | grep -q '^uv\.lock$'; then
+          if git diff HEAD~1 --name-only | grep -qE '^(uv\.lock|deploy/runtime/)'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
