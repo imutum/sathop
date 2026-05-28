@@ -9,7 +9,7 @@ set -euo pipefail
 # 使用自签证书。只需预装 Docker。
 #
 # 环境变量（可在运行前 export，或脚本会交互询问）:
-#   SATHOP_ORCH_URL   orchestrator 地址，如 https://sathop.mutum.top:16181
+#   SATHOP_ORCH_URL   orchestrator 地址，如 https://orch.example.com:8000
 #   SATHOP_TOKEN       API token
 # ─────────────────────────────────────────────────────────────────────
 
