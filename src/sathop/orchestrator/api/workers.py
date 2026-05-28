@@ -43,8 +43,6 @@ from .worker_heartbeat import (
 from .worker_leases import (
     LEASE_DURATION,
     claim_pending_granules,
-    count_worker_inflight,
-    held_granule_sample,
     lease_limit,
     renew_worker_leases,
     revoke_worker_leases,
@@ -67,10 +65,12 @@ def _check_worker_version(version: str, worker_id: str) -> None:
         )
 
 
-async def _enabled_worker_or_403(s: AsyncSession, worker_id: str) -> Worker:
+async def _active_worker_or_403(s: AsyncSession, worker_id: str) -> Worker:
     worker = await s.get(Worker, worker_id)
-    if worker is None or not worker.enabled:
-        raise HTTPException(403, "worker not registered or disabled")
+    if worker is None or worker.removed_at is not None:
+        raise HTTPException(403, "worker not registered or removed")
+    if worker.operator_paused:
+        raise HTTPException(403, "worker is paused")
     return worker
 
 
@@ -88,6 +88,8 @@ _LEASE_LOCK = asyncio.Lock()
 async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> WorkerRegisterResponse:
     _check_worker_version(req.version, req.worker_id)
     w = await s.get(Worker, req.worker_id)
+    if w is not None and w.removed_at is not None:
+        raise HTTPException(410, "worker has been removed — start a new worker with a different ID")
     if w is None:
         w = Worker(
             worker_id=req.worker_id,
@@ -102,9 +104,6 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
         w.version = req.version
         w.capacity = req.capacity
         w.public_url = req.public_url
-        # Update CA only when the worker provides one — preserves a previously
-        # registered CA across restarts without it (e.g. user temporarily ran
-        # the worker without the caddy_data mount).
         if req.ca_pem is not None:
             w.ca_pem = req.ca_pem
         w.last_seen = utcnow()
@@ -116,29 +115,30 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
 async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) -> WorkerHeartbeatResponse:
     _check_worker_version(req.version, req.worker_id)
     w = await get_or_404(s, Worker, req.worker_id, "worker not registered")
-    now = utcnow()
 
-    # In-memory telemetry — no DB write
+    if w.removed_at is not None:
+        return WorkerHeartbeatResponse(removed=True)
+
+    now = utcnow()
     apply_worker_heartbeat(req.worker_id, req, now)
 
-    # DB ops below only dirty the session on real state changes (rare)
     flapped = await record_version_flap(s, w, new_version=req.version, source=req.worker_id, kind="worker")
     renewed = await renew_worker_leases(s, req.worker_id, now)
     revoked = await revoked_active_granules(s, req)
-    restart_requested = await consume_one_shot_signal(
-        s, w, "restart_requested_at", source=w.worker_id, message="restart signal delivered to worker"
+    update_requested = await consume_one_shot_signal(
+        s, w, "update_requested_at", source=w.worker_id, message="update signal delivered to worker"
     )
     gc_requested = await consume_one_shot_signal(
         s, w, "gc_requested_at", source=w.worker_id, message="cache GC signal delivered to worker"
     )
 
-    if flapped or renewed or restart_requested or gc_requested:
+    if flapped or renewed or update_requested or gc_requested:
         await commit_and_publish(s, Scope.WORKERS)
 
     return WorkerHeartbeatResponse(
         desired_capacity=w.desired_capacity,
         revoked_granule_ids=revoked,
-        restart_requested=restart_requested,
+        update_requested=update_requested,
         operator_paused=bool(w.operator_paused),
         gc_requested=gc_requested,
     )
@@ -151,7 +151,7 @@ async def lease(req: LeaseRequest, s: AsyncSession = Depends(session)) -> LeaseR
 
 
 async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
-    worker = await _enabled_worker_or_403(s, req.worker_id)
+    worker = await _active_worker_or_403(s, req.worker_id)
     now = utcnow()
     expires = now + LEASE_DURATION
 
@@ -255,34 +255,48 @@ async def set_capacity(
     return {"ok": True, "desired_capacity": desired_capacity}
 
 
-@router.post("/{worker_id}/restart")
-async def request_restart(worker_id: str, s: AsyncSession = Depends(session)) -> dict:
-    """Operator-triggered restart. Sets a one-shot flag the worker picks up on
-    its next heartbeat and exits 0 on. Idempotent — re-clicks while a previous
-    request hasn't been consumed just refresh the timestamp."""
+@router.post("/{worker_id}/update")
+async def request_update(worker_id: str, s: AsyncSession = Depends(session)) -> dict:
     return await signal_one_shot(
         s,
         Worker,
         worker_id,
-        "restart_requested_at",
+        "update_requested_at",
         scope=Scope.WORKERS,
-        message="restart requested via UI",
+        message="update requested via UI",
     )
 
 
-@router.put("/{worker_id}/enabled")
-async def set_enabled(
-    worker_id: str,
-    enabled: bool = Body(embed=True),
-    s: AsyncSession = Depends(session),
-) -> dict:
-    """Runtime kill-switch. Disabled workers receive 403 on next lease call,
-    so in-flight work drains naturally before the worker goes idle."""
-    w = await get_or_404(s, Worker, worker_id, "worker not found")
-    w.enabled = enabled
-    await log(s, worker_id, f"worker {'enabled' if enabled else 'disabled'}")
-    await commit_and_publish(s, Scope.WORKERS)
-    return {"ok": True, "enabled": enabled}
+@router.post("/update-all")
+async def request_update_all(s: AsyncSession = Depends(session)) -> dict:
+    rows = (await s.execute(select(Worker).where(Worker.removed_at.is_(None)))).scalars().all()
+    count = 0
+    now = utcnow()
+    for w in rows:
+        if w.operator_paused:
+            continue
+        w.update_requested_at = now
+        count += 1
+    if count:
+        await log(s, "operator", f"update-all: {count} worker(s)")
+        await commit_and_publish(s, Scope.WORKERS)
+    return {"ok": True, "count": count}
+
+
+@router.post("/remove-all")
+async def request_remove_all(s: AsyncSession = Depends(session)) -> dict:
+    rows = (await s.execute(select(Worker).where(Worker.removed_at.is_(None)))).scalars().all()
+    now = utcnow()
+    for w in rows:
+        w.removed_at = now
+        w.operator_paused = True
+    count = len(rows)
+    if count:
+        await log(s, "operator", f"remove-all: {count} worker(s)")
+        await commit_and_publish(s, Scope.WORKERS)
+        for w in rows:
+            telemetry.evict_worker(w.worker_id)
+    return {"ok": True, "count": count}
 
 
 @router.put("/{worker_id}/pause")
@@ -291,10 +305,6 @@ async def set_paused(
     operator_paused: bool = Body(embed=True),
     s: AsyncSession = Depends(session),
 ) -> dict:
-    """Operator-set persistent pause. Distinct from `enabled=false`:
-      - paused: keep the worker registered + drain in-flight; resume any time
-      - disabled: prelude to forgetting the row entirely
-    Heartbeat reply propagates the flag; worker stops new leases until cleared."""
     w = await get_or_404(s, Worker, worker_id, "worker not found")
     w.operator_paused = operator_paused
     await log(s, worker_id, f"worker {'paused' if operator_paused else 'resumed'} via UI")
@@ -337,37 +347,29 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
 
 
 @router.delete("/{worker_id}")
-async def forget_worker(
+async def remove_worker(
     worker_id: str,
     force: bool = Query(default=False),
     s: AsyncSession = Depends(session),
 ) -> dict:
-    """Permanently remove a decommissioned worker row. Refuses if the worker is
-    still enabled or still holding any granule storage — operator must disable
-    and let it drain first. Pass ?force=true to orphan remaining objects and
-    delete anyway (objects become unreachable until re-uploaded)."""
+    """Mark a worker as removed. Next heartbeat returns removed=True; worker
+    drains in-flight work and exits. Row stays for retention sweep.
+    Pass ?force=true to also revoke leases immediately."""
     w = await get_or_404(s, Worker, worker_id, "worker not found")
-    if w.enabled:
-        raise HTTPException(409, "worker is still enabled — disable it first")
-    inflight = await count_worker_inflight(s, worker_id)
-    if inflight > 0 and not force:
-        sample = await held_granule_sample(s, worker_id)
-        more = f" (+{inflight - len(sample)} more)" if inflight > len(sample) else ""
-        raise HTTPException(
-            409,
-            f"worker still holds {inflight} granule(s): {', '.join(sample)}{more}; wait for drain (or ?force=true)",
-        )
+    if w.removed_at is not None:
+        return {"ok": True}
+    now = utcnow()
     if force:
-        await revoke_worker_leases(s, worker_id, utcnow())
-        now = utcnow()
+        await revoke_worker_leases(s, worker_id, now)
         await s.execute(
             update(GranuleObject)
             .where(GranuleObject.worker_id == worker_id)
             .where(GranuleObject.deleted_at.is_(None))
             .values(deleted_at=now)
         )
-    await s.delete(w)
-    await log(s, worker_id, f"worker forgotten (row deleted, force={force})")
-    await commit_and_publish(s, Scope.WORKERS, Scope.BATCHES)
+    w.removed_at = now
+    w.operator_paused = True
+    await log(s, worker_id, f"worker removed (force={force})")
+    await commit_and_publish(s, Scope.WORKERS, Scope.BATCHES if force else None)
     telemetry.evict_worker(worker_id)
     return {"ok": True}

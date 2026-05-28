@@ -129,9 +129,10 @@ async def _collect(s: AsyncSession) -> bytes:
 
     now = datetime.now(UTC)
     workers = (await s.execute(select(Worker))).scalars().all()
-    g_workers.labels(enabled="true").set(sum(1 for w in workers if w.enabled))
-    g_workers.labels(enabled="false").set(sum(1 for w in workers if not w.enabled))
-    for w in workers:
+    active = [w for w in workers if w.removed_at is None]
+    g_workers.labels(enabled="true").set(sum(1 for w in active if not w.operator_paused))
+    g_workers.labels(enabled="false").set(sum(1 for w in active if w.operator_paused))
+    for w in active:
         wt = telemetry.get_worker(w.worker_id) or w
         g_hb_worker.labels(worker_id=w.worker_id).set(_age_seconds(now, wt.last_seen))
         g_disk_used.labels(worker_id=w.worker_id).set(wt.disk_used_gb * GB)

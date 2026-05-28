@@ -48,9 +48,9 @@ async def list_workers(s: AsyncSession = Depends(session)) -> list[dict]:
             "version": w.version,
             "capacity": w.capacity,
             "public_url": w.public_url,
-            "enabled": w.enabled,
             "desired_capacity": w.desired_capacity,
             "operator_paused": bool(w.operator_paused),
+            "removed_at": w.removed_at.isoformat() if w.removed_at else None,
         }
         d.update(telemetry.worker_snapshot(w))
         result.append(d)

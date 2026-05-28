@@ -161,6 +161,6 @@ async def test_zero_retention_days_skips_prune(orch_session):
     event_store.append(ts=utcnow() - timedelta(days=365), source="t", level="info", message="ancient")
 
     counts = await retention.sweep_retention(events_days=0, deleted_days=0)
-    assert counts == {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0}
+    assert counts == {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0, "workers": 0}
 
     assert len(event_store.query(limit=10000)) == 1

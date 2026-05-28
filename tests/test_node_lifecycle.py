@@ -1,5 +1,4 @@
-"""Worker / receiver enable + forget endpoints — runtime kill-switch and
-permanent removal, with safety guards so an operator can't drop a busy node."""
+"""Worker remove + pause, receiver enable + forget endpoints."""
 
 from __future__ import annotations
 
@@ -26,9 +25,9 @@ async def client(tmp_path, patch_settings):
         await orch_db.shutdown_db()
 
 
-async def _add_worker(worker_id: str = "w1", enabled: bool = True) -> None:
+async def _add_worker(worker_id: str = "w1") -> None:
     async with orch_db._session_maker() as s:
-        s.add(Worker(worker_id=worker_id, version="t", capacity=4, enabled=enabled))
+        s.add(Worker(worker_id=worker_id, version="t", capacity=4))
         await s.commit()
 
 
@@ -58,48 +57,80 @@ async def _seed_granule(
         await s.commit()
 
 
-async def _worker_enabled(worker_id: str) -> bool:
-    async with orch_db._session_maker() as s:
-        w = await s.get(Worker, worker_id)
-        assert w is not None
-        return w.enabled
+# ─── worker remove ─────────────────────────────────────────────────────────
 
 
-# ─── worker enable/disable ──────────────────────────────────────────────────
-
-
-async def test_worker_disable_then_enable_round_trip(client):
+async def test_worker_remove_marks_removed_at(client):
     await _add_worker()
-    r = client.put("/api/workers/w1/enabled", json={"enabled": False})
+    r = client.delete("/api/workers/w1")
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "enabled": False}
-    assert (await _worker_enabled("w1")) is False
+    async with orch_db._session_maker() as s:
+        w = await s.get(Worker, "w1")
+        assert w is not None
+        assert w.removed_at is not None
 
-    r = client.put("/api/workers/w1/enabled", json={"enabled": True})
+
+async def test_worker_remove_idempotent(client):
+    await _add_worker()
+    assert client.delete("/api/workers/w1").status_code == 200
+    assert client.delete("/api/workers/w1").status_code == 200
+
+
+async def test_worker_remove_heartbeat_returns_removed(client):
+    await _add_worker()
+    client.delete("/api/workers/w1")
+    r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
     assert r.status_code == 200
-    assert (await _worker_enabled("w1")) is True
+    assert r.json()["removed"] is True
 
 
-async def test_worker_disabled_lease_returns_403(client):
-    await _add_worker(enabled=False)
+async def test_worker_remove_blocks_re_register(client):
+    await _add_worker()
+    client.delete("/api/workers/w1")
+    r = client.post(
+        "/api/workers/register",
+        json={"worker_id": "w1", "version": "0.1.0", "capacity": 4},
+    )
+    assert r.status_code == 410
+
+
+async def test_worker_remove_blocks_lease(client):
+    await _add_worker()
+    client.delete("/api/workers/w1")
     r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 4})
     assert r.status_code == 403
 
 
-async def test_worker_enable_404_when_unknown(client):
-    r = client.put("/api/workers/ghost/enabled", json={"enabled": False})
+async def test_worker_remove_404_when_unknown(client):
+    r = client.delete("/api/workers/ghost")
     assert r.status_code == 404
+
+
+async def test_worker_remove_force_revokes_leases(client):
+    await _add_worker()
+    await _seed_granule("w1", state=GranuleState.DOWNLOADING.value, granule_id="b:dl")
+    r = client.delete("/api/workers/w1?force=true")
+    assert r.status_code == 200
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, "b:dl")
+        assert g.state == GranuleState.PENDING.value
+
+
+# ─── worker paused blocks lease ──────────────────────────────────────────
+
+
+async def test_worker_paused_lease_returns_403(client):
+    await _add_worker()
+    client.put("/api/workers/w1/pause", json={"operator_paused": True})
+    r = client.post("/api/workers/lease", json={"worker_id": "w1", "capacity": 4})
+    assert r.status_code == 403
 
 
 # ─── worker self-paused state surfaces in /api/workers ─────────────────────
 
 
 async def test_worker_paused_round_trip_via_heartbeat(client):
-    """A heartbeat with paused=True should land on the workers row and ride the
-    list endpoint, so the dashboard can flag a self-paused-but-online worker."""
     await _add_worker()
-    # Default after registration: paused must be falsy (the row may have NULL
-    # right after the additive ALTER TABLE — both forms must read as not-paused).
     r0 = client.get("/api/workers")
     assert r0.status_code == 200
     [row0] = r0.json()
@@ -115,96 +146,30 @@ async def test_worker_paused_round_trip_via_heartbeat(client):
     [row1] = r1.json()
     assert row1["paused"] is True
 
-    # And it clears again on the next heartbeat once disk drops below resume
-    # threshold (the worker stops sending paused=True).
     client.post("/api/workers/heartbeat", json={"worker_id": "w1", "paused": False})
     [row2] = client.get("/api/workers").json()
     assert row2["paused"] is False
 
 
-# ─── worker forget (delete) ─────────────────────────────────────────────────
-
-
-async def test_worker_forget_refuses_when_enabled(client):
-    await _add_worker()
-    r = client.delete("/api/workers/w1")
-    assert r.status_code == 409
-    assert "disable it first" in r.json()["detail"]
-    # row stays
-    assert (await _worker_enabled("w1")) is True
-
-
-async def test_worker_forget_refuses_with_inflight(client):
-    await _add_worker(enabled=False)
-    await _seed_granule("w1", state=GranuleState.PROCESSING.value, granule_id="b:still-here")
-    r = client.delete("/api/workers/w1")
-    assert r.status_code == 409
-    detail = r.json()["detail"]
-    assert "wait for drain" in detail
-    # Operator needs to know which granules — the IDs surface in the error.
-    assert "b:still-here" in detail
-
-
-async def test_worker_forget_succeeds_when_disabled_and_idle(client):
-    await _add_worker(enabled=False)
-    r = client.delete("/api/workers/w1")
-    assert r.status_code == 200
-    async with orch_db._session_maker() as s:
-        assert (await s.get(Worker, "w1")) is None
-
-
-async def test_worker_forget_404_when_unknown(client):
-    r = client.delete("/api/workers/ghost")
-    assert r.status_code == 404
-
-
-# ─── receiver enable/disable + forget ───────────────────────────────────────
-
-
-async def test_receiver_disable_blocks_pull(client):
-    await _add_receiver(enabled=False)
-    r = client.post("/api/receivers/pull", json={"receiver_id": "r1", "limit": 10})
-    assert r.status_code == 403
-
-
-async def test_receiver_enable_round_trip_and_forget(client):
-    await _add_receiver()
-    # delete refused while enabled
-    assert client.delete("/api/receivers/r1").status_code == 409
-    # disable
-    assert client.put("/api/receivers/r1/enabled", json={"enabled": False}).status_code == 200
-    # delete now allowed
-    r = client.delete("/api/receivers/r1")
-    assert r.status_code == 200
-    async with orch_db._session_maker() as s:
-        assert (await s.get(Receiver, "r1")) is None
-
-
-# ─── operator-set pause via heartbeat reply ────────────────────────────────
+# ─── worker operator-set pause via heartbeat reply ────────────────────────
 
 
 async def test_worker_pause_endpoint_propagates_via_heartbeat(client):
-    """PUT /pause sets the persistent flag; the next heartbeat reply
-    forwards it, and /api/workers exposes it for the UI."""
     await _add_worker()
     r = client.put("/api/workers/w1/pause", json={"operator_paused": True})
     assert r.status_code == 200
     assert r.json() == {"ok": True, "operator_paused": True}
 
-    # /api/workers reflects the flag so the frontend renders the pause Badge
     [row] = client.get("/api/workers").json()
     assert row["operator_paused"] is True
 
-    # Worker-side observes operator_paused=True on the next heartbeat reply.
     r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
     assert r.status_code == 200
-    body = r.json()
-    assert body["operator_paused"] is True
-    # Persistent: operator_paused stays True across heartbeats until cleared.
+    assert r.json()["operator_paused"] is True
+
     r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
     assert r.json()["operator_paused"] is True
 
-    # Resume → flag flips, heartbeat reply mirrors it.
     assert client.put("/api/workers/w1/pause", json={"operator_paused": False}).status_code == 200
     r = client.post("/api/workers/heartbeat", json={"worker_id": "w1"})
     assert r.json()["operator_paused"] is False
@@ -219,8 +184,6 @@ async def test_worker_pause_404_when_unknown(client):
 
 
 async def test_worker_revoke_all_resets_leases_to_pending(client):
-    """Sets up a worker holding two granules (one DOWNLOADING, one PROCESSED)
-    and confirms revoke-all flips both back to PENDING with retry_count +1."""
     await _add_worker()
     await _seed_granule("w1", state=GranuleState.DOWNLOADING.value, granule_id="b:dl")
     await _seed_granule("w1", state=GranuleState.PROCESSED.value, granule_id="b:proc")
@@ -239,8 +202,6 @@ async def test_worker_revoke_all_resets_leases_to_pending(client):
 
 
 async def test_worker_revoke_all_skips_terminal_granules(client):
-    """A granule that already moved to UPLOADED (worker handed off to receiver)
-    must NOT be reverted — that would re-process work already shipped."""
     await _add_worker()
     await _seed_granule("w1", state=GranuleState.UPLOADED.value, granule_id="b:done")
     await _seed_granule("w1", state=GranuleState.DOWNLOADING.value, granule_id="b:dl")
@@ -263,13 +224,78 @@ async def test_worker_gc_endpoint_one_shot_via_heartbeat(client):
     r = client.post("/api/workers/w1/gc")
     assert r.status_code == 200
 
-    # First heartbeat after the click sees the flag.
     body = client.post("/api/workers/heartbeat", json={"worker_id": "w1"}).json()
     assert body["gc_requested"] is True
-    # Second heartbeat: flag was consumed (one-shot), no longer set.
     body = client.post("/api/workers/heartbeat", json={"worker_id": "w1"}).json()
     assert body["gc_requested"] is False
 
 
 async def test_worker_gc_404_when_unknown(client):
     assert client.post("/api/workers/ghost/gc").status_code == 404
+
+
+# ─── receiver enable/disable + forget ───────────────────────────────────────
+
+
+async def test_receiver_disable_blocks_pull(client):
+    await _add_receiver(enabled=False)
+    r = client.post("/api/receivers/pull", json={"receiver_id": "r1", "limit": 10})
+    assert r.status_code == 403
+
+
+async def test_receiver_enable_round_trip_and_forget(client):
+    await _add_receiver()
+    assert client.delete("/api/receivers/r1").status_code == 409
+    assert client.put("/api/receivers/r1/enabled", json={"enabled": False}).status_code == 200
+    r = client.delete("/api/receivers/r1")
+    assert r.status_code == 200
+    async with orch_db._session_maker() as s:
+        assert (await s.get(Receiver, "r1")) is None
+
+
+# ─── update-all ────────────────────────────────────────────────────────────
+
+
+async def test_update_all_sends_to_active_workers(client):
+    await _add_worker("w1")
+    await _add_worker("w2")
+    # pause w2 — should be skipped
+    client.put("/api/workers/w2/pause", json={"operator_paused": True})
+    r = client.post("/api/workers/update-all")
+    assert r.status_code == 200
+    assert r.json()["count"] == 1
+
+    # w1 gets the signal
+    body = client.post("/api/workers/heartbeat", json={"worker_id": "w1"}).json()
+    assert body["update_requested"] is True
+    # w2 does not
+    body = client.post("/api/workers/heartbeat", json={"worker_id": "w2"}).json()
+    assert body["update_requested"] is False
+
+
+# ─── remove-all ────────────────────────────────────────────────────────────
+
+
+async def test_remove_all_marks_all_workers(client):
+    await _add_worker("w1")
+    await _add_worker("w2")
+    r = client.post("/api/workers/remove-all")
+    assert r.status_code == 200
+    assert r.json()["count"] == 2
+
+    # both get removed signal
+    body = client.post("/api/workers/heartbeat", json={"worker_id": "w1"}).json()
+    assert body["removed"] is True
+    body = client.post("/api/workers/heartbeat", json={"worker_id": "w2"}).json()
+    assert body["removed"] is True
+
+    # re-register blocked
+    r = client.post("/api/workers/register", json={"worker_id": "w1", "version": "t", "capacity": 4})
+    assert r.status_code == 410
+
+
+async def test_remove_all_skips_already_removed(client):
+    await _add_worker("w1")
+    client.delete("/api/workers/w1")
+    r = client.post("/api/workers/remove-all")
+    assert r.json()["count"] == 0

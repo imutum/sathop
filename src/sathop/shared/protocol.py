@@ -64,27 +64,12 @@ class WorkerRegisterResponse(BaseModel):
 
 class WorkerHeartbeatResponse(BaseModel):
     ok: bool = True
-    # None ⇒ no override; worker clamps env capacity by this if set.
     desired_capacity: int | None = None
-    # Granules the worker reported as active that the orchestrator no longer
-    # considers leased to it (batch/granule cancelled, lease swept, manual
-    # reassignment). Worker cancels the matching asyncio.Task to free up the
-    # CPU/bandwidth those granules are wasting on now-ghost work.
     revoked_granule_ids: list[str] = Field(default_factory=list)
-    # One-shot signal: operator clicked "重启" in the UI. Worker exits 0 on
-    # receipt; docker `restart: unless-stopped` brings it back. Orchestrator
-    # clears the underlying flag the same heartbeat it returns True, so a
-    # later heartbeat (post-restart) sees False and the worker doesn't loop.
-    restart_requested: bool = False
-    # Persistent operator-set pause flag. True ⇒ worker stops accepting new
-    # leases (in-flight work continues). Distinct from the aggregate
-    # `WorkerHeartbeat.paused` field — that one bundles operator + backpressure
-    # into "currently not accepting leases"; this one is strictly the
-    # operator-clicked toggle, persisted until the operator clears it.
+    update_requested: bool = False
     operator_paused: bool = False
-    # One-shot: operator asked the worker to run cache GC right now (instead
-    # of waiting for the periodic loop). Mirrors restart_requested semantics.
     gc_requested: bool = False
+    removed: bool = False
 
 
 class WorkerHeartbeat(BaseModel):

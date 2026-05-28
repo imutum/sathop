@@ -1,11 +1,7 @@
-"""Operator-triggered restart, delivered via heartbeat reply.
+"""Operator-triggered update (worker) / restart (receiver), delivered via heartbeat reply.
 
-POST /api/{workers,receivers}/{id}/restart sets a one-shot flag the next
-heartbeat consumes — the response carries `restart_requested=True` exactly
-once, the orchestrator clears the flag, and a follow-up heartbeat reads
-False. Two containers sharing the same ID would race for the signal; the
-first one to heartbeat wins, which is the same "first to ack wins" pattern
-we already use for lease reclamation."""
+Worker: POST /api/workers/{id}/update → heartbeat returns update_requested=True once.
+Receiver: POST /api/receivers/{id}/restart → heartbeat returns restart_requested=True once."""
 
 from __future__ import annotations
 
@@ -43,51 +39,40 @@ def _worker_heartbeat() -> dict:
     return {"worker_id": "w1", "version": "0.3.9"}
 
 
-def test_worker_restart_endpoint_404_for_unknown(client):
-    r = client.post("/api/workers/ghost/restart")
+def test_worker_update_endpoint_404_for_unknown(client):
+    r = client.post("/api/workers/ghost/update")
     assert r.status_code == 404
 
 
-async def test_worker_restart_signal_round_trip(client):
-    """Set flag → heartbeat returns True once → orchestrator clears → next
-    heartbeat returns False. The whole point is one-shot delivery: a second
-    heartbeat (post-restart, from the freshly-spawned container) must NOT see
-    the flag again, otherwise we'd loop the worker forever."""
+async def test_worker_update_signal_round_trip(client):
     await _seed_worker()
 
-    # No restart pending yet.
     r = client.post("/api/workers/heartbeat", json=_worker_heartbeat())
     assert r.status_code == 200
-    assert r.json()["restart_requested"] is False
+    assert r.json()["update_requested"] is False
 
-    # Operator clicks restart.
-    r = client.post("/api/workers/w1/restart")
+    r = client.post("/api/workers/w1/update")
     assert r.status_code == 200
 
-    # First heartbeat after the click consumes it.
     r = client.post("/api/workers/heartbeat", json=_worker_heartbeat())
-    assert r.json()["restart_requested"] is True
+    assert r.json()["update_requested"] is True
 
-    # And it's gone from the row.
     async with orch_db._session_maker() as s:
         w = await s.get(Worker, "w1")
-        assert w.restart_requested_at is None
+        assert w.update_requested_at is None
 
-    # Subsequent heartbeats see False — no looping.
     r = client.post("/api/workers/heartbeat", json=_worker_heartbeat())
-    assert r.json()["restart_requested"] is False
+    assert r.json()["update_requested"] is False
 
 
-async def test_worker_restart_idempotent(client):
-    """Re-clicking before the heartbeat consumes it just refreshes the ts —
-    still one delivery. Prevents 'I clicked twice; will it restart twice?'"""
+async def test_worker_update_idempotent(client):
     await _seed_worker()
-    client.post("/api/workers/w1/restart")
-    client.post("/api/workers/w1/restart")  # second click
+    client.post("/api/workers/w1/update")
+    client.post("/api/workers/w1/update")
     r = client.post("/api/workers/heartbeat", json=_worker_heartbeat())
-    assert r.json()["restart_requested"] is True
+    assert r.json()["update_requested"] is True
     r = client.post("/api/workers/heartbeat", json=_worker_heartbeat())
-    assert r.json()["restart_requested"] is False
+    assert r.json()["update_requested"] is False
 
 
 # ─── receiver ──────────────────────────────────────────────────────────────

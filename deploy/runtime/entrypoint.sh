@@ -84,8 +84,15 @@ with open('$REPO_DIR/pyproject.toml','rb') as f:
 
 # ── Supervisor loop ──────────────────────────────────────────────────
 # Each iteration: git pull → dep sync → (orchestrator: frontend check) → start.
-# Python exits → loop pulls latest code and restarts.
+# Exit codes:
+#   0   = update requested (git pull + restart process)
+#   42  = removed by orchestrator (break loop → container stops)
+#   other = crash (exponential backoff, then retry)
 export PATH="$REPO_DIR/.venv/bin:$PATH"
+
+BACKOFF=1
+MAX_BACKOFF=60
+STABLE_THRESHOLD=30
 
 while true; do
   update_repo
@@ -94,15 +101,28 @@ while true; do
 
   echo "[entrypoint] Starting sathop.$ROLE ..."
   cd /app
+  START_TS=$(date +%s)
   set +e
   python -m "sathop.$ROLE.main"
   EXIT_CODE=$?
   set -e
+  ELAPSED=$(( $(date +%s) - START_TS ))
 
-  if [ "$EXIT_CODE" -ne 0 ]; then
-    echo "[entrypoint] Process exited with code $EXIT_CODE, restarting in 3s ..."
-    sleep 3
+  if [ "$EXIT_CODE" -eq 42 ]; then
+    echo "[entrypoint] Process removed (exit 42) — stopping container."
+    break
+  elif [ "$EXIT_CODE" -eq 0 ]; then
+    echo "[entrypoint] Update requested — pulling latest code ..."
+    BACKOFF=1
   else
-    echo "[entrypoint] Process exited cleanly, restarting ..."
+    if [ "$ELAPSED" -ge "$STABLE_THRESHOLD" ]; then
+      BACKOFF=1
+    fi
+    echo "[entrypoint] Process crashed (exit $EXIT_CODE), retrying in ${BACKOFF}s ..."
+    sleep "$BACKOFF"
+    BACKOFF=$(( BACKOFF * 2 ))
+    if [ "$BACKOFF" -gt "$MAX_BACKOFF" ]; then
+      BACKOFF=$MAX_BACKOFF
+    fi
   fi
 done

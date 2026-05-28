@@ -74,34 +74,20 @@ class Worker(Base):
     # can ALTER TABLE on existing DBs and old rows read as NULL.
     queue_pending_upload: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     queue_uploading: Mapped[int] = mapped_column(Integer, default=0)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    # Worker self-reports True while it's gating off leases (disk pressure today).
-    # Display-only — actual lease gating happens worker-side.
     paused: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Runtime concurrency override; NULL ⇒ worker's env capacity. Rides heartbeat replies.
     desired_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Self-signed root CA (PEM) the worker uploaded at register time; aggregated
-    # into /api/receivers/ca-bundle so receivers can pin trust without skip_verify.
-    # NULL for workers without a self-signed front (publicly-trusted or HTTP).
     ca_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Operator-clicked "重启" timestamp; consumed (cleared) on the next heartbeat
-    # which then returns restart_requested=True to the worker. NULL ⇒ no pending
-    # restart. One-shot — a re-click after the heartbeat consumed it sets a new ts.
-    restart_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
-    # Operator-set persistent pause flag — distinct from `paused` (which the
-    # worker self-reports as the aggregate "not accepting leases for any
-    # reason"). True ⇒ heartbeat reply tells the worker to stop accepting new
-    # leases until the operator clears it. SQL column is still named
-    # `pause_requested` for back-compat with existing DBs (no rename
-    # migration); the Python attribute is `operator_paused` to make the
-    # WHO-set-this-pause direction obvious at the call sites.
-    # Nullable so _ensure_columns can ALTER TABLE on existing DBs; readers
-    # coerce NULL → False.
+    # One-shot "update" signal (was "restart"). SQL column keeps old name for
+    # back-compat with existing DBs; Python attr is the canonical name.
+    update_requested_at: Mapped[datetime | None] = mapped_column(
+        "restart_requested_at", UtcDateTime(), nullable=True
+    )
+    # Operator-set persistent pause flag. SQL column keeps old name for back-compat.
     operator_paused: Mapped[bool | None] = mapped_column(
         "pause_requested", Boolean, default=False, nullable=True
     )
-    # Operator-clicked "立即清理缓存" timestamp; one-shot, mirrors restart_requested_at.
     gc_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    removed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
 
 class Receiver(Base):

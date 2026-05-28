@@ -28,10 +28,11 @@ import { useNow } from "@/i18n";
 // re-evaluate every tick — otherwise an absent worker stays "在线" until the
 // next data refetch.
 export function nodeStatusBadge(
-  enabled: boolean,
+  active: boolean,
   lastSeenISO: string,
+  inactiveLabel = "已禁用",
 ): { tone: BadgeTone; label: string } {
-  if (!enabled) return { tone: "error", label: "已禁用" };
+  if (!active) return { tone: "error", label: inactiveLabel };
   const sec = (useNow().value - new Date(lastSeenISO).getTime()) / 1000;
   if (sec < 60) return { tone: "acked", label: "在线" };
   if (sec < 300) return { tone: "warn", label: "待机" };

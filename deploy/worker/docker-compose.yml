@@ -25,7 +25,7 @@ services:
 
   worker:
     image: ${SATHOP_IMAGE:-ghcr.io/imutum/sathop}/runtime:${SATHOP_TAG:-latest}
-    restart: unless-stopped
+    restart: on-failure
     env_file: .env
     depends_on: [minio, aria2c]
     user: "${SATHOP_UID:-10001}:${SATHOP_GID:-10001}"

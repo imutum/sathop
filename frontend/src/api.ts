@@ -73,15 +73,16 @@ const nodeApi = {
       `/api/workers/${encodeURIComponent(workerId)}/capacity`,
       { desired_capacity: desiredCapacity },
     ),
-  setWorkerEnabled: (workerId: string, enabled: boolean) =>
-    putJson<{ ok: boolean; enabled: boolean }>(
-      `/api/workers/${encodeURIComponent(workerId)}/enabled`,
-      { enabled },
+  removeWorker: (workerId: string, force = false) =>
+    deleteJson<{ ok: boolean }>(
+      `/api/workers/${encodeURIComponent(workerId)}${force ? "?force=true" : ""}`,
     ),
-  forgetWorker: (workerId: string) =>
-    deleteJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}`),
-  restartWorker: (workerId: string) =>
-    postJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}/restart`),
+  updateWorker: (workerId: string) =>
+    postJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}/update`),
+  updateAllWorkers: () =>
+    postJson<{ ok: boolean; count: number }>("/api/workers/update-all"),
+  removeAllWorkers: () =>
+    postJson<{ ok: boolean; count: number }>("/api/workers/remove-all"),
   setWorkerPaused: (workerId: string, operator_paused: boolean) =>
     putJson<{ ok: boolean; operator_paused: boolean }>(
       `/api/workers/${encodeURIComponent(workerId)}/pause`,

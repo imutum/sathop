@@ -69,7 +69,7 @@ async def consume_one_shot_signal(
     message: str,
 ) -> bool:
     """Consumer side. Clear `entity.<attr>` if set and log; return True iff
-    the flag fired. Same shape works across Worker.restart_requested_at /
+    the flag fired. Same shape works across Worker.update_requested_at /
     gc_requested_at / Receiver.restart_requested_at."""
     if getattr(entity, attr) is None:
         return False

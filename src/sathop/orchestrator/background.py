@@ -11,7 +11,7 @@ from sathop.shared.state_machine import LEASED_STATES, GranuleState, Scope
 from . import event_store
 from .api.progress import evict_granule_ids
 from .config import settings
-from .db import Granule, GranuleObject, GranuleStageTiming, get_session_maker, utcnow
+from .db import Granule, GranuleObject, GranuleStageTiming, Worker, get_session_maker, utcnow
 from .pubsub import commit_and_publish, log_event, publish
 
 _log = logging.getLogger("sathop.orch.background")
@@ -74,7 +74,7 @@ async def sweep_retention(
     ev_days = settings.retain_events_days if events_days is None else events_days
     del_days = settings.retain_deleted_days if deleted_days is None else deleted_days
     now = utcnow()
-    out = {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0}
+    out = {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0, "workers": 0}
 
     if ev_days > 0:
         cutoff = now - timedelta(days=ev_days)
@@ -110,6 +110,13 @@ async def sweep_retention(
                 r = await s.execute(delete(Granule).where(Granule.granule_id.in_(doomed)))
                 out["granules"] = getattr(r, "rowcount", 0) or 0
 
+        if del_days > 0:
+            cutoff_w = now - timedelta(days=del_days)
+            r = await s.execute(
+                delete(Worker).where(Worker.removed_at.is_not(None)).where(Worker.removed_at < cutoff_w)
+            )
+            out["workers"] = getattr(r, "rowcount", 0) or 0
+
         await s.commit()
 
     if any(out.values()):
@@ -117,6 +124,8 @@ async def sweep_retention(
             publish({"scope": "events"})
         if out["granules"] or out["granule_objects"]:
             publish({"scope": "batches"})
+        if out["workers"]:
+            publish({"scope": "workers"})
     return out
 
 

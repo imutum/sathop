@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import CopyButton from "@/components/CopyButton.vue";
 import HintTip from "@/components/HintTip.vue";
-import { useNodeLifecycle } from "@/features/nodes/useNodeLifecycle";
 import ProgressBar from "@/components/ProgressBar.vue";
 import TextInput from "@/ui/TextInput.vue";
 import { Icon } from "@/components/Icon";
@@ -30,34 +29,46 @@ const props = defineProps<{ worker: WorkerInfo; focused?: boolean }>();
 const qc = useQueryClient();
 const toast = useToast();
 
-const lifecycle = useNodeLifecycle<WorkerInfo>({
-  id: props.worker.worker_id,
-  queryKey: K.workers,
-  getId: (worker) => worker.worker_id,
-  setEnabled: (next) => API.setWorkerEnabled(props.worker.worker_id, next),
-  forget: () => API.forgetWorker(props.worker.worker_id),
-  restart: () => API.restartWorker(props.worker.worker_id),
-  enabledMessage: "已启用",
-  disabledMessage: "已禁用，已在手任务排空后停止接新单",
-  deletedMessage: `已删除节点 ${props.worker.worker_id}`,
-  restartMessage: "已发送重启信号，下次心跳生效",
-  forgetConfirm: {
-    title: `永久移除节点 ${props.worker.worker_id}？`,
-    description:
-      "将从注册表中删除这条节点记录。\n" +
-      "如果 worker 容器仍在运行，下次心跳会自动重新注册（misclick 重启容器即恢复）。\n" +
-      "想让它彻底不再回来：先停掉容器再点移除。",
-    confirmText: "永久移除",
-    tone: "danger",
-  },
-  restartConfirm: {
-    title: `重启节点 ${props.worker.worker_id}？`,
-    description:
-      "向该 worker 发送重启信号 — 它会在下一次心跳收到后立即退出，由容器 restart 策略拉起。\n" +
-      "在手任务的 lease 在 30 分钟后被回收并重新分配，重启过程中不接新单。",
-    confirmText: "重启",
-  },
+const isRemoved = computed(() => props.worker.removed_at != null);
+
+const doUpdate = useMutation({
+  mutationFn: () => API.updateWorker(props.worker.worker_id),
+  onSuccess: () => toast.success("已发送更新信号，下次心跳生效"),
+  onError: (e: Error) => toast.error(`更新失败：${e.message}`),
 });
+
+const doRemove = useMutation({
+  mutationFn: () => API.removeWorker(props.worker.worker_id),
+  onSuccess: () => {
+    qc.invalidateQueries({ queryKey: [...K.workers] });
+    toast.success(`已移除节点 ${props.worker.worker_id}`);
+  },
+  onError: (e: Error) => toast.error(`移除失败：${e.message}`),
+});
+
+const lifecyclePending = computed(() => doUpdate.isPending.value || doRemove.isPending.value);
+
+async function confirmUpdate(): Promise<void> {
+  const ok = await requestConfirm({
+    title: `更新节点 ${props.worker.worker_id}？`,
+    description:
+      "向该 worker 发送更新信号 — 它会在下一次心跳收到后排空在手任务并退出，自动拉取最新代码后重新启动。",
+    confirmText: "更新",
+  });
+  if (ok) doUpdate.mutate();
+}
+
+async function confirmRemove(): Promise<void> {
+  const ok = await requestConfirm({
+    title: `移除节点 ${props.worker.worker_id}？`,
+    description:
+      "该节点将被永久移除，容器会在排空任务后自动停止。\n" +
+      "移除后该节点 ID 不可再注册 — 如需恢复，请启动新的 worker。",
+    confirmText: "移除",
+    tone: "danger",
+  });
+  if (ok) doRemove.mutate();
+}
 
 const pause = useMutation({
   mutationFn: (next: boolean) => API.setWorkerPaused(props.worker.worker_id, next),
@@ -96,7 +107,7 @@ async function onRevokeAll(): Promise<void> {
     description:
       "把这台节点持有的全部在手 lease 重置回 待分配，等其他 worker 抢占。\n" +
       "已下载/已处理的中间产物会被丢弃；retry_count 会 +1，仍受 max_retries 限制。\n" +
-      "用于 worker 卡住但还在心跳的场景（不卡的话就用禁用 + 等 lease 到期更稳）。",
+      "用于 worker 卡住但还在心跳的场景。",
     confirmText: "立即释放",
     tone: "danger",
   });
@@ -125,7 +136,11 @@ const inflightTotal = computed(
 );
 
 const status = computed(() =>
-  nodeStatusBadge(props.worker.enabled, props.worker.last_seen),
+  nodeStatusBadge(
+    !isRemoved.value,
+    props.worker.last_seen,
+    "已移除",
+  ),
 );
 
 const diskPct = computed(() =>
@@ -193,7 +208,7 @@ function onKey(e: KeyboardEvent) {
         : undefined
     "
   >
-    <Card>
+    <Card :class="isRemoved ? 'opacity-50' : undefined">
       <div class="flex items-start justify-between gap-2 border-b border-border/60 px-5 py-4">
         <div class="min-w-0">
           <div class="flex items-center gap-1 font-mono text-[13px] font-semibold">
@@ -212,13 +227,13 @@ function onKey(e: KeyboardEvent) {
         </div>
         <div class="flex shrink-0 items-center gap-1.5">
           <HintTip
-            v-if="worker.operator_paused"
+            v-if="worker.operator_paused && !isRemoved"
             text="管理员手动暂停 — 在手任务继续，不接新单。点下方「恢复」按钮解除"
           >
             <Badge tone="warn">手动暂停</Badge>
           </HintTip>
           <HintTip
-            v-else-if="worker.paused"
+            v-else-if="worker.paused && !isRemoved"
             :text="`worker 自我暂停 — 当前磁盘 ${diskPct.toFixed(0)}%，等待降到恢复阈值再领新任务`"
           >
             <Badge tone="warn">磁盘暂停</Badge>
@@ -354,7 +369,7 @@ function onKey(e: KeyboardEvent) {
               </Button>
             </template>
             <HintTip
-              v-else
+              v-else-if="!isRemoved"
               :text="worker.desired_capacity != null
                 ? '修改运行时并发上限（不能超过容器声明的容量）'
                 : '人工限流：临时压低这台节点的并发上限'"
@@ -380,80 +395,71 @@ function onKey(e: KeyboardEvent) {
                 事件
               </RouterLink>
             </Button>
-            <Button
-              type="button"
-              :variant="worker.operator_paused ? 'default' : 'outline'"
-              size="xs"
-              :disabled="pause.isPending.value"
-              :title="worker.operator_paused
-                ? '恢复领取新任务'
-                : '暂停领取新任务（在手的继续跑完）'"
-              @click="onTogglePause"
-            >
-              {{ pause.isPending.value ? "…" : worker.operator_paused ? "恢复" : "暂停" }}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger as-child>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-sm"
-                  title="更多运维操作"
-                  aria-label="更多运维操作"
-                >
-                  <Icon name="more" :size="14" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" class="min-w-48">
-                <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
-                  运维
-                </DropdownMenuLabel>
-                <DropdownMenuItem
-                  :disabled="gc.isPending.value"
-                  @select="onGc"
-                >
-                  立即清理缓存
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  :disabled="revoke.isPending.value || inflightTotal === 0"
-                  :title="inflightTotal === 0
-                    ? '当前无在手 lease'
-                    : `立即释放在手的 ${inflightTotal} 条 lease（丢弃中间产物）`"
-                  class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
-                  @select="onRevokeAll"
-                >
-                  释放在手 lease {{ inflightTotal > 0 ? `(${inflightTotal})` : '' }}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
-                  生命周期
-                </DropdownMenuLabel>
-                <DropdownMenuItem
-                  :disabled="lifecycle.pending.value"
-                  @select="lifecycle.confirmRestart"
-                >
-                  重启…
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  :disabled="lifecycle.pending.value || worker.enabled"
-                  :title="worker.enabled ? '请先禁用此节点，再点击此按钮永久移除' : '永久从注册表中删除（misclick → 重启 worker 自动重建）'"
-                  class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
-                  @select="lifecycle.confirmForget"
-                >
-                  永久移除…
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              type="button"
-              :variant="worker.enabled ? 'outline' : 'default'"
-              size="xs"
-              :disabled="lifecycle.pending.value"
-              :title="worker.enabled ? '禁用此节点（在手任务继续，可点启用恢复）' : '重新启用此节点'"
-              @click="lifecycle.setEnabled(!worker.enabled)"
-            >
-              {{ lifecycle.pending.value ? "…" : worker.enabled ? "禁用" : "启用" }}
-            </Button>
+            <template v-if="!isRemoved">
+              <Button
+                type="button"
+                :variant="worker.operator_paused ? 'default' : 'outline'"
+                size="xs"
+                :disabled="pause.isPending.value"
+                :title="worker.operator_paused
+                  ? '恢复领取新任务'
+                  : '暂停领取新任务（在手的继续跑完）'"
+                @click="onTogglePause"
+              >
+                {{ pause.isPending.value ? "…" : worker.operator_paused ? "恢复" : "暂停" }}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    title="更多运维操作"
+                    aria-label="更多运维操作"
+                  >
+                    <Icon name="more" :size="14" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="min-w-48">
+                  <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
+                    运维
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem
+                    :disabled="gc.isPending.value"
+                    @select="onGc"
+                  >
+                    立即清理缓存
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    :disabled="revoke.isPending.value || inflightTotal === 0"
+                    :title="inflightTotal === 0
+                      ? '当前无在手 lease'
+                      : `立即释放在手的 ${inflightTotal} 条 lease（丢弃中间产物）`"
+                    class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
+                    @select="onRevokeAll"
+                  >
+                    释放在手 lease {{ inflightTotal > 0 ? `(${inflightTotal})` : '' }}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
+                    生命周期
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem
+                    :disabled="lifecyclePending"
+                    @select="confirmUpdate"
+                  >
+                    更新…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    :disabled="lifecyclePending"
+                    class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
+                    @select="confirmRemove"
+                  >
+                    移除…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </template>
             <span class="whitespace-nowrap">心跳 {{ fmtAge(worker.last_seen) }}</span>
           </div>
         </div>

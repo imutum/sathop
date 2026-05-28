@@ -12,9 +12,8 @@ Three concerns live here:
    the canonical Runner; renewal stays the documented bulk-UPDATE carve-out
    (ADR-0002) because it must remain race-safe against the sweeper.
 
-3. **Worker-state introspection** — `count_worker_inflight` and
-   `held_granule_sample` answer "what is this Worker still holding?" for
-   both the quota path and operator-facing forget-worker flow.
+3. **Worker-state introspection** — `count_worker_inflight` answers
+   "how many granules is this Worker still holding?" for the quota path.
 """
 
 from __future__ import annotations
@@ -140,34 +139,6 @@ async def claim_pending_granules(
         batch = await s.get(Batch, granule.batch_id)
         items.append(lease_item(granule, batch))
     return items
-
-
-async def held_granule_sample(s: AsyncSession, worker_id: str, limit: int = 5) -> list[str]:
-    leased = (
-        (
-            await s.execute(
-                select(Granule.granule_id)
-                .where(Granule.leased_by == worker_id)
-                .where(Granule.state.in_(LEASED_STATES))
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    uploaded = (
-        (
-            await s.execute(
-                select(distinct(GranuleObject.granule_id))
-                .where(GranuleObject.worker_id == worker_id)
-                .where(GranuleObject.deleted_at.is_(None))
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    return list({*leased, *uploaded})[:limit]
 
 
 async def renew_worker_leases(s: AsyncSession, worker_id: str, now) -> int:

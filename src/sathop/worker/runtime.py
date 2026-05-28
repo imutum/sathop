@@ -66,13 +66,15 @@ class LeaseRevoked(Exception):
     pass
 
 
+class WorkerRemoved(BaseException):
+    """Inherits BaseException so run_periodic's `except Exception` won't swallow it."""
+
+
 DOWNLOAD_PROGRESS_MIN_INTERVAL_SECONDS = 2.0
 DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT = 5.0
 LEASE_MAX_BACKOFF_FACTOR = 6
-# Matches deploy/worker/docker-compose.yml::stop_grace_period — drift between
-# the two means docker SIGKILLs us mid-drain (too low) or wastes restart time
-# (too high). Keep them in lockstep.
 DRAIN_WATCHDOG_TIMEOUT_SEC = 60
+EXIT_CODE_REMOVED = 42
 
 
 class Worker:
@@ -229,19 +231,25 @@ class Worker:
                 )
             )
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 410:
+                raise WorkerRemoved from e
             if e.response.status_code != 404:
                 raise
-            # Worker row missing — orchestrator was wiped, race with /forget, etc.
-            # Re-register and let the next beat carry real telemetry.
             log.warning("heartbeat 404 — worker row missing, re-registering")
             try:
                 await self._register()
                 log.info("re-registered after 404")
+            except httpx.HTTPStatusError as reg_e:
+                if reg_e.response.status_code == 410:
+                    raise WorkerRemoved from reg_e
+                log.warning("re-register failed (will retry next beat): %s", reg_e)
             except Exception as reg_e:
                 log.warning("re-register failed (will retry next beat): %s", reg_e)
             return
-        if resp.restart_requested:
-            self._start_drain("restart_requested via orchestrator")
+        if resp.removed:
+            raise WorkerRemoved
+        if resp.update_requested:
+            self._start_drain("update_requested via orchestrator")
         if self._remote_pause != resp.operator_paused:
             log.info("remote pause %s", "engaged" if resp.operator_paused else "released")
             self._remote_pause = resp.operator_paused
