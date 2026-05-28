@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, TypeDecorator
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, TypeDecorator, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -258,9 +258,16 @@ def _url() -> str:
     return f"sqlite+aiosqlite:///{settings.db_path.as_posix()}"
 
 
+def _set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
+    dbapi_connection.execute("PRAGMA journal_mode=WAL")
+    dbapi_connection.execute("PRAGMA synchronous=NORMAL")
+    dbapi_connection.execute("PRAGMA busy_timeout=5000")
+
+
 async def init_db() -> None:
     global _engine, _session_maker
     _engine = create_async_engine(_url(), echo=False, future=True)
+    event.listen(_engine.sync_engine, "connect", _set_sqlite_pragmas)
     _session_maker = async_sessionmaker(_engine, expire_on_commit=False)
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
