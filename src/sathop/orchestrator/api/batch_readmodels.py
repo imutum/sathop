@@ -20,8 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sathop.shared.protocol import BatchSummary, GranuleRow
 from sathop.shared.state_machine import IN_FLIGHT_STATES
 
-from ..config import settings
 from ..db import Batch, Granule, GranuleObject, GranuleStageTiming
+from ._helpers import object_is_exhausted
 
 
 async def summaries(s: AsyncSession, batches: list[Batch]) -> list[BatchSummary]:
@@ -167,9 +167,7 @@ async def _exhausted_by_batch(s: AsyncSession, batch_ids: list[str]) -> dict[str
         select(Granule.batch_id, func.count(GranuleObject.id))
         .join(Granule, GranuleObject.granule_id == Granule.granule_id)
         .where(Granule.batch_id.in_(batch_ids))
-        .where(GranuleObject.acked_at.is_(None))
-        .where(GranuleObject.deleted_at.is_(None))
-        .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
+        .where(object_is_exhausted())
         .group_by(Granule.batch_id)
     )
     return {bid: n for bid, n in (await s.execute(stmt)).all()}
@@ -181,9 +179,7 @@ async def _exhausted_by_granule(s: AsyncSession, granule_ids: list[str]) -> dict
     stmt = (
         select(GranuleObject.granule_id, func.count(GranuleObject.id))
         .where(GranuleObject.granule_id.in_(granule_ids))
-        .where(GranuleObject.acked_at.is_(None))
-        .where(GranuleObject.deleted_at.is_(None))
-        .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
+        .where(object_is_exhausted())
         .group_by(GranuleObject.granule_id)
     )
     return {gid: n for gid, n in (await s.execute(stmt)).all()}

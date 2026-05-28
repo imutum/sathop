@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import PlainTextResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
@@ -26,9 +26,9 @@ from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, Receiver, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ._helpers import get_or_404
+from ._helpers import get_or_404, object_is_pullable
 from ._transition import apply_transition
-from .one_shot import consume_one_shot_signal, record_version_flap, request_one_shot_signal
+from .one_shot import consume_one_shot_signal, record_version_flap, signal_one_shot
 
 router = APIRouter(prefix="/receivers", tags=["receivers"], dependencies=[Depends(require_token)])
 
@@ -78,9 +78,7 @@ async def pull(req: PullRequest, s: AsyncSession = Depends(session)) -> PullResp
         select(GranuleObject, Granule, Batch)
         .join(Granule, GranuleObject.granule_id == Granule.granule_id)
         .join(Batch, Granule.batch_id == Batch.batch_id)
-        .where(GranuleObject.acked_at.is_(None))
-        .where(GranuleObject.deleted_at.is_(None))
-        .where(func.coalesce(GranuleObject.failed_pulls, 0) < settings.max_pull_failures)
+        .where(object_is_pullable())
         .where((Batch.target_receiver_id == req.receiver_id) | (Batch.target_receiver_id.is_(None)))
         .where(Granule.state == GranuleState.UPLOADED.value)
         .limit(req.limit)
@@ -161,16 +159,10 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
 @router.post("/{receiver_id}/restart")
 async def request_restart(receiver_id: str, s: AsyncSession = Depends(session)) -> dict:
     """Operator-triggered restart — see workers.request_restart."""
-    r = await get_or_404(s, Receiver, receiver_id, "receiver not found")
-    await request_one_shot_signal(
-        s,
-        r,
-        "restart_requested_at",
-        source=receiver_id,
-        message="restart requested via UI",
-        scope=Scope.RECEIVERS,
+    return await signal_one_shot(
+        s, Receiver, receiver_id, "restart_requested_at",
+        scope=Scope.RECEIVERS, message="restart requested via UI",
     )
-    return {"ok": True}
 
 
 @router.put("/{receiver_id}/enabled")

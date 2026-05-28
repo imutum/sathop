@@ -27,7 +27,7 @@ from sathop.shared.state_machine import (
 )
 
 from ..bundle_schema import validate_granule
-from ..config import require_token, settings
+from ..config import require_token
 from ..db import (
     Batch,
     Bundle,
@@ -42,7 +42,7 @@ from ..db import (
 )
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ._helpers import get_or_404
+from ._helpers import get_or_404, object_is_exhausted
 from ._transition import apply_transition
 from .batch_readmodels import (
     granule_rows,
@@ -245,9 +245,7 @@ async def reset_exhausted_objects(batch_id: str, s: AsyncSession = Depends(sessi
     result = await s.execute(
         update(GranuleObject)
         .where(GranuleObject.granule_id.in_(granule_ids_subq))
-        .where(GranuleObject.acked_at.is_(None))
-        .where(GranuleObject.deleted_at.is_(None))
-        .where(func.coalesce(GranuleObject.failed_pulls, 0) >= settings.max_pull_failures)
+        .where(object_is_exhausted())
         .values(failed_pulls=0)
     )
     reset = getattr(result, "rowcount", 0) or 0
