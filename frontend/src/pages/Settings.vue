@@ -1,26 +1,43 @@
 <script setup lang="ts">
-import { useQuery, useMutation } from "@tanstack/vue-query";
+import { ref } from "vue";
+import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
 import { K } from "@/queryKeys";
 import { requestConfirm } from "@/composables/useConfirm";
+import { useToast } from "@/composables/useToast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import CardSection from "@/components/CardSection.vue";
 import Field from "@/components/Field.vue";
 import PageHeader from "@/components/PageHeader.vue";
 
+const toast = useToast();
 const info = useQuery({ queryKey: [...K.orchInfo], queryFn: API.orchestratorInfo });
 
-const restart = useMutation({ mutationFn: API.restartOrchestrator });
+const updating = ref(false);
 
-async function confirmRestart() {
+async function confirmUpdateAndRestart() {
   const ok = await requestConfirm({
     title: "更新并重启 Orchestrator？",
-    description: "将拉取最新代码并重启 Orchestrator 进程。期间服务短暂不可用（约 3-5 秒）。",
-    confirmText: "确认重启",
+    description: "将更新前端资源、拉取最新代码并重启进程。期间服务短暂不可用（约 3-5 秒）。",
+    confirmText: "确认更新",
     tone: "danger",
   });
-  if (ok) restart.mutate();
+  if (!ok) return;
+
+  updating.value = true;
+  try {
+    const r = await API.updateFrontend();
+    if (r.action === "downloaded") {
+      toast.success(`前端 v${r.version} 下载完成`);
+    } else {
+      toast.success("前端已是最新版本");
+    }
+    await API.restartOrchestrator();
+  } catch (e: any) {
+    toast.error(`更新失败：${e.message ?? e}`);
+    updating.value = false;
+  }
 }
 </script>
 
@@ -31,9 +48,9 @@ async function confirmRestart() {
         <Button
           variant="outline"
           size="sm"
-          :pending="restart.isPending.value"
-          pending-label="重启中…"
-          @click="confirmRestart"
+          :pending="updating"
+          pending-label="更新中…"
+          @click="confirmUpdateAndRestart"
         >
           更新并重启
         </Button>

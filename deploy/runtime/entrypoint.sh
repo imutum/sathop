@@ -48,70 +48,39 @@ sync_deps() {
   uv sync --frozen --extra "$ROLE" --quiet
 }
 
-# ── Helper: frontend (orchestrator only) ─────────────────────────────
-fetch_frontend() {
-  [ "$ROLE" = "orchestrator" ] || return 0
+# ── First boot: clone + frontend ─────────────────────────────────────
+# Initial clone is needed before the loop so we have pyproject.toml
+# for the version number. Frontend is downloaded ONCE here if missing;
+# subsequent updates are triggered from the Web UI (POST /api/admin/update-frontend).
+update_repo
+sync_deps
 
+if [ "$ROLE" = "orchestrator" ] && [ ! -d "$REPO_DIR/frontend/dist" ]; then
   VERSION=$(python -c "
 import tomllib
-with open('pyproject.toml','rb') as f:
+with open('$REPO_DIR/pyproject.toml','rb') as f:
     print(tomllib.load(f)['project']['version'])
 " 2>/dev/null || echo "")
-
-  STAMP="$REPO_DIR/frontend/dist/.version"
-  if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$VERSION" ]; then
-    return 0
-  fi
-
-  # Cooldown: skip if last attempt was <10 min ago (avoid rate-limit loop)
-  FAIL_STAMP="/tmp/.sathop-frontend-fail"
-  if [ -f "$FAIL_STAMP" ]; then
-    LAST_FAIL=$(cat "$FAIL_STAMP")
-    NOW=$(date +%s)
-    if [ $((NOW - LAST_FAIL)) -lt 600 ]; then
-      echo "[entrypoint] Frontend download on cooldown — skipping."
-      return 0
-    fi
-  fi
-
-  FRONTEND_URL="${SATHOP_FRONTEND_URL:-}"
-  if [ -z "$FRONTEND_URL" ] && [ -n "$VERSION" ]; then
+  if [ -n "$VERSION" ]; then
     CLEAN_REPO=$(echo "${SATHOP_GIT_REPO:-https://github.com/imutum/sathop.git}" | sed 's|\.git$||')
-    FRONTEND_URL="${CLEAN_REPO}/releases/download/v${VERSION}/frontend-dist.tar.gz"
-  fi
-
-  # Use git token for authenticated GitHub API access (5000 req/h vs 60)
-  CURL_OPTS=(-fsSL)
-  if [ -n "${SATHOP_GIT_TOKEN:-}" ] && echo "$FRONTEND_URL" | grep -q "github.com"; then
-    CURL_OPTS+=(-H "Authorization: token ${SATHOP_GIT_TOKEN}")
-  fi
-
-  if [ -n "$FRONTEND_URL" ]; then
-    echo "[entrypoint] Downloading frontend v${VERSION} ..."
-    rm -rf "$REPO_DIR/frontend/dist"
-    if curl "${CURL_OPTS[@]}" "$FRONTEND_URL" | tar -xz -C "$REPO_DIR/frontend/"; then
-      echo "$VERSION" > "$STAMP"
-      rm -f "$FAIL_STAMP"
+    FRONTEND_URL="${SATHOP_FRONTEND_URL:-${CLEAN_REPO}/releases/download/v${VERSION}/frontend-dist.tar.gz}"
+    echo "[entrypoint] First boot — downloading frontend v${VERSION} ..."
+    if curl -fsSL "$FRONTEND_URL" | tar -xz -C "$REPO_DIR/frontend/"; then
+      echo "$VERSION" > "$REPO_DIR/frontend/dist/.version"
       echo "[entrypoint] Frontend ready."
     else
-      date +%s > "$FAIL_STAMP"
-      echo "[entrypoint] Frontend download failed — running without Web UI (retry in 10 min)."
+      echo "[entrypoint] Frontend download failed — use Web API to retry later."
     fi
-  else
-    echo "[entrypoint] No frontend dist — running without Web UI."
   fi
-}
+fi
 
 # ── Supervisor loop ──────────────────────────────────────────────────
 # Python exits → loop pulls latest code and restarts. No container
 # restart needed. API restart endpoints just kill the Python process;
-# the loop picks up from git pull.
+# the loop picks up from git pull. Frontend is NOT re-downloaded here.
 export PATH="$REPO_DIR/.venv/bin:$PATH"
 
 while true; do
-  update_repo
-  sync_deps
-  fetch_frontend
 
   echo "[entrypoint] Starting sathop.$ROLE ..."
   cd /app

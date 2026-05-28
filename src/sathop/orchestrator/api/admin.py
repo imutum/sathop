@@ -173,6 +173,57 @@ async def _gc_apply(s: AsyncSession, candidates: list[Bundle]) -> dict[str, Any]
     return {"deleted": deleted_meta, "freed_bytes": freed, "unlinked_blobs": len(unlinked)}
 
 
+@router.post("/update-frontend")
+async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
+    """Download frontend dist from GitHub Release matching current version.
+    Idempotent: skips if already up to date. Triggered manually from UI."""
+    import asyncio
+    import shutil
+    import tarfile
+    import tempfile
+    from io import BytesIO
+    from pathlib import Path
+
+    import httpx
+
+    repo_dir = Path(__file__).resolve().parents[3]
+    dist_dir = repo_dir / "frontend" / "dist"
+    stamp = dist_dir / ".version"
+
+    if stamp.is_file() and stamp.read_text().strip() == __version__:
+        return {"ok": True, "version": __version__, "action": "already_up_to_date"}
+
+    git_repo = os.environ.get("SATHOP_GIT_REPO", "https://github.com/imutum/sathop.git")
+    clean_repo = git_repo.removesuffix(".git")
+    url = os.environ.get(
+        "SATHOP_FRONTEND_URL",
+        f"{clean_repo}/releases/download/v{__version__}/frontend-dist.tar.gz",
+    )
+
+    await log(s, "orchestrator", f"downloading frontend v{__version__}")
+    await commit_and_publish(s, Scope.EVENTS)
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+    except Exception as e:
+        raise HTTPException(502, f"frontend download failed: {e}")
+
+    if dist_dir.exists():
+        shutil.rmtree(dist_dir)
+    dist_dir.mkdir(parents=True, exist_ok=True)
+
+    buf = BytesIO(r.content)
+    with tarfile.open(fileobj=buf, mode="r:gz") as tf:
+        tf.extractall(dist_dir.parent, filter="data")
+
+    stamp.write_text(__version__)
+    await log(s, "orchestrator", f"frontend v{__version__} ready")
+    await commit_and_publish(s, Scope.EVENTS)
+    return {"ok": True, "version": __version__, "action": "downloaded"}
+
+
 @router.post("/restart")
 async def restart_orchestrator(s: AsyncSession = Depends(session)) -> dict:
     """Self-restart: log, respond, then SIGTERM self. The entrypoint supervisor
