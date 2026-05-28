@@ -123,10 +123,7 @@ export function receiverDockerCompose(cfg: ReceiverConfig): string {
 ${envLines}
     volumes:
       - ${cfg.outputDir}:/data/archive
-      - sathop-repo:/app/repo
-
-volumes:
-  sathop-repo:
+      - ./repo:/app/repo
 `;
 }
 
@@ -329,7 +326,7 @@ export function workerDockerCompose(cfg: WorkerConfig): string {
 ${envLines}
 ${cfg.exposeMode !== "caddy" ? portLine : ""}    volumes:
       - ${cfg.dataDir}:/app/data
-      - sathop-repo:/app/repo
+      - ./repo:/app/repo
 `;
 
   if (cfg.exposeMode === "caddy") {
@@ -349,14 +346,8 @@ ${cfg.exposeMode !== "caddy" ? portLine : ""}    volumes:
       - worker
 
 volumes:
-  sathop-repo:
   caddy_data:
   caddy_config:
-`;
-  } else {
-    body += `
-volumes:
-  sathop-repo:
 `;
   }
 

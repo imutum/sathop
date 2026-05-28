@@ -9,7 +9,7 @@ services:
       SATHOP_STORAGE_DIR: /data/archive
     volumes:
       - ${RECEIVER_HOST_ARCHIVE:-./archive}:/data/archive
-      - repo:/app/repo
+      - ./repo:/app/repo
     stop_signal: SIGTERM
     stop_grace_period: 30s
     healthcheck:
@@ -18,6 +18,3 @@ services:
       timeout: 3s
       retries: 3
       start_period: 20s
-
-volumes:
-  repo:
