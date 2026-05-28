@@ -44,7 +44,6 @@ from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import get_or_404, object_is_exhausted
 from ._transition import apply_transition
-from .progress import evict_granule
 from .batch_readmodels import (
     granule_rows,
     state_counts,
@@ -52,6 +51,7 @@ from .batch_readmodels import (
     summary,
     summary_just_created,
 )
+from .progress import evict_granule
 
 router = APIRouter(prefix="/batches", tags=["batches"], dependencies=[Depends(require_token)])
 

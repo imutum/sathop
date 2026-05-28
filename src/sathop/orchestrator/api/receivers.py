@@ -160,8 +160,12 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
 async def request_restart(receiver_id: str, s: AsyncSession = Depends(session)) -> dict:
     """Operator-triggered restart — see workers.request_restart."""
     return await signal_one_shot(
-        s, Receiver, receiver_id, "restart_requested_at",
-        scope=Scope.RECEIVERS, message="restart requested via UI",
+        s,
+        Receiver,
+        receiver_id,
+        "restart_requested_at",
+        scope=Scope.RECEIVERS,
+        message="restart requested via UI",
     )
 
 

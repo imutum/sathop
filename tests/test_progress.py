@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator.api.progress import _clear as clear_progress, evict_granule
+from sathop.orchestrator.api.progress import _clear as clear_progress
+from sathop.orchestrator.api.progress import evict_granule
 from sathop.orchestrator.db import Batch, Granule
 from sathop.orchestrator.main import app
 from sathop.shared.protocol import GranuleState

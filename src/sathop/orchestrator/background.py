@@ -8,8 +8,8 @@ from sqlalchemy import delete, select, update
 from sathop.shared.periodic import run_periodic
 from sathop.shared.state_machine import LEASED_STATES, GranuleState, Scope
 
-from .config import settings
 from .api.progress import evict_granule_ids
+from .config import settings
 from .db import Event, Granule, GranuleObject, GranuleStageTiming, get_session_maker, utcnow
 from .pubsub import commit_and_publish, log_event, publish
 

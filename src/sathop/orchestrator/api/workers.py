@@ -25,7 +25,6 @@ from sathop.shared.state_machine import (
     Scope,
     UploadCompleted,
 )
-
 from sathop.shared.versioning import parse_version
 
 from ..config import require_token, settings
@@ -257,8 +256,12 @@ async def request_restart(worker_id: str, s: AsyncSession = Depends(session)) ->
     its next heartbeat and exits 0 on. Idempotent — re-clicks while a previous
     request hasn't been consumed just refresh the timestamp."""
     return await signal_one_shot(
-        s, Worker, worker_id, "restart_requested_at",
-        scope=Scope.WORKERS, message="restart requested via UI",
+        s,
+        Worker,
+        worker_id,
+        "restart_requested_at",
+        scope=Scope.WORKERS,
+        message="restart requested via UI",
     )
 
 
@@ -319,8 +322,12 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
     sets a timestamp, next heartbeat reply forwards it, worker runs prune_caches
     out-of-band of its periodic loop."""
     return await signal_one_shot(
-        s, Worker, worker_id, "gc_requested_at",
-        scope=Scope.WORKERS, message="cache GC requested via UI",
+        s,
+        Worker,
+        worker_id,
+        "gc_requested_at",
+        scope=Scope.WORKERS,
+        message="cache GC requested via UI",
     )
 
 
