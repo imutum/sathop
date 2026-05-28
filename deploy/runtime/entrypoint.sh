@@ -14,7 +14,7 @@ GIT_REPO="${SATHOP_GIT_REPO:-https://github.com/imutum/sathop.git}"
 GIT_REF="${SATHOP_GIT_REF:-main}"
 
 if [ -n "${SATHOP_GIT_TOKEN:-}" ]; then
-  GIT_REPO=$(echo "$GIT_REPO" | sed "s|https://|https://${SATHOP_GIT_TOKEN}@|")
+  GIT_REPO="${GIT_REPO/https:\/\//https://${SATHOP_GIT_TOKEN}@}"
 fi
 
 # ── Clone or pull ─────────────────────────────────────────────────────

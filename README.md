@@ -46,10 +46,12 @@
 
 ```bash
 docker run -d --name sathop-orch \
+  -e SATHOP_ROLE=orchestrator \
   -e SATHOP_TOKEN=your-secret-token \
   -p 8000:8000 \
   -v sathop-data:/app/data \
-  ghcr.io/imutum/sathop/orchestrator
+  -v sathop-repo:/app/repo \
+  ghcr.io/imutum/sathop/runtime
 ```
 
 浏览器访问 `http://<host>:8000/`，输入 Token 登录。
@@ -58,22 +60,26 @@ docker run -d --name sathop-orch \
 
 ```bash
 docker run -d --name sathop-worker \
+  -e SATHOP_ROLE=worker \
   -e SATHOP_WORKER_ID=worker-1 \
   -e SATHOP_URL=sathop://your-secret-token@<orchestrator-host>:8000 \
   -e SATHOP_PUBLIC_URL=http://<worker-host>:9000 \
   -p 9000:9000 \
   -v sathop-worker:/app/data \
-  ghcr.io/imutum/sathop/worker
+  -v sathop-repo:/app/repo \
+  ghcr.io/imutum/sathop/runtime
 ```
 
 ### 3. Receiver（接收节点）
 
 ```bash
 docker run -d --name sathop-recv \
+  -e SATHOP_ROLE=receiver \
   -e SATHOP_RECEIVER_ID=recv-1 \
   -e SATHOP_URL=sathop://your-secret-token@<orchestrator-host>:8000 \
   -v /your/archive:/data/archive \
-  ghcr.io/imutum/sathop/receiver
+  -v sathop-repo:/app/repo \
+  ghcr.io/imutum/sathop/runtime
 ```
 
 ### 开始使用
@@ -151,12 +157,10 @@ cd frontend && npm ci && cd ..             # 前端依赖（Vue 3）
 .venv/Scripts/ruff.exe check . --fix       # lint + auto-fix
 ```
 
-从源码构建镜像：
+从源码构建 runtime 镜像：
 
 ```bash
-docker build -f deploy/orchestrator/Dockerfile -t sathop/orchestrator .
-docker build -f deploy/worker/Dockerfile      -t sathop/worker .
-docker build -f deploy/receiver/Dockerfile    -t sathop/receiver .
+docker build -f deploy/runtime/Dockerfile -t sathop/runtime .
 ```
 
 ## License
