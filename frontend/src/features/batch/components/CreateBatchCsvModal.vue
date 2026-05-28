@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import FilePicker from "@/components/FilePicker.vue";
 import Modal from "@/ui/Modal.vue";
 
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 200 * 1024 * 1024;
 
 const props = defineProps<{ schema: Schema }>();
 const emit = defineEmits<{ close: []; import: [rows: Row[]] }>();
