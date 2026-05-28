@@ -60,6 +60,9 @@ class OrchClient:
         if r.status_code == 401:
             raise AuthTokenInvalid(f"orch {path} returned 401 — SATHOP_TOKEN mismatch")
         if r.status_code == 426:
-            detail = r.json().get("detail", "") if r.headers.get("content-type", "").startswith("application/json") else r.text
+            try:
+                detail = r.json().get("detail", r.text) if r.headers.get("content-type", "").startswith("application/json") else r.text
+            except Exception:
+                detail = r.text
             raise VersionTooOld(detail)
         r.raise_for_status()

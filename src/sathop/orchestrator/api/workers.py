@@ -51,6 +51,7 @@ from .worker_leases import (
 
 router = APIRouter(prefix="/workers", tags=["workers"], dependencies=[Depends(require_token)])
 
+
 def _check_worker_version(version: str, worker_id: str) -> None:
     min_ver = settings.min_worker_version
     if not min_ver:
