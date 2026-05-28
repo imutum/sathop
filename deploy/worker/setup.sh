@@ -64,13 +64,15 @@ HOST_PORT=$(pick_port)
 echo "[setup] Port: $HOST_PORT"
 
 # ── 生成随机 Worker ID ───────────────────────────────────────────────
-WORKER_ID="worker-$(head -c 4 /dev/urandom | xxd -p)"
+WORKER_ID="worker-$(od -An -tx1 -N4 /dev/urandom | tr -d ' ')"
 echo "[setup] Worker ID: $WORKER_ID"
 
 # ── 构建 sathop:// URL ──────────────────────────────────────────────
-SCHEME=$(echo "$SATHOP_ORCH_URL" | grep -q '^https' && echo "sathops" || echo "sathop")
-ORCH_HOST=$(echo "$SATHOP_ORCH_URL" | sed 's|^https\?://||; s|/$||')
-SATHOP_URL="${SCHEME}://${SATHOP_TOKEN}@${ORCH_HOST}"
+SCHEME=$(echo "$SATHOP_ORCH_URL" | grep -qi '^https' && echo "sathops" || echo "sathop")
+ORCH_HOST=$(echo "$SATHOP_ORCH_URL" | sed 's|^[Hh][Tt][Tt][Pp][Ss]\?://||; s|/$||')
+ENCODED_TOKEN=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$SATHOP_TOKEN', safe=''))" 2>/dev/null \
+             || echo "$SATHOP_TOKEN")
+SATHOP_URL="${SCHEME}://${ENCODED_TOKEN}@${ORCH_HOST}"
 
 # ── PUBLIC_URL（443 省略端口，非 443 带端口）─────────────────────────
 if [ "$HOST_PORT" = "443" ]; then

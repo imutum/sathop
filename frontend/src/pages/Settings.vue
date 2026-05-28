@@ -29,15 +29,21 @@ async function confirmUpdateAndRestart() {
   try {
     const r = await API.updateFrontend();
     if (r.action === "downloaded") {
-      toast.success(`前端 v${r.version} 下载完成`);
+      toast.success(`前端 v${r.version} 下载完成，正在重启…`);
     } else {
-      toast.success("前端已是最新版本");
+      toast.success("前端已是最新，正在重启…");
     }
-    await API.restartOrchestrator();
   } catch (e: any) {
-    toast.error(`更新失败：${e.message ?? e}`);
+    toast.error(`前端更新失败：${e.message ?? e}`);
     updating.value = false;
+    return;
   }
+  try {
+    await API.restartOrchestrator();
+  } catch {
+    // Connection drop is expected — SIGTERM kills the process
+  }
+  // Page will reload when the server comes back via SSE reconnect
 }
 </script>
 

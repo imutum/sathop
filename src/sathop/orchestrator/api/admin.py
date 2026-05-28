@@ -177,16 +177,14 @@ async def _gc_apply(s: AsyncSession, candidates: list[Bundle]) -> dict[str, Any]
 async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
     """Download frontend dist from GitHub Release matching current version.
     Idempotent: skips if already up to date. Triggered manually from UI."""
-    import asyncio
     import shutil
     import tarfile
-    import tempfile
     from io import BytesIO
     from pathlib import Path
 
     import httpx
 
-    repo_dir = Path(__file__).resolve().parents[3]
+    repo_dir = Path(__file__).resolve().parents[4]
     dist_dir = repo_dir / "frontend" / "dist"
     stamp = dist_dir / ".version"
 
@@ -210,13 +208,24 @@ async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
     except Exception as e:
         raise HTTPException(502, f"frontend download failed: {e}")
 
-    if dist_dir.exists():
-        shutil.rmtree(dist_dir)
-    dist_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir = dist_dir.parent / ".dist-tmp"
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True)
 
     buf = BytesIO(r.content)
     with tarfile.open(fileobj=buf, mode="r:gz") as tf:
-        tf.extractall(dist_dir.parent, filter="data")
+        tf.extractall(tmp_dir)
+
+    extracted_dist = tmp_dir / "dist"
+    if not extracted_dist.is_dir():
+        shutil.rmtree(tmp_dir)
+        raise HTTPException(502, "archive does not contain a dist/ directory")
+
+    if dist_dir.exists():
+        shutil.rmtree(dist_dir)
+    extracted_dist.rename(dist_dir)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
     stamp.write_text(__version__)
     await log(s, "orchestrator", f"frontend v{__version__} ready")
@@ -233,7 +242,7 @@ async def restart_orchestrator(s: AsyncSession = Depends(session)) -> dict:
 
     import asyncio
 
-    asyncio.get_event_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    asyncio.get_running_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
     return {"ok": True}
 
 

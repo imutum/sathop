@@ -326,9 +326,14 @@ async function copySnippet() {
 
     <Alert v-if="!valid" variant="destructive" class="mt-4">
       <AlertDescription>
-        Worker ID / Token / Orchestrator URL /
-        {{ exposeMode === "caddy" ? "域名" : exposeMode === "selfsigned" ? "Worker 主机 IP" : "主机:端口" }}
-        都不能为空
+        <template v-if="activeTab === 'one-click'">
+          Token / Orchestrator URL 不能为空
+        </template>
+        <template v-else>
+          Worker ID / Token / Orchestrator URL /
+          {{ exposeMode === "caddy" ? "域名" : exposeMode === "selfsigned" ? "Worker 主机 IP" : "主机:端口" }}
+          都不能为空
+        </template>
       </AlertDescription>
     </Alert>
 
