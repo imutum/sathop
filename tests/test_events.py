@@ -27,7 +27,9 @@ async def client(tmp_path, patch_settings):
 
 async def test_event_with_granule_carries_batch_id(client):
     now = utcnow()
-    event_store.append(ts=now, source="worker-a", level="error", granule_id="g1", batch_id="b1", message="oops")
+    event_store.append(
+        ts=now, source="worker-a", level="error", granule_id="g1", batch_id="b1", message="oops"
+    )
     event_store.append(ts=now, source="orchestrator", level="info", message="started")
 
     r = client.get("/api/events")
@@ -71,7 +73,9 @@ async def test_granule_id_filter_isolates_one_granule(client):
     """BatchDetail's expanded-row events panel relies on granule_id= filter."""
     now = utcnow()
     for i in range(3):
-        event_store.append(ts=now, source="w", level="error", granule_id="b1:g-a", batch_id="b1", message=f"a-err-{i}")
+        event_store.append(
+            ts=now, source="w", level="error", granule_id="b1:g-a", batch_id="b1", message=f"a-err-{i}"
+        )
     event_store.append(ts=now, source="w", level="info", granule_id="b1:g-b", batch_id="b1", message="b-ok")
     event_store.append(ts=now, source="o", level="info", message="orchestrator-noise")
 

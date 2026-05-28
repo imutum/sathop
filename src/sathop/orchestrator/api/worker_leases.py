@@ -178,7 +178,7 @@ async def renew_worker_leases(s: AsyncSession, worker_id: str, now) -> int:
         .where(Granule.lease_expires_at < now + LEASE_DURATION / 2)
         .values(lease_expires_at=now + LEASE_DURATION)
     )
-    return result.rowcount or 0
+    return getattr(result, "rowcount", 0) or 0
 
 
 async def revoke_worker_leases(s: AsyncSession, worker_id: str, now) -> int:

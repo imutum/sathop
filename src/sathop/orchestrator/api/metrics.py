@@ -140,7 +140,9 @@ async def _collect(s: AsyncSession) -> bytes:
         g_disk_pct.labels(worker_id=w.worker_id).set(ratio)
         g_queue.labels(worker_id=w.worker_id, stage="pending_download").set(wt.queue_pending_download or 0)
         g_queue.labels(worker_id=w.worker_id, stage="downloading").set(wt.queue_downloading)
-        g_queue.labels(worker_id=w.worker_id, stage="pending_processing").set(wt.queue_pending_processing or 0)
+        g_queue.labels(worker_id=w.worker_id, stage="pending_processing").set(
+            wt.queue_pending_processing or 0
+        )
         g_queue.labels(worker_id=w.worker_id, stage="processing").set(wt.queue_processing)
         g_queue.labels(worker_id=w.worker_id, stage="pending_upload").set(wt.queue_pending_upload or 0)
         g_queue.labels(worker_id=w.worker_id, stage="uploading").set(wt.queue_uploading)

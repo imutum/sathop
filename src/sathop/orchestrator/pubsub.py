@@ -81,6 +81,5 @@ async def log_event(
     from ``commit_and_publish``) so a rolled-back transaction discards its
     events — no phantom entries in the event feed."""
     s.info.setdefault(_PENDING_EVENTS, []).append(
-        dict(source=source, message=message, level=level,
-             granule_id=granule_id, batch_id=batch_id)
+        dict(source=source, message=message, level=level, granule_id=granule_id, batch_id=batch_id)
     )

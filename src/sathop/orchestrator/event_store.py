@@ -48,8 +48,13 @@ def append(
         _next_id += 1
         _store.append(
             MemEvent(
-                id=eid, ts=ts, level=level, source=source,
-                granule_id=granule_id, batch_id=batch_id, message=message,
+                id=eid,
+                ts=ts,
+                level=level,
+                source=source,
+                granule_id=granule_id,
+                batch_id=batch_id,
+                message=message,
             )
         )
     return eid

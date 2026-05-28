@@ -64,7 +64,9 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
         ),
     )
 
-    flapped = await record_version_flap(s, r, new_version=req.version, source=req.receiver_id, kind="receiver")
+    flapped = await record_version_flap(
+        s, r, new_version=req.version, source=req.receiver_id, kind="receiver"
+    )
     restart_requested = await consume_one_shot_signal(
         s, r, "restart_requested_at", source=req.receiver_id, message="restart signal delivered to receiver"
     )

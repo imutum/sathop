@@ -288,7 +288,9 @@ async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depen
         conflict_message=lambda g, _e: f"cannot cancel granule in state {g.state!r}",
     )
     evict_granule(granule_id, batch_id)
-    await log(s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id, batch_id=batch_id)
+    await log(
+        s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id, batch_id=batch_id
+    )
     await commit_and_publish(s, Scope.BATCHES)
     return {"ok": True, "state": g.state}
 

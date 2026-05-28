@@ -80,9 +80,13 @@ async def test_source_filter_combines_with_batch(client):
     """Source + batch — narrows to "events from worker X about granules in
     batch B". No fuzzy substring; both filters apply server-side."""
     now = utcnow()
-    event_store.append(ts=now, level="info", source="worker-w1", granule_id="b:g1", batch_id="b", message="ours")
+    event_store.append(
+        ts=now, level="info", source="worker-w1", granule_id="b:g1", batch_id="b", message="ours"
+    )
     event_store.append(ts=now, level="info", source="worker-w1", message="orch-level")
-    event_store.append(ts=now, level="info", source="worker-w2", granule_id="b:g1", batch_id="b", message="other-worker")
+    event_store.append(
+        ts=now, level="info", source="worker-w2", granule_id="b:g1", batch_id="b", message="other-worker"
+    )
 
     rows = client.get("/api/events?source=worker-w1&batch_id=b").json()
     assert [r["message"] for r in rows] == ["ours"]
