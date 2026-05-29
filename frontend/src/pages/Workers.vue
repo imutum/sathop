@@ -2,23 +2,32 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
-import { API } from "@/api";
+import { API, type WorkerInfo } from "@/api";
 import { K } from "@/queryKeys";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
 import Segmented from "@/components/Segmented.vue";
-import WorkerCard from "@/features/nodes/components/WorkerCard.vue";
+import WorkerRow from "@/features/nodes/components/WorkerRow.vue";
+import WorkerDrawer from "@/features/nodes/components/WorkerDrawer.vue";
 import OnboardWorkerModal from "@/features/onboarding/components/OnboardWorkerModal.vue";
-import { Icon } from "@/components/Icon";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import Modal from "@/ui/Modal.vue";
+import { Icon } from "@/components/Icon";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
 
@@ -41,7 +50,8 @@ const tab = ref<Tab>("active");
 watch(hasHistory, (h) => {
   if (!h) tab.value = "active";
 });
-const shown = computed(() =>
+// Rows of the current tab, in display order — the basis for select-all + shift range.
+const rows = computed(() =>
   hasHistory.value && tab.value === "history" ? removedList.value : activeList.value,
 );
 const tabOptions = computed(() => [
@@ -49,75 +59,118 @@ const tabOptions = computed(() => [
   { value: "history", label: "历史", count: removedList.value.length },
 ]);
 
-const updateAll = useMutation({
-  mutationFn: () => API.updateAllWorkers(),
-  onSuccess: (r) => {
-    qc.invalidateQueries({ queryKey: [...K.workers] });
-    toast.success(`已向 ${r.count} 个活跃节点发送更新信号`);
-  },
-  onError: (e: Error) => toast.error(`全部更新失败：${e.message}`),
-});
-
-async function onUpdateAll() {
-  const ok = await requestConfirm({
-    title: "更新全部工作节点？",
-    description:
-      "向所有活跃（未暂停）的 worker 发送更新信号。\n" +
-      "它们会依次排空在手任务、拉取最新代码后重新启动。",
-    confirmText: "全部更新",
-  });
-  if (ok) updateAll.mutate();
-}
-
-const removeAll = useMutation({
-  mutationFn: () => API.removeAllWorkers(),
-  onSuccess: (r) => {
-    qc.invalidateQueries({ queryKey: [...K.workers] });
-    toast.success(`已移除 ${r.count} 个工作节点`);
-  },
-  onError: (e: Error) => toast.error(`全部移除失败：${e.message}`),
-});
-
-async function onRemoveAll() {
-  const ok = await requestConfirm({
-    title: "移除全部工作节点？",
-    description:
-      "所有 worker 将在排空在手任务后自动停止，容器不再重启。\n" +
-      "移除后节点 ID 不可再注册 — 如需恢复集群，需启动新的 worker。",
-    confirmText: "全部移除",
-    tone: "danger",
-  });
-  if (ok) removeAll.mutate();
-}
-
-// Multi-select for bulk concurrency. Only meaningful on the active tab; the
-// per-worker concurrency editor on each card remains the primitive.
-const selectMode = ref(false);
+// ── Selection (always-on, scoped to current tab) ────────────────────────────
 const selected = ref<Set<string>>(new Set());
 const selectedCount = computed(() => selected.value.size);
-const allSelected = computed(
-  () => activeCount.value > 0 && selectedCount.value === activeCount.value,
-);
+let lastIndex = -1; // last toggled row index within current tab, for shift-range
 
-function toggleSelect(id: string) {
+function toggle(id: string, shiftKey: boolean) {
+  const ids = rows.value.map((w) => w.worker_id);
+  const i = ids.indexOf(id);
   const next = new Set(selected.value);
-  next.has(id) ? next.delete(id) : next.add(id);
+  if (shiftKey && lastIndex >= 0 && i >= 0) {
+    const [lo, hi] = lastIndex < i ? [lastIndex, i] : [i, lastIndex];
+    const turnOn = !next.has(id);
+    for (let k = lo; k <= hi; k++) turnOn ? next.add(ids[k]) : next.delete(ids[k]);
+  } else {
+    next.has(id) ? next.delete(id) : next.add(id);
+  }
+  lastIndex = i;
   selected.value = next;
 }
-function toggleSelectAll() {
-  selected.value = allSelected.value
-    ? new Set()
-    : new Set(activeList.value.map((w) => w.worker_id));
-}
-function exitSelect() {
-  selectMode.value = false;
-  selected.value = new Set();
-}
-// Leaving the active tab cancels selection so stale ids never linger.
-watch(tab, (t) => {
-  if (t !== "active") exitSelect();
-});
 
+const allSelected = computed(
+  () => rows.value.length > 0 && rows.value.every((w) => selected.value.has(w.worker_id)),
+);
+const indeterminate = computed(() => selectedCount.value > 0 && !allSelected.value);
+function toggleAll() {
+  selected.value = allSelected.value ? new Set() : new Set(rows.value.map((w) => w.worker_id));
+  lastIndex = -1;
+}
+function clearSelection() {
+  selected.value = new Set();
+  lastIndex = -1;
+}
+// Switching tabs clears selection so stale ids never linger across active/history.
+watch(tab, clearSelection);
+
+// ── Batch dispatch: client-side fan-out over the existing per-worker fns ─────
+const batchPending = ref(false);
+
+function summarize(verb: string, results: PromiseSettledResult<unknown>[]) {
+  const failed = results.filter((r) => r.status === "rejected").length;
+  const ok = results.length - failed;
+  if (failed === 0) toast.success(`已对 ${ok} 个节点${verb}`);
+  else if (ok === 0) toast.error(`${verb}失败：${failed} 个节点`);
+  else toast.error(`已对 ${ok} 个节点${verb}，${failed} 个失败`);
+}
+
+async function fanOut(verb: string, fn: (id: string) => Promise<unknown>) {
+  const ids = [...selected.value];
+  if (ids.length === 0) return;
+  batchPending.value = true;
+  const results = await Promise.allSettled(ids.map(fn));
+  batchPending.value = false;
+  qc.invalidateQueries({ queryKey: [...K.workers] });
+  summarize(verb, results);
+  clearSelection();
+}
+
+function onBatchUpdate() {
+  void fanOut("发送更新信号", (id) => API.updateWorker(id));
+}
+function onBatchPause() {
+  void fanOut("暂停领新任务", (id) => API.setWorkerPaused(id, true));
+}
+function onBatchResume() {
+  void fanOut("恢复", (id) => API.setWorkerPaused(id, false));
+}
+function onBatchGc() {
+  void fanOut("发送清理信号", (id) => API.workerGc(id));
+}
+
+async function onBatchRevoke() {
+  const n = selectedCount.value;
+  const ok = await requestConfirm({
+    title: `释放 ${n} 个节点的在手 lease？`,
+    description:
+      "把这些节点持有的全部在手 lease 重置回 待分配，等其他 worker 抢占。\n" +
+      "已下载/已处理的中间产物会被丢弃；retry_count 会 +1，仍受 max_retries 限制。",
+    confirmText: "立即释放",
+    tone: "danger",
+  });
+  if (!ok) return;
+  await fanOut("释放在手 lease", (id) => API.revokeWorkerLeases(id));
+  qc.invalidateQueries({ queryKey: [...K.batches] });
+}
+
+async function onBatchRemove() {
+  const n = selectedCount.value;
+  const ok = await requestConfirm({
+    title: `移除 ${n} 个工作节点？`,
+    description:
+      "这些节点将被永久移除，容器会在排空任务后自动停止。\n" +
+      "移除后节点 ID 不可再注册 — 如需恢复，请启动新的 worker。",
+    confirmText: "移除",
+    tone: "danger",
+  });
+  if (ok) await fanOut("发送移除信号", (id) => API.removeWorker(id));
+}
+
+async function onBatchPurge() {
+  const n = selectedCount.value;
+  const ok = await requestConfirm({
+    title: `彻底删除 ${n} 个节点记录？`,
+    description:
+      "从注册表中物理删除这些节点记录（已上传产物与事件日志不受影响，各自按保留周期老化）。\n" +
+      "如果对应容器仍在运行，删除后它会以新节点身份重新注册。",
+    confirmText: "彻底删除",
+    tone: "danger",
+  });
+  if (ok) await fanOut("彻底删除", (id) => API.purgeWorker(id));
+}
+
+// ── Batch concurrency (bulk endpoint) ────────────────────────────────────────
 const showBulkConc = ref(false);
 const bulkDl = ref("");
 const bulkPr = ref("");
@@ -129,7 +182,7 @@ const setConcurrencyBulk = useMutation({
     qc.invalidateQueries({ queryKey: [...K.workers] });
     toast.success(`已向 ${r.applied.length} 个节点下发并发设置，下次心跳收敛`);
     showBulkConc.value = false;
-    exitSelect();
+    clearSelection();
   },
   onError: (e: Error) => toast.error(`批量设置失败：${e.message}`),
 });
@@ -140,6 +193,7 @@ function openBulkConc() {
   showBulkConc.value = true;
 }
 
+// type=number 的 v-model 会回吐 number，先 String(...) 再 trim 才安全。
 function parseConc(s: string): number | null | undefined {
   const t = String(s ?? "").trim();
   if (t === "") return null;
@@ -159,17 +213,31 @@ function submitBulkConc() {
 
 const showOnboard = ref(false);
 
-// Deep-link: /workers?id=<worker_id> scrolls + ring-highlights one card. Used
-// by leased_by cells in BatchDetail / Dashboard.
+// ── Detail drawer ────────────────────────────────────────────────────────────
+// openWorkerId is resolved against the live list each render, so the drawer
+// live-updates while open (SSE refetch flows through), and closes if the worker
+// disappears (e.g. purged elsewhere).
+const openWorkerId = ref<string | null>(null);
+const drawerWorker = computed<WorkerInfo | null>(
+  () => list.value.find((w) => w.worker_id === openWorkerId.value) ?? null,
+);
+const drawerOpen = computed({
+  get: () => openWorkerId.value != null && drawerWorker.value != null,
+  set: (v) => {
+    if (!v) openWorkerId.value = null;
+  },
+});
+
+// ── Deep-link: /workers?id=<worker_id> scrolls + highlights one row ──────────
 const route = useRoute();
 const focusId = computed(() => (route.query.id as string | undefined) ?? null);
-const cardRefs = ref<Record<string, HTMLElement | null>>({});
+const rowEls = ref<Record<string, HTMLElement | null>>({});
 
 let lastScrolled: string | null = null;
 function maybeScroll() {
   const id = focusId.value;
   if (!id || lastScrolled === id) return;
-  const el = cardRefs.value[id];
+  const el = rowEls.value[id];
   if (!el) return;
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   lastScrolled = id;
@@ -181,7 +249,7 @@ watch(
     const id = focusId.value;
     if (id) {
       // A deep-linked removed worker lives in the history tab — switch to it so
-      // the target card is rendered before maybeScroll() looks up its ref.
+      // the target row is rendered before maybeScroll() looks up its ref.
       const w = list.value.find((x) => x.worker_id === id);
       if (w) tab.value = w.removed_at != null ? "history" : "active";
     }
@@ -190,8 +258,8 @@ watch(
   { immediate: true },
 );
 
-function setRef(id: string, el: Element | null) {
-  cardRefs.value[id] = el as HTMLElement | null;
+function setRowRef(id: string, el: Element | null) {
+  rowEls.value[id] = el as HTMLElement | null;
 }
 </script>
 
@@ -199,63 +267,16 @@ function setRef(id: string, el: Element | null) {
   <div class="space-y-6">
     <PageHeader title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列">
       <template #actions>
-        <template v-if="tab === 'active' && selectMode">
-          <span class="self-center text-2xs text-muted-foreground">已选 {{ selectedCount }}</span>
-          <Button variant="outline" class="gap-1.5" @click="toggleSelectAll">
-            {{ allSelected ? "清除" : "全选" }}
-          </Button>
-          <Button
-            variant="default"
-            class="gap-1.5"
-            :disabled="selectedCount === 0"
-            @click="openBulkConc"
-          >
-            设置并发
-          </Button>
-          <Button variant="ghost" class="gap-1.5 text-muted-foreground" @click="exitSelect">
-            退出多选
-          </Button>
-        </template>
-        <template v-else>
-          <Button
-            v-if="tab === 'active' && activeCount > 0"
-            variant="outline"
-            class="gap-1.5"
-            @click="selectMode = true"
-          >
-            多选
-          </Button>
-          <Button
-            v-if="tab === 'active' && activeCount > 0"
-            variant="outline"
-            class="gap-1.5"
-            :disabled="updateAll.isPending.value"
-            @click="onUpdateAll"
-          >
-            全部更新
-          </Button>
-          <Button
-            v-if="tab === 'active' && activeCount > 0"
-            variant="outline"
-            class="gap-1.5 text-destructive hover:bg-destructive/10"
-            :disabled="removeAll.isPending.value"
-            @click="onRemoveAll"
-          >
-            全部移除
-          </Button>
-          <Button variant="default" class="gap-1.5" @click="showOnboard = true">
-            <Icon name="plus" :size="13" />
-            接入工作节点
-          </Button>
-        </template>
+        <Button variant="default" class="gap-1.5" @click="showOnboard = true">
+          <Icon name="plus" :size="13" />
+          接入工作节点
+        </Button>
       </template>
     </PageHeader>
 
     <QueryState :query="workers">
       <template #loading>
-        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <Skeleton v-for="n in 3" :key="n" class="h-48 w-full" />
-        </div>
+        <Skeleton class="h-64 w-full" />
       </template>
       <template #error="{ error, retry }">
         <Alert variant="destructive">
@@ -291,7 +312,60 @@ function setRef(id: string, el: Element | null) {
             :options="tabOptions"
             aria-label="活跃 / 历史 工作节点"
           />
-          <Card v-if="shown.length === 0">
+
+          <!-- 批量工具栏：>=1 选中时出现 -->
+          <div
+            v-if="selectedCount > 0"
+            class="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2"
+          >
+            <span class="text-2xs font-medium text-foreground">已选 {{ selectedCount }}</span>
+            <Button
+              variant="ghost"
+              size="xs"
+              class="text-muted-foreground hover:text-foreground"
+              @click="clearSelection"
+            >
+              清除
+            </Button>
+            <span class="mx-1 h-4 w-px bg-border" />
+            <template v-if="tab === 'active'">
+              <Button variant="outline" size="xs" :disabled="batchPending" @click="onBatchUpdate">更新</Button>
+              <Button variant="outline" size="xs" :disabled="batchPending" @click="onBatchPause">暂停</Button>
+              <Button variant="outline" size="xs" :disabled="batchPending" @click="onBatchResume">恢复</Button>
+              <Button variant="outline" size="xs" :disabled="batchPending" @click="onBatchGc">清缓存</Button>
+              <Button
+                variant="outline"
+                size="xs"
+                class="text-danger hover:bg-danger/10"
+                :disabled="batchPending"
+                @click="onBatchRevoke"
+              >
+                释放lease
+              </Button>
+              <Button variant="outline" size="xs" :disabled="batchPending" @click="openBulkConc">设并发</Button>
+              <Button
+                variant="outline"
+                size="xs"
+                class="text-danger hover:bg-danger/10"
+                :disabled="batchPending"
+                @click="onBatchRemove"
+              >
+                移除
+              </Button>
+            </template>
+            <Button
+              v-else
+              variant="outline"
+              size="xs"
+              class="text-danger hover:bg-danger/10"
+              :disabled="batchPending"
+              @click="onBatchPurge"
+            >
+              彻底删除
+            </Button>
+          </div>
+
+          <Card v-if="rows.length === 0">
             <CardContent class="pt-6">
               <EmptyState
                 :title="tab === 'history' ? '暂无历史节点' : '当前无活跃节点'"
@@ -300,29 +374,66 @@ function setRef(id: string, el: Element | null) {
               />
             </CardContent>
           </Card>
-          <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <div
-              v-for="w in shown"
-              :key="w.worker_id"
-              :ref="(el) => setRef(w.worker_id, el as Element | null)"
-              class="relative"
-            >
-              <label
-                v-if="selectMode && tab === 'active'"
-                class="absolute right-3 top-3 z-10 flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-background/90 px-2 py-1 shadow-sm backdrop-blur"
-              >
-                <Checkbox
-                  :model-value="selected.has(w.worker_id)"
-                  @update:model-value="toggleSelect(w.worker_id)"
-                />
-                <span class="text-2xs text-muted-foreground">选中</span>
-              </label>
-              <WorkerCard :worker="w" :focused="focusId === w.worker_id" />
-            </div>
-          </div>
+
+          <Card v-else>
+            <CardContent class="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow v-if="tab === 'active'">
+                    <TableHead class="w-8">
+                      <Checkbox
+                        :model-value="indeterminate ? 'indeterminate' : allSelected"
+                        aria-label="全选当前页"
+                        @update:model-value="toggleAll"
+                      />
+                    </TableHead>
+                    <TableHead class="w-6" />
+                    <TableHead>节点</TableHead>
+                    <TableHead>CPU</TableHead>
+                    <TableHead>内存</TableHead>
+                    <TableHead>磁盘</TableHead>
+                    <TableHead>并发</TableHead>
+                    <TableHead>队列</TableHead>
+                    <TableHead>心跳</TableHead>
+                    <TableHead class="w-8" />
+                  </TableRow>
+                  <TableRow v-else>
+                    <TableHead class="w-8">
+                      <Checkbox
+                        :model-value="indeterminate ? 'indeterminate' : allSelected"
+                        aria-label="全选当前页"
+                        @update:model-value="toggleAll"
+                      />
+                    </TableHead>
+                    <TableHead class="w-16">状态</TableHead>
+                    <TableHead>节点</TableHead>
+                    <TableHead>最后心跳</TableHead>
+                    <TableHead class="w-8" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <template v-for="w in rows" :key="w.worker_id">
+                    <WorkerRow
+                      :ref="(c: any) => setRowRef(w.worker_id, c?.$el ?? null)"
+                      :worker="w"
+                      :tab="tab"
+                      :selected="selected.has(w.worker_id)"
+                      @toggle="toggle(w.worker_id, $event)"
+                      @open="openWorkerId = w.worker_id"
+                    />
+                  </template>
+                  <TableEmpty v-if="rows.length === 0" :colspan="tab === 'active' ? 10 : 5">
+                    无数据
+                  </TableEmpty>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </div>
       </template>
     </QueryState>
+
+    <WorkerDrawer v-model:open="drawerOpen" :worker="drawerWorker" />
 
     <OnboardWorkerModal v-if="showOnboard" @close="showOnboard = false" />
 

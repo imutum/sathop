@@ -96,10 +96,6 @@ const nodeApi = {
     ),
   updateWorker: (workerId: string) =>
     postJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}/update`),
-  updateAllWorkers: () =>
-    postJson<{ ok: boolean; count: number }>("/api/workers/update-all"),
-  removeAllWorkers: () =>
-    postJson<{ ok: boolean; count: number }>("/api/workers/remove-all"),
   setWorkerPaused: (workerId: string, operator_paused: boolean) =>
     putJson<{ ok: boolean; operator_paused: boolean }>(
       `/api/workers/${encodeURIComponent(workerId)}/pause`,
