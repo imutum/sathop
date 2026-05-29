@@ -58,3 +58,43 @@ async def test_concurrent_subscribers_each_get_event():
         publish({"scope": "shared"})
         assert q1.get_nowait() == {"scope": "shared"}
         assert q2.get_nowait() == {"scope": "shared"}
+
+
+async def test_repeat_scope_nudges_coalesced():
+    # A burst of the same scope (the receiver-ack storm): the first nudge fans out
+    # immediately; the rest collapse into the 1s window instead of one-per-ack.
+    with subscribe() as q:
+        for _ in range(10):
+            publish({"scope": "batches"})
+        assert q.get_nowait() == {"scope": "batches"}  # leading edge, immediate
+        assert q.empty()  # the other 9 coalesced — not yet flushed
+
+
+async def test_coalesced_scope_flushes_on_trailing_edge():
+    with subscribe() as q:
+        publish({"scope": "batches"})  # leading
+        publish({"scope": "batches"})  # coalesced into the window
+        assert q.get_nowait() == {"scope": "batches"}
+        evt = await asyncio.wait_for(q.get(), timeout=2.0)  # trailing flush ~1s later
+        assert evt == {"scope": "batches"}
+        assert q.empty()  # exactly one trailing flush, window then closes
+
+
+async def test_distinct_scopes_not_coalesced():
+    # Per-scope windows: a different scope is never delayed by another's open window.
+    with subscribe() as q:
+        publish({"scope": "batches"})
+        publish({"scope": "workers"})
+        got = {q.get_nowait()["scope"], q.get_nowait()["scope"]}
+        assert got == {"batches", "workers"}  # both immediate
+
+
+async def test_shutdown_and_data_events_bypass_coalescing():
+    with subscribe() as q:
+        publish({"scope": "batches"})  # opens a batches window
+        assert q.get_nowait() == {"scope": "batches"}
+        # __shutdown__ and data-carrying events must never be coalesced/delayed.
+        publish({"scope": "__shutdown__"})
+        publish({"scope": "progress", "granule_id": "g1", "batch_id": "b1"})
+        assert q.get_nowait() == {"scope": "__shutdown__"}
+        assert q.get_nowait() == {"scope": "progress", "granule_id": "g1", "batch_id": "b1"}

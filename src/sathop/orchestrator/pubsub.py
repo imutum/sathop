@@ -17,13 +17,71 @@ log = logging.getLogger("sathop.pubsub")
 _subscribers: set[asyncio.Queue[dict]] = set()
 _QUEUE_MAX = 512
 
+# Per-scope nudge coalescing. During high-throughput delivery every receiver ack
+# publishes a `batches` (and `events`) nudge; without coalescing each one is a
+# socket write + client refetch per open Web UI tab. Each scope gets its own 1s
+# window: the first nudge of an idle scope fans out at once (leading edge — a
+# sparse change stays instant), and repeat nudges of that *same* scope within the
+# window collapse into a single trailing flush, so sustained load stays at ~1
+# flush/scope/sec. Windows are per-scope, so a `workers` nudge is never delayed by
+# an in-flight `batches` window.
+_COALESCE_SEC = 1.0
+_open_windows: dict[str, asyncio.TimerHandle] = {}  # scope -> active window timer
+_repeat: set[str] = set()  # scopes nudged again during their open window
+_loop: asyncio.AbstractEventLoop | None = None
 
-def publish(event: dict) -> None:
+
+def _fan_out(event: dict) -> None:
     for q in list(_subscribers):
         try:
             q.put_nowait(event)
         except asyncio.QueueFull:
             log.warning("subscriber queue full, dropping event: %s", event)
+
+
+def _close_window(scope: str) -> None:
+    # Trailing edge: if the scope was nudged again during the window, flush one
+    # coalesced nudge and keep the window open another cycle; otherwise close it
+    # so the next nudge leads again immediately.
+    if scope in _repeat:
+        _repeat.discard(scope)
+        _fan_out({"scope": scope})
+        if _loop is not None:
+            _open_windows[scope] = _loop.call_later(_COALESCE_SEC, _close_window, scope)
+    else:
+        _open_windows.pop(scope, None)
+
+
+def _coalesce(scope: str) -> None:
+    global _loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _fan_out({"scope": scope})  # no running loop (sync context) — emit now, can't schedule
+        return
+    if loop is not _loop:  # new event loop (per-test or restart) — drop stale window state
+        _loop = loop
+        _open_windows.clear()
+        _repeat.clear()
+    if scope in _open_windows:
+        _repeat.add(scope)  # within the window: coalesce; delivered on the trailing flush
+    else:
+        _fan_out({"scope": scope})  # leading edge: deliver at once, open the window
+        _open_windows[scope] = loop.call_later(_COALESCE_SEC, _close_window, scope)
+
+
+def publish(event: dict) -> None:
+    """Fan an event out to every SSE subscriber.
+
+    Plain scope nudges (``{"scope": <str>}``) are coalesced per scope into a 1s
+    window so a burst collapses to ~1 nudge/scope/sec. ``__shutdown__`` and
+    data-carrying events (e.g. progress, which also carries granule/batch ids)
+    pass through immediately."""
+    scope = event.get("scope")
+    if event.keys() == {"scope"} and isinstance(scope, str) and scope != "__shutdown__":
+        _coalesce(scope)
+    else:
+        _fan_out(event)
 
 
 @contextmanager
@@ -69,6 +127,19 @@ def reset_shutdown() -> None:
     """Test helper — clear the flag between in-process test cases."""
     global _shutdown_requested
     _shutdown_requested = False
+
+
+def reset_coalesce() -> None:
+    """Test helper — drop coalescing window state between in-process test cases.
+
+    Cancels any pending window timers so a trailing flush scheduled by one test
+    can't fan out into the next (anyio reuses one event loop across the suite)."""
+    global _loop
+    for handle in _open_windows.values():
+        handle.cancel()
+    _open_windows.clear()
+    _repeat.clear()
+    _loop = None
 
 
 _PENDING_EVENTS = "sathop_pending_events"

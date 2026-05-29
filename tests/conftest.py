@@ -44,18 +44,20 @@ def free_port() -> int:
 def _clear_in_memory_stores():
     from sathop.orchestrator.api.progress import _clear as clear_progress
     from sathop.orchestrator.event_store import _clear as clear_events
-    from sathop.orchestrator.pubsub import reset_shutdown
+    from sathop.orchestrator.pubsub import reset_coalesce, reset_shutdown
     from sathop.orchestrator.telemetry import _clear as clear_telemetry
 
     clear_events()
     clear_telemetry()
     clear_progress()
     reset_shutdown()  # module-global flag must not leak a "shutting down" state
+    reset_coalesce()  # cancel pending nudge-window timers so they don't cross tests
     yield
     clear_events()
     clear_telemetry()
     clear_progress()
     reset_shutdown()
+    reset_coalesce()
 
 
 @pytest.fixture
