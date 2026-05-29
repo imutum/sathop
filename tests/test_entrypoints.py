@@ -4,7 +4,7 @@ Both look like:
     config = load()
     r = Component(config)
     try: await r.run()
-    finally: await r.client.aclose()  # receiver also: await r.aclose()
+    finally: await r.client.aclose()  # worker also: downloader.aclose(); receiver also: r.aclose()
 
 Tests substitute fakes for the Component class so we never hit the
 network or spin a runtime; the assertions are about exit-path ordering
@@ -32,6 +32,7 @@ class _FakeWorker:
 
     def __init__(self, _cfg: object) -> None:
         self.client = _FakeClient()
+        self.downloader = _FakeClient()  # worker/main closes the downloader too
         self.run_called = False
         self.raise_in_run: BaseException | None = None
         _FakeWorker.instances.append(self)
@@ -64,6 +65,7 @@ async def test_worker_main_runs_then_aclose(monkeypatch):
     [w] = _FakeWorker.instances
     assert w.run_called
     assert w.client.aclose_called
+    assert w.downloader.aclose_called
 
 
 async def test_worker_main_aclose_runs_even_when_run_raises(monkeypatch):
@@ -84,6 +86,7 @@ async def test_worker_main_aclose_runs_even_when_run_raises(monkeypatch):
     [w] = _FakeWorker.instances
     assert w.run_called
     assert w.client.aclose_called  # finally branch still ran
+    assert w.downloader.aclose_called
 
 
 # ─── receiver/main.py ────────────────────────────────────────────────────

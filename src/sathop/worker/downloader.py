@@ -82,6 +82,7 @@ class Downloader(Protocol):
         progress_cb: ProgressCb | None = None,
     ) -> int: ...
     async def set_global_bandwidth_bps(self, bps: int) -> None: ...
+    async def aclose(self) -> None: ...
 
 
 def _safe_int(s: str | None) -> int | None:
@@ -120,6 +121,36 @@ def _aria2_auth_options(auth: Credential | None) -> dict[str, object]:
 
 
 class HttpDownloader:
+    """One long-lived AsyncClient reused across every fetch. Remote-sensing
+    archives are small (~3 MB) and latency-bound: a fresh client per file
+    re-pays the TLS handshake (and any auth redirect) each time, which dwarfs
+    the ~0.1s of actual transfer. A pooled, keep-alive client lets repeat
+    fetches from the same host skip the handshake and approach the link rate.
+    Per-file credentials ride on each request (`auth=`), so one client serves
+    granules carrying different credentials."""
+
+    def __init__(self) -> None:
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        # Lazy + race-free: construction is fully synchronous, so two
+        # concurrent first-fetches on the single event loop can't interleave
+        # between the None check and the assignment. The pool is unbounded
+        # because the worker's download semaphore is the real concurrency cap;
+        # a 60s keepalive expiry keeps host connections warm across the
+        # lease-poll gap so consecutive granules reuse them.
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, read=30.0),
+                follow_redirects=True,
+                limits=httpx.Limits(
+                    max_connections=None,
+                    max_keepalive_connections=None,
+                    keepalive_expiry=60.0,
+                ),
+            )
+        return self._client
+
     async def fetch(
         self,
         url: str,
@@ -140,30 +171,27 @@ class HttpDownloader:
         # as long as the server keeps delivering bytes the timer resets each
         # chunk, so big files still finish. 30s without any byte ⇒ fail fast,
         # orchestrator re-leases instead of holding the download semaphore.
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(30.0, read=30.0),
-            follow_redirects=True,
-            auth=x_auth,
-        ) as c:
-            async with c.stream("GET", url, headers=headers) as r:
-                if r.status_code == 416:
-                    tmp.replace(dest)
-                    final_size = dest.stat().st_size
+        # `auth` rides on the request (not the shared client) so per-file
+        # credentials don't leak across granules; None ⇒ no auth.
+        async with self._get_client().stream("GET", url, headers=headers, auth=x_auth) as r:
+            if r.status_code == 416:
+                tmp.replace(dest)
+                final_size = dest.stat().st_size
+                if progress_cb:
+                    await progress_cb(final_size, final_size)
+                return final_size
+            r.raise_for_status()
+            resumed = r.status_code == 206
+            body_len = _safe_int(r.headers.get("Content-Length"))
+            total = (existing + body_len) if (resumed and body_len is not None) else body_len
+            downloaded = existing
+            mode = "ab" if resumed else "wb"
+            with tmp.open(mode) as f:
+                async for chunk in r.aiter_bytes(_CHUNK):
+                    f.write(chunk)
+                    downloaded += len(chunk)
                     if progress_cb:
-                        await progress_cb(final_size, final_size)
-                    return final_size
-                r.raise_for_status()
-                resumed = r.status_code == 206
-                body_len = _safe_int(r.headers.get("Content-Length"))
-                total = (existing + body_len) if (resumed and body_len is not None) else body_len
-                downloaded = existing
-                mode = "ab" if resumed else "wb"
-                with tmp.open(mode) as f:
-                    async for chunk in r.aiter_bytes(_CHUNK):
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if progress_cb:
-                            await progress_cb(downloaded, total)
+                        await progress_cb(downloaded, total)
         tmp.replace(dest)
         final_size = dest.stat().st_size
         if progress_cb:
@@ -172,6 +200,11 @@ class HttpDownloader:
 
     async def set_global_bandwidth_bps(self, bps: int) -> None:
         return None  # httpx has no built-in rate limit
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
 
 class Aria2Downloader:
@@ -237,6 +270,9 @@ class Aria2Downloader:
             "aria2.changeGlobalOption",
             [{"max-overall-download-limit": str(max(0, bps))}],
         )
+
+    async def aclose(self) -> None:
+        return None  # aria2p talks over its own RPC socket; nothing to close here
 
 
 def load(aria2_rpc: str, aria2_secret: str) -> Downloader:

@@ -20,6 +20,7 @@ async def main() -> None:
         sys.exit(EXIT_CODE_REMOVED)
     finally:
         await w.client.aclose()
+        await w.downloader.aclose()
 
 
 def run() -> None:
