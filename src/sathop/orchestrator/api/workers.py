@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
@@ -32,7 +32,7 @@ from ..config import require_token, settings
 from ..db import Granule, GranuleObject, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ._helpers import get_or_404
+from ._helpers import all_objects_acked, get_or_404
 from ._transition import apply_transition
 from .one_shot import consume_one_shot_signal, record_version_flap, signal_one_shot
 from .progress import evict_granule
@@ -182,7 +182,7 @@ async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) ->
         raise HTTPException(409, "granule not leased by this worker")
     result = await apply_transition(s, g, event, now=utcnow())
     if isinstance(event, UploadCompleted):
-        evict_granule(g.granule_id, g.batch_id)
+        evict_granule(g.granule_id)
         await log(
             s,
             event.worker_id,
@@ -191,7 +191,7 @@ async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) ->
             batch_id=g.batch_id,
         )
     elif isinstance(event, ProcessingFailed):
-        evict_granule(g.granule_id, g.batch_id)
+        evict_granule(g.granule_id)
         await log(
             s,
             event.worker_id,
@@ -215,7 +215,7 @@ async def deletable(worker_id: str, s: AsyncSession = Depends(session)) -> list[
         select(GranuleObject.granule_id)
         .where(GranuleObject.deleted_at.is_(None))
         .group_by(GranuleObject.granule_id)
-        .having(func.count() == func.count(GranuleObject.acked_at))
+        .having(all_objects_acked())
         .scalar_subquery()
     )
     rows = (

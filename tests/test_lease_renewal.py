@@ -187,19 +187,6 @@ class _StubAgent:
             raise _http_error(next_status)
 
 
-def _stub_worker(agent: _StubAgent):
-    """Build just enough of `Worker` to call `_emit_lease_event` — bypasses
-    the real __init__ which requires Settings, storage, semaphores, etc."""
-    from types import SimpleNamespace
-
-    from sathop.worker.runtime import Worker
-
-    w = Worker.__new__(Worker)
-    w.client = agent  # type: ignore[assignment]
-    w.s = SimpleNamespace(worker_id="w1")
-    return w
-
-
 def _download_started(gid: str = "g1"):
     from sathop.shared.state_machine import DownloadStarted
 
@@ -213,33 +200,33 @@ def _process_started(gid: str = "g1"):
 
 
 async def test_emit_lease_event_409_raises_lease_revoked():
-    from sathop.worker.runtime import LeaseRevoked
+    from sathop.worker.handler import LeaseRevoked, emit_lease_event
 
-    w = _stub_worker(_StubAgent([409]))
     with pytest.raises(LeaseRevoked):
-        await w._emit_lease_event(_download_started())
+        await emit_lease_event(_StubAgent([409]), _download_started())
 
 
 async def test_emit_lease_event_404_raises_lease_revoked():
-    from sathop.worker.runtime import LeaseRevoked
+    from sathop.worker.handler import LeaseRevoked, emit_lease_event
 
-    w = _stub_worker(_StubAgent([404]))
     with pytest.raises(LeaseRevoked):
-        await w._emit_lease_event(_process_started())
+        await emit_lease_event(_StubAgent([404]), _process_started())
 
 
 async def test_emit_lease_event_500_swallowed_as_best_effort():
     """5xx and network errors stay best-effort — the next phase boundary
     will retry. Raising would abort the whole granule on a transient
     orchestrator hiccup."""
-    w = _stub_worker(_StubAgent([500]))
-    await w._emit_lease_event(_download_started())
+    from sathop.worker.handler import emit_lease_event
+
+    await emit_lease_event(_StubAgent([500]), _download_started())
 
 
 async def test_emit_lease_event_success_returns_silently():
+    from sathop.worker.handler import emit_lease_event
+
     agent = _StubAgent([None])
-    w = _stub_worker(agent)
-    await w._emit_lease_event(_download_started())
+    await emit_lease_event(agent, _download_started())
     assert agent.calls == ["download_started"]
 
 

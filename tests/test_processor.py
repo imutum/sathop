@@ -45,13 +45,13 @@ def _make_bundle(
 
 
 @pytest.fixture
-def work_root(tmp_path):
+def work_dir(tmp_path):
     d = tmp_path / "work"
     d.mkdir()
     return d
 
 
-async def test_happy_path_copies_input_runs_and_collects(tmp_path, work_root):
+async def test_happy_path_copies_input_runs_and_collects(tmp_path, work_dir):
     inp = tmp_path / "in.txt"
     inp.write_text("hello", encoding="utf-8")
 
@@ -63,34 +63,35 @@ async def test_happy_path_copies_input_runs_and_collects(tmp_path, work_root):
     )
     h = _make_bundle(tmp_path, "python run.py", script)
 
-    r = await run_bundle(h, "g1", "b1", [inp], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [inp], {}, work_dir)
 
     assert r.ok
     assert r.exit_code == 0
     assert len(r.outputs) == 1
     assert r.outputs[0].read_text(encoding="utf-8") == "hello"
-    # kept_root naming
-    assert "_staged" in str(r.outputs[0])
+    # Output is staged under the caller-owned work_dir (so the caller's reap
+    # removes it) — never in an orphan sibling tree.
+    assert work_dir in r.outputs[0].parents
 
 
-async def test_nonzero_exit_reports_failure(tmp_path, work_root):
+async def test_nonzero_exit_reports_failure(tmp_path, work_dir):
     h = _make_bundle(tmp_path, "python run.py", "import sys; sys.exit(7)")
-    r = await run_bundle(h, "g1", "b1", [], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [], {}, work_dir)
     assert not r.ok
     assert r.exit_code == 7
     assert r.outputs == []
 
 
-async def test_empty_output_dir_flagged_as_failure(tmp_path, work_root):
+async def test_empty_output_dir_flagged_as_failure(tmp_path, work_dir):
     """Bundle ran to success but produced nothing — worker needs this caught."""
     h = _make_bundle(tmp_path, "python run.py", "print('idle'); pass")
-    r = await run_bundle(h, "g1", "b1", [], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [], {}, work_dir)
     assert not r.ok
     assert r.exit_code == 0
     assert "no outputs" in r.stderr
 
 
-async def test_extension_filter_drops_non_matching(tmp_path, work_root):
+async def test_extension_filter_drops_non_matching(tmp_path, work_dir):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
@@ -98,13 +99,13 @@ async def test_extension_filter_drops_non_matching(tmp_path, work_root):
         "(o / 'skip.log').write_text('no')\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script, extensions=[".txt"])
-    r = await run_bundle(h, "g1", "b1", [], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [], {}, work_dir)
     assert r.ok
     names = {p.name for p in r.outputs}
     assert names == {"keep.txt"}
 
 
-async def test_multiple_inputs_all_staged(tmp_path, work_root):
+async def test_multiple_inputs_all_staged(tmp_path, work_dir):
     a = tmp_path / "a.txt"
     a.write_text("A", encoding="utf-8")
     b = tmp_path / "b.txt"
@@ -117,12 +118,12 @@ async def test_multiple_inputs_all_staged(tmp_path, work_root):
         "(o / 'list.txt').write_text(','.join(names))\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = await run_bundle(h, "g1", "b1", [a, b], {}, work_root)
+    r = await run_bundle(h, "g1", "b1", [a, b], {}, work_dir)
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "a.txt,b.txt"
 
 
-async def test_env_vars_reach_entrypoint(tmp_path, work_root):
+async def test_env_vars_reach_entrypoint(tmp_path, work_dir):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
@@ -131,24 +132,24 @@ async def test_env_vars_reach_entrypoint(tmp_path, work_root):
         ")\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = await run_bundle(h, "my-granule", "my-batch", [], {}, work_root)
+    r = await run_bundle(h, "my-granule", "my-batch", [], {}, work_dir)
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "my-granule|my-batch"
 
 
-async def test_runtime_python_env_vars_reach_entrypoint(tmp_path, work_root):
+async def test_runtime_python_env_vars_reach_entrypoint(tmp_path, work_dir):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
         "(o / 'python.txt').write_text(os.environ['SATHOP_BUNDLE_PYTHON'])\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = await run_bundle(h, "g", "b", [], {}, work_root)
+    r = await run_bundle(h, "g", "b", [], {}, work_dir)
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == sys.executable
 
 
-async def test_custom_env_in_manifest_merged(tmp_path, work_root):
+async def test_custom_env_in_manifest_merged(tmp_path, work_dir):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
@@ -179,12 +180,12 @@ async def test_custom_env_in_manifest_merged(tmp_path, work_root):
         python=Path(sys.executable),
         shared_dir=tmp_path / "shared",
     )
-    r = await run_bundle(h, "g", "b", [], {}, work_root)
+    r = await run_bundle(h, "g", "b", [], {}, work_dir)
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "custom-val"
 
 
-async def test_batch_env_overrides_bundle_env(tmp_path, work_root):
+async def test_batch_env_overrides_bundle_env(tmp_path, work_dir):
     """Batch execution_env wins over bundle manifest env — the whole point of
     batch-level overrides (same bundle, different task knobs)."""
     script = (
@@ -218,12 +219,12 @@ async def test_batch_env_overrides_bundle_env(tmp_path, work_root):
         shared_dir=tmp_path / "shared",
     )
     # Batch overrides the bundle default
-    r = await run_bundle(h, "g", "b", [], {}, work_root, execution_env={"RESOLUTION": "1km"})
+    r = await run_bundle(h, "g", "b", [], {}, work_dir, execution_env={"RESOLUTION": "1km"})
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "1km"
 
 
-async def test_internal_sathop_vars_immune_to_override(tmp_path, work_root):
+async def test_internal_sathop_vars_immune_to_override(tmp_path, work_dir):
     """Batch env must NOT be able to hijack SATHOP_OUTPUT_DIR or SATHOP_INPUT_DIR
     — those are worker-controlled invariants."""
     script = (
@@ -239,14 +240,14 @@ async def test_internal_sathop_vars_immune_to_override(tmp_path, work_root):
         "b",
         [],
         {},
-        work_root,
+        work_dir,
         execution_env={"SATHOP_OUTPUT_DIR": "/tmp/pwned"},
     )
     assert r.ok  # internal var wasn't overridden; output went where worker said
     assert len(r.outputs) == 1
 
 
-async def test_progress_url_injected_when_provided(tmp_path, work_root):
+async def test_progress_url_injected_when_provided(tmp_path, work_dir):
     script = (
         "import os, pathlib\n"
         "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
@@ -259,14 +260,14 @@ async def test_progress_url_injected_when_provided(tmp_path, work_root):
         "b",
         [],
         {},
-        work_root,
+        work_dir,
         progress_url="http://127.0.0.1:9002/progress/abc123",
     )
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "http://127.0.0.1:9002/progress/abc123"
 
 
-async def test_progress_url_absent_when_not_provided(tmp_path, work_root):
+async def test_progress_url_absent_when_not_provided(tmp_path, work_dir):
     """No progress_url → SATHOP_PROGRESS_URL should not appear in env. Bundles
     check for its absence to stay backward compatible with older workers."""
     script = (
@@ -275,12 +276,12 @@ async def test_progress_url_absent_when_not_provided(tmp_path, work_root):
         "(o / 'u.txt').write_text(os.environ.get('SATHOP_PROGRESS_URL', 'MISSING'))\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = await run_bundle(h, "g", "b", [], {}, work_root)
+    r = await run_bundle(h, "g", "b", [], {}, work_dir)
     assert r.ok
     assert r.outputs[0].read_text(encoding="utf-8") == "MISSING"
 
 
-async def test_batch_env_cannot_hijack_progress_url(tmp_path, work_root):
+async def test_batch_env_cannot_hijack_progress_url(tmp_path, work_dir):
     """Like SATHOP_OUTPUT_DIR, SATHOP_PROGRESS_URL is worker-controlled —
     a malicious batch env mustn't be able to redirect progress to an external host."""
     script = (
@@ -295,7 +296,7 @@ async def test_batch_env_cannot_hijack_progress_url(tmp_path, work_root):
         "b",
         [],
         {},
-        work_root,
+        work_dir,
         execution_env={"SATHOP_PROGRESS_URL": "http://attacker.example.com/x"},
         progress_url="http://127.0.0.1:9002/progress/real",
     )
@@ -303,7 +304,7 @@ async def test_batch_env_cannot_hijack_progress_url(tmp_path, work_root):
     assert r.outputs[0].read_text(encoding="utf-8") == "http://127.0.0.1:9002/progress/real"
 
 
-async def test_worker_secrets_not_leaked_to_bundle(tmp_path, work_root, monkeypatch):
+async def test_worker_secrets_not_leaked_to_bundle(tmp_path, work_dir, monkeypatch):
     """Critical security guarantee: bundle subprocesses must NOT inherit the
     worker's SATHOP_TOKEN (or any other non-whitelisted env var) — otherwise a
     malicious bundle could call the orchestrator API with worker-level
@@ -324,7 +325,7 @@ async def test_worker_secrets_not_leaked_to_bundle(tmp_path, work_root, monkeypa
         ")\n"
     )
     h = _make_bundle(tmp_path, "python run.py", script)
-    r = await run_bundle(h, "g", "b", [], {}, work_root)
+    r = await run_bundle(h, "g", "b", [], {}, work_dir)
     assert r.ok
     out = r.outputs[0].read_text(encoding="utf-8")
     assert "token=MISSING" in out, f"SATHOP_TOKEN leaked to bundle: {out!r}"
@@ -332,7 +333,40 @@ async def test_worker_secrets_not_leaked_to_bundle(tmp_path, work_root, monkeypa
     assert "arb=MISSING" in out, f"non-whitelisted SATHOP_* leaked: {out!r}"
 
 
-async def test_cancel_kills_subprocess_promptly(tmp_path, work_root):
+async def test_outputs_confined_to_work_dir_no_orphan_leak(tmp_path):
+    """run_bundle confines every filesystem effect to the work_dir it is given:
+    outputs land under it and the run scratch is dropped, so the caller's single
+    rmtree(work_dir) leaves no orphan. Regression for the old work_root/_staged
+    tree that no pruner could reap."""
+    import shutil
+
+    root = tmp_path / "work"
+    root.mkdir()
+    work_dir = root / "g-g1-123"
+    work_dir.mkdir()
+    inp = tmp_path / "in.txt"
+    inp.write_text("hi", encoding="utf-8")
+    script = (
+        "import os, shutil, pathlib\n"
+        "i = pathlib.Path(os.environ['SATHOP_INPUT_DIR'])\n"
+        "o = pathlib.Path(os.environ['SATHOP_OUTPUT_DIR'])\n"
+        "for p in i.iterdir(): shutil.copy2(p, o / p.name)\n"
+    )
+    h = _make_bundle(tmp_path, "python run.py", script)
+
+    r = await run_bundle(h, "g1", "b1", [inp], {}, work_dir)
+    assert r.ok
+    # Output lives under work_dir; run scratch ("run-*") was dropped.
+    assert work_dir in r.outputs[0].parents
+    assert not any(p.name.startswith("run-") for p in work_dir.iterdir())
+    # run_bundle created nothing outside work_dir (no orphan sibling tree).
+    assert list(root.iterdir()) == [work_dir]
+    # Caller reaps work_dir → clean slate.
+    shutil.rmtree(work_dir)
+    assert list(root.iterdir()) == []
+
+
+async def test_cancel_kills_subprocess_promptly(tmp_path, work_dir):
     """The whole reason run_bundle is async: when the worker's handler task
     is cancelled (operator hit "取消批次"), the child must die within a few
     seconds rather than burning CPU until manifest.timeout_sec."""
@@ -344,7 +378,7 @@ async def test_cancel_kills_subprocess_promptly(tmp_path, work_root):
     h = _make_bundle(tmp_path, "python run.py", script, timeout_sec=120)
 
     async def worker_task():
-        return await run_bundle(h, "g", "b", [], {}, work_root)
+        return await run_bundle(h, "g", "b", [], {}, work_dir)
 
     task = asyncio.create_task(worker_task())
     # Let the subprocess actually start before we cancel — without this the

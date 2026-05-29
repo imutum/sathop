@@ -4,7 +4,7 @@ Cancel-then-delete is the supported workflow. The endpoint refuses by default
 when any granule is still mid-flight on a worker (downloading / downloaded /
 processing / processed) so a stop-the-world delete can't strand worker tasks
 that would later 404 on state report. `?force=true` overrides; everything
-referencing the batch is wiped (granules, objects, progress, timings, events).
+referencing the batch is wiped (granules, objects, timings, events).
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from sathop.orchestrator.db import (
     Batch,
     Granule,
     GranuleObject,
-    GranuleProgress,
     GranuleStageTiming,
     utcnow,
 )
@@ -58,7 +57,6 @@ async def _seed_full_batch(batch_id: str = "b") -> None:
                 size=10,
             )
         )
-        s.add(GranuleProgress(granule_id=g1, batch_id=batch_id, step="read", pct=50.0))
         now = utcnow()
         s.add(
             GranuleStageTiming(
@@ -83,7 +81,6 @@ async def _counts() -> dict[str, int]:
             "batches": (await s.execute(select(func.count(Batch.batch_id)))).scalar_one(),
             "granules": (await s.execute(select(func.count(Granule.granule_id)))).scalar_one(),
             "objects": (await s.execute(select(func.count(GranuleObject.id)))).scalar_one(),
-            "progress": (await s.execute(select(func.count(GranuleProgress.id)))).scalar_one(),
             "timings": (await s.execute(select(func.count(GranuleStageTiming.id)))).scalar_one(),
             "events_with_gid": sum(1 for e in event_store.query(limit=10000) if e["granule_id"]),
         }
@@ -97,7 +94,6 @@ async def test_delete_terminal_batch_cascades(client):
     assert body["ok"] is True
     assert body["granules"] == 2
     assert body["objects"] == 1
-    assert body["progress"] == 1
     assert body["stage_timings"] == 1
     assert body["events"] == 1
 
@@ -106,7 +102,6 @@ async def test_delete_terminal_batch_cascades(client):
     assert counts["batches"] == 0
     assert counts["granules"] == 0
     assert counts["objects"] == 0
-    assert counts["progress"] == 0
     assert counts["timings"] == 0
     assert counts["events_with_gid"] == 0
 
@@ -191,6 +186,5 @@ async def test_delete_does_not_touch_other_batches(client):
     assert counts["batches"] == 1
     assert counts["granules"] == 2
     assert counts["objects"] == 1
-    assert counts["progress"] == 1
     assert counts["timings"] == 1
     assert counts["events_with_gid"] == 1

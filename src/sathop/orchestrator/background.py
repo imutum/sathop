@@ -9,10 +9,11 @@ from sathop.shared.periodic import run_periodic
 from sathop.shared.state_machine import LEASED_STATES, GranuleState, Scope
 
 from . import event_store
-from .api.progress import evict_granule_ids
+from .api.progress import evict_granules
 from .config import settings
-from .db import Granule, GranuleObject, GranuleStageTiming, Worker, get_session_maker, utcnow
+from .db import Granule, GranuleObject, Worker, get_session_maker, utcnow
 from .pubsub import commit_and_publish, log_event, publish
+from .reaping import reap_granules
 
 _log = logging.getLogger("sathop.orch.background")
 
@@ -51,7 +52,7 @@ async def sweep_expired_leases() -> int:
         actually_reclaimed = getattr(result, "rowcount", 0) or 0
         if actually_reclaimed == 0:
             return 0
-        evict_granule_ids(list(ids))
+        evict_granules(ids)
         await log_event(s, "scheduler", f"reclaimed {actually_reclaimed} expired leases", level="warn")
         await commit_and_publish(s, Scope.BATCHES)
         return actually_reclaimed
@@ -89,8 +90,6 @@ async def sweep_retention(
                 .where(GranuleObject.deleted_at < cutoff)
             )
             out["granule_objects"] = getattr(r, "rowcount", 0) or 0
-            # Children before parent: stage timings reference granules; SQLite FKs
-            # aren't enforced but staying consistent keeps the table bounded.
             doomed = (
                 (
                     await s.execute(
@@ -103,12 +102,10 @@ async def sweep_retention(
                 .all()
             )
             if doomed:
-                r = await s.execute(
-                    delete(GranuleStageTiming).where(GranuleStageTiming.granule_id.in_(doomed))
-                )
-                out["stage_timings"] = getattr(r, "rowcount", 0) or 0
-                r = await s.execute(delete(Granule).where(Granule.granule_id.in_(doomed)))
-                out["granules"] = getattr(r, "rowcount", 0) or 0
+                reaped = await reap_granules(s, doomed)
+                out["stage_timings"] = reaped["stage_timings"]
+                out["granules"] = reaped["granules"]
+                out["granule_objects"] += reaped["objects"]
 
         if del_days > 0:
             cutoff_w = now - timedelta(days=del_days)

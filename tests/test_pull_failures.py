@@ -113,6 +113,52 @@ async def test_reset_endpoint_404s_on_missing_batch(client):
     assert r.status_code == 404
 
 
+async def _seed_two_objects(receiver_id: str = "r1") -> tuple[int, int]:
+    async with orch_db._session_maker() as s:
+        s.add(Receiver(receiver_id=receiver_id, version="t", platform="linux"))
+        s.add(Batch(batch_id="b", name="t", bundle_ref="orch:x@1"))
+        s.add(Granule(granule_id="g1", batch_id="b", state=GranuleState.UPLOADED.value, inputs=[]))
+        ids: list[int] = []
+        for key in ("b/g1/out1.bin", "b/g1/out2.bin"):
+            o = GranuleObject(
+                granule_id="g1",
+                worker_id="w1",
+                object_key=key,
+                presigned_url="http://w1/x",
+                sha256="abc",
+                size=10,
+            )
+            s.add(o)
+            await s.flush()
+            ids.append(o.id)
+        await s.commit()
+        return ids[0], ids[1]
+
+
+async def _granule_state(gid: str = "g1") -> str:
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, gid)
+        return g.state
+
+
+async def test_granule_acked_only_after_all_objects_acked(client):
+    """UPLOADED→ACKED fires only once every object is acked — exercises the
+    shared all_objects_acked predicate as the receiver-side transition gate."""
+    id1, id2 = await _seed_two_objects()
+
+    r = client.post(
+        "/api/receivers/ack", json={"receiver_id": "r1", "object_id": id1, "sha256": "abc", "success": True}
+    )
+    assert r.status_code == 200
+    assert await _granule_state() == GranuleState.UPLOADED.value  # one of two acked → no transition
+
+    r = client.post(
+        "/api/receivers/ack", json={"receiver_id": "r1", "object_id": id2, "sha256": "abc", "success": True}
+    )
+    assert r.status_code == 200
+    assert await _granule_state() == GranuleState.ACKED.value  # all acked → ACKED
+
+
 async def test_success_ack_clears_offering_independent_of_counter(client):
     obj_id = await _seed()
     # One failure, then a successful ack — object should be acked, no longer offered.

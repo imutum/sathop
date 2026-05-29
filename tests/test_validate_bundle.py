@@ -1,11 +1,11 @@
-"""Tests for sathop.cli.validate_bundle — covers happy path + every shape error
-the orchestrator would also reject at upload time."""
+"""Tests for sathop.shared.bundle_validate — covers happy path + every shape
+error the orchestrator would also reject at upload time."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from sathop.cli import validate_bundle as validator
+from sathop.shared import bundle_validate as validator
 
 
 def _write(bundle: Path, manifest: str, extra_files: dict[str, str] | None = None) -> Path:

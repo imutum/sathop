@@ -23,9 +23,9 @@ from pathlib import Path
 from sathop.shared.bundle_archive import detect_wrapper_dir
 from sathop.shared.bundle_manifest import BundleManifest
 from sathop.shared.bundle_python_deps import python_deps_source
+from sathop.shared.bundle_ref import BUNDLE_REF_PREFIX, parse_bundle_ref
 from sathop.shared.http import make_sync_orch_client
 from sathop.shared.locks import NamedLockRegistry
-from sathop.shared.protocol import BUNDLE_REF_PREFIX, parse_bundle_ref
 
 from . import shared as shared_sync
 from ._paths import dir_size_bytes
