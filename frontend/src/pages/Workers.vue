@@ -141,7 +141,7 @@ function openBulkConc() {
 }
 
 function parseConc(s: string): number | null | undefined {
-  const t = s.trim();
+  const t = String(s ?? "").trim();
   if (t === "") return null;
   const n = Number(t);
   return Number.isInteger(n) && n >= 1 ? n : undefined;

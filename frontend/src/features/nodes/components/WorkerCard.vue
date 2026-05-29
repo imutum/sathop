@@ -85,7 +85,7 @@ function startEdit(dim: Dim) {
 function submitDraft() {
   const dim = editing.value;
   if (dim === null) return;
-  const t = draft.value.trim();
+  const t = String(draft.value ?? "").trim();
   const next = t === "" ? null : Number(t);
   if (next !== null && (!Number.isInteger(next) || next < 1)) {
     toast.error("并发必须是 ≥ 1 的整数，留空表示用节点默认值");
