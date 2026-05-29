@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
+import Segmented from "@/components/Segmented.vue";
 import WorkerCard from "@/features/nodes/components/WorkerCard.vue";
 import OnboardWorkerModal from "@/features/onboarding/components/OnboardWorkerModal.vue";
 import { Icon } from "@/components/Icon";
@@ -21,7 +22,28 @@ const qc = useQueryClient();
 const toast = useToast();
 const workers = useQuery({ queryKey: [...K.workers], queryFn: API.workers });
 const list = computed(() => workers.data.value ?? []);
-const activeCount = computed(() => list.value.filter((w) => w.removed_at == null).length);
+
+// Active vs history (removed) split. Removed nodes get their own tab so the
+// common case — a screenful of live nodes — never has to scroll past tombstones.
+const activeList = computed(() => list.value.filter((w) => w.removed_at == null));
+const removedList = computed(() => list.value.filter((w) => w.removed_at != null));
+const activeCount = computed(() => activeList.value.length);
+const hasHistory = computed(() => removedList.value.length > 0);
+
+type Tab = "active" | "history";
+const tab = ref<Tab>("active");
+// History is only reachable when it exists; if the last removed node is purged
+// while history is open, fall back to active.
+watch(hasHistory, (h) => {
+  if (!h) tab.value = "active";
+});
+const shown = computed(() =>
+  hasHistory.value && tab.value === "history" ? removedList.value : activeList.value,
+);
+const tabOptions = computed(() => [
+  { value: "active", label: "活跃", count: activeCount.value },
+  { value: "history", label: "历史", count: removedList.value.length },
+]);
 
 const updateAll = useMutation({
   mutationFn: () => API.updateAllWorkers(),
@@ -82,7 +104,20 @@ function maybeScroll() {
   lastScrolled = id;
 }
 
-watch([focusId, list], () => void nextTick(maybeScroll), { immediate: true });
+watch(
+  [focusId, list],
+  () => {
+    const id = focusId.value;
+    if (id) {
+      // A deep-linked removed worker lives in the history tab — switch to it so
+      // the target card is rendered before maybeScroll() looks up its ref.
+      const w = list.value.find((x) => x.worker_id === id);
+      if (w) tab.value = w.removed_at != null ? "history" : "active";
+    }
+    void nextTick(maybeScroll);
+  },
+  { immediate: true },
+);
 
 function setRef(id: string, el: Element | null) {
   cardRefs.value[id] = el as HTMLElement | null;
@@ -94,7 +129,7 @@ function setRef(id: string, el: Element | null) {
     <PageHeader title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列">
       <template #actions>
         <Button
-          v-if="activeCount > 0"
+          v-if="tab === 'active' && activeCount > 0"
           variant="outline"
           class="gap-1.5"
           :disabled="updateAll.isPending.value"
@@ -103,7 +138,7 @@ function setRef(id: string, el: Element | null) {
           全部更新
         </Button>
         <Button
-          v-if="activeCount > 0"
+          v-if="tab === 'active' && activeCount > 0"
           variant="outline"
           class="gap-1.5 text-destructive hover:bg-destructive/10"
           :disabled="removeAll.isPending.value"
@@ -151,9 +186,26 @@ function setRef(id: string, el: Element | null) {
         </Card>
       </template>
       <template #default>
-        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <div v-for="w in list" :key="w.worker_id" :ref="(el) => setRef(w.worker_id, el as Element | null)">
-            <WorkerCard :worker="w" :focused="focusId === w.worker_id" />
+        <div class="space-y-4">
+          <Segmented
+            v-if="hasHistory"
+            v-model="tab"
+            :options="tabOptions"
+            aria-label="活跃 / 历史 工作节点"
+          />
+          <Card v-if="shown.length === 0">
+            <CardContent class="pt-6">
+              <EmptyState
+                :title="tab === 'history' ? '暂无历史节点' : '当前无活跃节点'"
+                :description="tab === 'history' ? undefined : '已注册的节点都在历史中。'"
+                illustration="inbox"
+              />
+            </CardContent>
+          </Card>
+          <div v-else class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div v-for="w in shown" :key="w.worker_id" :ref="(el) => setRef(w.worker_id, el as Element | null)">
+              <WorkerCard :worker="w" :focused="focusId === w.worker_id" />
+            </div>
           </div>
         </div>
       </template>

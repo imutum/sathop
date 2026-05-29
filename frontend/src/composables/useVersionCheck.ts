@@ -37,12 +37,16 @@ async function fetchLatestRelease(): Promise<{ tag: string; htmlUrl: string }> {
   };
 }
 
-// The shared GitHub query. Long staleTime: releases change on the order of days.
+// The shared GitHub query. Checked once on first load, then never auto-refetched
+// (staleTime: Infinity gates both refetch-on-mount and refetch-on-focus) — the
+// only re-check is the manual refresh button in the sidebar VersionStatus. Its
+// sole consumer is that sidebar banner; per-node cards compare against the
+// orchestrator version, not GitHub, so they never touch this query.
 export function useLatestRelease() {
   return useQuery({
     queryKey: [...K.githubRelease],
     queryFn: fetchLatestRelease,
-    staleTime: 30 * 60 * 1000,
+    staleTime: Infinity,
     retry: 1,
   });
 }

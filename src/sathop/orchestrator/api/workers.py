@@ -350,12 +350,28 @@ async def request_gc(worker_id: str, s: AsyncSession = Depends(session)) -> dict
 async def remove_worker(
     worker_id: str,
     force: bool = Query(default=False),
+    purge: bool = Query(default=False),
     s: AsyncSession = Depends(session),
 ) -> dict:
     """Mark a worker as removed. Next heartbeat returns removed=True; worker
     drains in-flight work and exits. Row stays for retention sweep.
-    Pass ?force=true to also revoke leases immediately."""
+    Pass ?force=true to also revoke leases immediately.
+
+    Pass ?purge=true to physically delete an already-removed worker now —
+    bringing forward what the retention sweep does after retain_deleted_days.
+    Only the workers row goes; its granule_objects and events age out on their
+    own schedule, and dangling leased_by refs render client-side as a deleted
+    node. Requires removed_at to be set: deleting the tombstone while the
+    container is still draining would let it re-register (see register()'s 410)."""
     w = await get_or_404(s, Worker, worker_id, "worker not found")
+    if purge:
+        if w.removed_at is None:
+            raise HTTPException(409, "worker must be removed before it can be purged")
+        await log(s, worker_id, "worker purged (physical delete)")
+        await s.delete(w)
+        await commit_and_publish(s, Scope.WORKERS)
+        telemetry.evict_worker(worker_id)
+        return {"ok": True, "purged": True}
     if w.removed_at is not None:
         return {"ok": True}
     now = utcnow()

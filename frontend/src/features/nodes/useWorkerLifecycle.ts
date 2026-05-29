@@ -31,6 +31,15 @@ export function useWorkerLifecycle(worker: MaybeRefOrGetter<{ worker_id: string 
     onError: (e: Error) => toast.error(`移除失败：${e.message}`),
   });
 
+  const purge = useMutation({
+    mutationFn: () => API.purgeWorker(id()),
+    onSuccess: () => {
+      refreshWorkers();
+      toast.success(`已彻底删除节点 ${id()}`);
+    },
+    onError: (e: Error) => toast.error(`删除失败：${e.message}`),
+  });
+
   const pause = useMutation({
     mutationFn: (next: boolean) => API.setWorkerPaused(id(), next),
     onSuccess: (_r, next) => {
@@ -90,6 +99,18 @@ export function useWorkerLifecycle(worker: MaybeRefOrGetter<{ worker_id: string 
     if (ok) remove.mutate();
   }
 
+  async function confirmPurge(): Promise<void> {
+    const ok = await requestConfirm({
+      title: `彻底删除节点 ${id()}？`,
+      description:
+        "从注册表中物理删除该节点记录（已上传产物与事件日志不受影响，各自按保留周期老化）。\n" +
+        "如果该节点容器仍在运行，删除后它会以新节点身份重新注册 — 想让它彻底不再回来，请先停掉容器。",
+      confirmText: "彻底删除",
+      tone: "danger",
+    });
+    if (ok) purge.mutate();
+  }
+
   function togglePause(currentlyPaused: boolean): void {
     pause.mutate(!currentlyPaused);
   }
@@ -121,6 +142,7 @@ export function useWorkerLifecycle(worker: MaybeRefOrGetter<{ worker_id: string 
   return {
     update,
     remove,
+    purge,
     pause,
     revoke,
     gc,
@@ -128,6 +150,7 @@ export function useWorkerLifecycle(worker: MaybeRefOrGetter<{ worker_id: string 
     pending,
     confirmUpdate,
     confirmRemove,
+    confirmPurge,
     togglePause,
     confirmRevoke,
     confirmGc,

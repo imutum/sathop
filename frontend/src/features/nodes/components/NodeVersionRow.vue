@@ -1,19 +1,24 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useVersionCheck } from "@/composables/useVersionCheck";
+import { useQuery } from "@tanstack/vue-query";
+import { API } from "@/api";
+import { K } from "@/queryKeys";
+import { compareSemver } from "@/lib/semver";
 import { Button } from "@/components/ui/button";
 import HintTip from "@/components/HintTip.vue";
 import { Icon } from "@/components/Icon";
 
-// One visual anchor that fuses "检查 + 更新": the running version, a status dot
-// comparing it to the latest GitHub release, a re-check button, and — only when
-// behind — an inline 更新 action. Replaces the old passive version badge plus
-// the update item buried two menus deep in the card footer.
+// One visual anchor fusing "运行版本 + 是否与控制端一致 + 更新动作". The control
+// plane (orchestrator) is the version anchor: a node is compared against the
+// orchestrator's running version, NOT GitHub. The single global "is a newer
+// release available?" check lives only in the sidebar VersionStatus, so there
+// is no per-card GitHub re-check button here. Equal → 一致; differs → 不一致 +
+// an inline 更新 action (drift remediation).
 const props = withDefaults(
   defineProps<{
     version: string;
     pending?: boolean;
-    // Removed/disabled nodes show the version read-only (no check/update).
+    // Removed/disabled nodes show the version read-only (no update action).
     actionable?: boolean;
     updateTitle?: string;
   }>(),
@@ -22,16 +27,29 @@ const props = withDefaults(
 
 const emit = defineEmits<{ (e: "update"): void }>();
 
-const { latestTag, status, isFetching, refresh } = useVersionCheck(() => props.version);
+// Shared, deduped, long-staleTime query — the orchestrator version is the anchor.
+const orch = useQuery({
+  queryKey: [...K.orchInfo],
+  queryFn: API.orchestratorInfo,
+  staleTime: 60 * 60 * 1000,
+});
+const target = computed(() => orch.data.value?.version ?? "");
+
+type NodeVersionStatus = "match" | "drift" | "unknown";
+// Equality judgment (not ordering): a node either matches the control plane or
+// it doesn't. compareSemver tolerates a stray leading `v` / suffix; a node that
+// somehow runs ahead of the orchestrator is still surfaced as 不一致.
+const status = computed<NodeVersionStatus>(() => {
+  if (!props.version || !target.value) return "unknown";
+  return compareSemver(props.version, target.value) === 0 ? "match" : "drift";
+});
 
 const dotClass = computed(() => {
   switch (status.value) {
-    case "current":
+    case "match":
       return "bg-success";
-    case "outdated":
+    case "drift":
       return "bg-warning animate-pulse-soft";
-    case "loading":
-      return "bg-muted-foreground animate-pulse-soft";
     default:
       return "bg-muted-foreground";
   }
@@ -39,14 +57,12 @@ const dotClass = computed(() => {
 
 const label = computed(() => {
   switch (status.value) {
-    case "current":
-      return "已是最新";
-    case "outdated":
-      return `有新版 ${latestTag.value}`;
-    case "loading":
-      return "检查中…";
+    case "match":
+      return "与控制端一致";
+    case "drift":
+      return `与控制端不一致 v${target.value}`;
     default:
-      return "无法检查最新版本";
+      return "版本未知";
   }
 });
 </script>
@@ -62,37 +78,23 @@ const label = computed(() => {
       </span>
     </HintTip>
     <span
-      :class="['truncate', status === 'outdated' ? 'text-warning' : 'text-muted-foreground']"
+      :class="['truncate', status === 'drift' ? 'text-warning' : 'text-muted-foreground']"
     >
       {{ label }}
     </span>
 
-    <div v-if="actionable" class="ml-auto flex items-center gap-1">
-      <HintTip text="重新检查 GitHub 上的最新版本">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          class="h-6 w-6 text-muted-foreground hover:text-foreground"
-          :disabled="isFetching"
-          aria-label="检查更新"
-          @click="refresh"
-        >
-          <Icon name="refresh" :size="12" :class="isFetching ? 'animate-spin' : ''" />
-        </Button>
-      </HintTip>
-      <Button
-        v-if="status === 'outdated'"
-        type="button"
-        variant="default"
-        size="xs"
-        :disabled="pending"
-        :title="updateTitle ?? '拉取最新代码并重启该节点'"
-        @click="emit('update')"
-      >
-        <Icon name="download" :size="11" />
-        更新
-      </Button>
-    </div>
+    <Button
+      v-if="actionable && status === 'drift'"
+      type="button"
+      variant="default"
+      size="xs"
+      class="ml-auto"
+      :disabled="pending"
+      :title="updateTitle ?? '拉取最新代码并重启该节点'"
+      @click="emit('update')"
+    >
+      <Icon name="download" :size="11" />
+      更新
+    </Button>
   </div>
 </template>

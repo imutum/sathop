@@ -77,6 +77,12 @@ const nodeApi = {
     deleteJson<{ ok: boolean }>(
       `/api/workers/${encodeURIComponent(workerId)}${force ? "?force=true" : ""}`,
     ),
+  // Physical delete of an already-removed (history) worker. Backend 409s unless
+  // removed_at is set, so the UI only offers it on the history tab.
+  purgeWorker: (workerId: string) =>
+    deleteJson<{ ok: boolean; purged: boolean }>(
+      `/api/workers/${encodeURIComponent(workerId)}?purge=true`,
+    ),
   updateWorker: (workerId: string) =>
     postJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}/update`),
   updateAllWorkers: () =>

@@ -354,6 +354,20 @@ function onKey(e: KeyboardEvent) {
                 </DropdownMenuContent>
               </DropdownMenu>
             </template>
+            <template v-else>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                class="text-destructive hover:bg-destructive/10"
+                :disabled="lc.purge.isPending.value"
+                title="从注册表中物理删除该节点记录"
+                @click="lc.confirmPurge"
+              >
+                <Icon name="trash" :size="11" />
+                彻底删除
+              </Button>
+            </template>
             <span class="whitespace-nowrap">心跳 {{ fmtAge(worker.last_seen) }}</span>
           </div>
         </div>

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/table";
 import EmptyState from "@/components/EmptyState.vue";
 import { Icon } from "@/components/Icon";
+import WorkerRef from "@/components/WorkerRef.vue";
 import { stripBatchPrefix } from "@/lib/utils";
 import ErrorCell from "@/features/batch/components/ErrorCell.vue";
 import GranuleExpandedDetail from "@/features/batch/components/GranuleExpandedDetail.vue";
@@ -87,15 +88,7 @@ const emit = defineEmits<{
         <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-2xs text-muted-foreground">
           <span class="font-mono">
             领取方:
-            <RouterLink
-              v-if="g.leased_by"
-              :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-              class="transition-colors hover:text-primary"
-              title="跳转到该 worker 卡片"
-            >
-              {{ g.leased_by }}
-            </RouterLink>
-            <template v-else>—</template>
+            <WorkerRef :worker-id="g.leased_by" />
           </span>
           <span>{{ fmtAge(g.updated_at) }}</span>
         </div>
@@ -205,15 +198,7 @@ const emit = defineEmits<{
               />
             </TableCell>
             <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">
-              <RouterLink
-                v-if="g.leased_by"
-                :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                class="transition-colors hover:text-primary"
-                title="跳转到该 worker 卡片"
-              >
-                {{ g.leased_by }}
-              </RouterLink>
-              <template v-else>—</template>
+              <WorkerRef :worker-id="g.leased_by" />
             </TableCell>
             <TableCell class="py-2.5 text-cell text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
             <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">

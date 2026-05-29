@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/table";
 import CardSection from "@/components/CardSection.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import WorkerRef from "@/components/WorkerRef.vue";
 import EventTimeline from "@/components/EventTimeline.vue";
 import HintTip from "@/components/HintTip.vue";
 import PageHeader from "@/components/PageHeader.vue";
@@ -246,14 +247,7 @@ function fmtHours(h: number): string {
                 class="py-2.5 font-mono text-cell text-muted-foreground"
                 @click.stop
               >
-                <RouterLink
-                  v-if="g.leased_by"
-                  :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                  class="transition-colors hover:text-primary"
-                >
-                  {{ g.leased_by }}
-                </RouterLink>
-                <template v-else>—</template>
+                <WorkerRef :worker-id="g.leased_by" />
               </TableCell>
               <TableCell class="px-5 py-2.5 text-cell text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
             </TableRow>
@@ -319,14 +313,7 @@ function fmtHours(h: number): string {
               class="py-2.5 font-mono text-cell text-muted-foreground"
               @click.stop
             >
-              <RouterLink
-                v-if="g.leased_by"
-                :to="`/workers?id=${encodeURIComponent(g.leased_by)}`"
-                class="transition-colors hover:text-primary"
-              >
-                {{ g.leased_by }}
-              </RouterLink>
-              <template v-else>—</template>
+              <WorkerRef :worker-id="g.leased_by" />
             </TableCell>
             <TableCell class="py-2.5 text-cell text-warning tabular-nums">
               {{ fmtHours(g.age_hours) }}

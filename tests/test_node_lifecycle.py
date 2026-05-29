@@ -116,6 +116,45 @@ async def test_worker_remove_force_revokes_leases(client):
         assert g.state == GranuleState.PENDING.value
 
 
+# ─── worker purge (physical delete of a history node) ──────────────────────
+
+
+async def test_worker_purge_requires_removed_first(client):
+    await _add_worker()
+    r = client.delete("/api/workers/w1?purge=true")
+    assert r.status_code == 409
+    async with orch_db._session_maker() as s:
+        assert await s.get(Worker, "w1") is not None
+
+
+async def test_worker_purge_deletes_row(client):
+    await _add_worker()
+    client.delete("/api/workers/w1")
+    r = client.delete("/api/workers/w1?purge=true")
+    assert r.status_code == 200
+    assert r.json()["purged"] is True
+    async with orch_db._session_maker() as s:
+        assert await s.get(Worker, "w1") is None
+
+
+async def test_worker_purge_leaves_leased_by_dangling(client):
+    # Purge only drops the worker row; the granule's leased_by string stays as a
+    # now-orphaned reference (rendered as a deleted node client-side).
+    await _add_worker()
+    await _seed_granule("w1", state=GranuleState.DELETED.value, granule_id="b:done")
+    client.delete("/api/workers/w1")
+    assert client.delete("/api/workers/w1?purge=true").status_code == 200
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, "b:done")
+        assert g is not None
+        assert g.leased_by == "w1"
+
+
+async def test_worker_purge_404_when_unknown(client):
+    r = client.delete("/api/workers/ghost?purge=true")
+    assert r.status_code == 404
+
+
 # ─── worker paused blocks lease ──────────────────────────────────────────
 
 
