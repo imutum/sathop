@@ -33,6 +33,7 @@ const router = useRouter();
 const overview = useQuery({ queryKey: [...K.overview], queryFn: API.overview });
 const workers = useQuery({ queryKey: [...K.workers], queryFn: API.workers });
 const receivers = useQuery({ queryKey: [...K.receivers], queryFn: API.receivers });
+const bundles = useQuery({ queryKey: [...K.bundles], queryFn: API.bundles });
 const inflight = useQuery({ queryKey: [...K.inflight], queryFn: () => API.inFlight(30) });
 const stuckList = useQuery({
   queryKey: [...K.stuck],
@@ -77,12 +78,18 @@ const activeReceivers = computed(
 const hasChartData = computed(() => pipelineSegments(counts.value).length > 0);
 const active = computed(() => inflight.data.value ?? []);
 
-const firstRun = computed(
+// Onboarding checklist reflects real cluster state, shown until all three done.
+const onboardStatus = computed(() => ({
+  worker: (workers.data.value?.length ?? 0) > 0,
+  bundle: (bundles.data.value?.length ?? 0) > 0,
+  batch: Object.keys(counts.value).length > 0,
+}));
+const showOnboarding = computed(
   () =>
     overview.isSuccess.value &&
     workers.isSuccess.value &&
-    Object.keys(counts.value).length === 0 &&
-    (workers.data.value?.length ?? 0) === 0,
+    bundles.isSuccess.value &&
+    !(onboardStatus.value.worker && onboardStatus.value.bundle && onboardStatus.value.batch),
 );
 
 const lastEvents = computed(() => overview.data.value?.last_events ?? []);
@@ -113,7 +120,7 @@ function fmtHours(h: number): string {
       </AlertDescription>
     </Alert>
 
-    <OnboardingCard v-if="firstRun" />
+    <OnboardingCard v-if="showOnboarding" :status="onboardStatus" />
 
     <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
       <Stat

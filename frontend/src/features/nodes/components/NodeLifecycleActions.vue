@@ -42,11 +42,11 @@ function toggle(): void {
       </HintTip>
     </template>
     <DropdownMenuItem
-      :title="restartTitle ?? '触发该节点重启（一次心跳内生效，依赖容器 restart 策略恢复）'"
+      :title="restartTitle ?? '触发该节点更新（一次心跳内生效，拉取最新代码后由容器 restart 策略恢复）'"
       :disabled="pending"
       @select="emit('restart')"
     >
-      重启…
+      更新…
     </DropdownMenuItem>
     <DropdownMenuItem
       :title="enabled ? '请先禁用此节点，再点击此按钮永久移除' : (forgetTitle ?? '永久从注册表中删除（misclick → 重启 receiver/worker 自动重建）')"

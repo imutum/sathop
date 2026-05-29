@@ -107,28 +107,6 @@ async function download() {
     </div>
     <Alert v-if="error" variant="destructive"><AlertDescription>{{ error }}</AlertDescription></Alert>
 
-    <div class="grid grid-cols-2 gap-4 rounded-lg border border-border bg-muted/40 p-4 text-xs sm:grid-cols-3">
-      <Field label="SHA256">
-        <span class="font-mono" :title="d.sha256">{{ d.sha256.slice(0, 16) }}…</span>
-        <CopyButton :value="d.sha256" title="复制完整 SHA256" />
-      </Field>
-      <Field label="大小">
-        <span class="font-mono tabular-nums">{{ fmtBytes(d.size) }}</span>
-      </Field>
-      <Field label="入口">
-        <span class="break-all font-mono">{{ m.execution.entrypoint }}</span>
-      </Field>
-      <Field label="超时">
-        {{ m.execution.timeout_sec ? `${m.execution.timeout_sec}s` : "默认" }}
-      </Field>
-      <Field label="输出目录">
-        <span class="font-mono">{{ m.outputs.watch_dir }}</span>
-      </Field>
-      <Field label="输出扩展名">
-        {{ m.outputs.extensions?.length ? m.outputs.extensions.join(", ") : "全部" }}
-      </Field>
-    </div>
-
     <BundleSection title="输入槽位 · slots" :count="slots.length">
       <div v-if="slots.length === 0" class="text-xs text-muted-foreground">未声明</div>
       <table v-else class="w-full font-mono text-cell">
@@ -194,26 +172,55 @@ async function download() {
       </ul>
     </BundleSection>
 
-    <BundleSection v-if="apt.length > 0" title="系统依赖 · apt" :count="apt.length">
-      <ul class="space-y-0.5 font-mono text-cell">
-        <li v-for="p in apt" :key="p">{{ p }}</li>
-      </ul>
-    </BundleSection>
+    <!-- 校验/执行契约/依赖环境：次要参考信息，默认折叠，避免与下方文件浏览器抢首屏。 -->
+    <details class="group rounded-lg border border-border bg-muted/40">
+      <summary
+        class="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-2xs font-semibold uppercase tracking-label text-muted-foreground [&::-webkit-details-marker]:hidden"
+      >
+        <span>高级信息 · 校验 / 执行契约 / 依赖环境</span>
+        <Icon name="chevronDown" :size="14" class="transition-transform group-open:rotate-180" />
+      </summary>
+      <div class="space-y-5 border-t border-border/60 p-4">
+        <div class="grid grid-cols-2 gap-4 text-xs sm:grid-cols-3">
+          <Field label="SHA256">
+            <span class="font-mono" :title="d.sha256">{{ d.sha256.slice(0, 16) }}…</span>
+            <CopyButton :value="d.sha256" title="复制完整 SHA256" />
+          </Field>
+          <Field label="大小">
+            <span class="font-mono tabular-nums">{{ fmtBytes(d.size) }}</span>
+          </Field>
+          <Field label="入口">
+            <span class="break-all font-mono">{{ m.execution.entrypoint }}</span>
+          </Field>
+          <Field label="超时">
+            {{ m.execution.timeout_sec ? `${m.execution.timeout_sec}s` : "默认" }}
+          </Field>
+          <Field label="输出目录">
+            <span class="font-mono">{{ m.outputs.watch_dir }}</span>
+          </Field>
+          <Field label="输出扩展名">
+            {{ m.outputs.extensions?.length ? m.outputs.extensions.join(", ") : "全部" }}
+          </Field>
+        </div>
 
-    <BundleSection
-      v-if="envEntries.length > 0"
-      title="默认环境变量"
-      :count="envEntries.length"
-    >
-      <table class="w-full font-mono text-cell">
-        <tbody>
-          <tr v-for="[k, v] in envEntries" :key="k" class="border-t border-border/50">
-            <td class="py-1.5 pr-3 text-muted-foreground">{{ k }}</td>
-            <td class="break-all py-1.5">{{ String(v) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </BundleSection>
+        <BundleSection v-if="apt.length > 0" title="系统依赖 · apt" :count="apt.length">
+          <ul class="space-y-0.5 font-mono text-cell">
+            <li v-for="p in apt" :key="p">{{ p }}</li>
+          </ul>
+        </BundleSection>
+
+        <BundleSection v-if="envEntries.length > 0" title="默认环境变量" :count="envEntries.length">
+          <table class="w-full font-mono text-cell">
+            <tbody>
+              <tr v-for="[k, v] in envEntries" :key="k" class="border-t border-border/50">
+                <td class="py-1.5 pr-3 text-muted-foreground">{{ k }}</td>
+                <td class="break-all py-1.5">{{ String(v) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </BundleSection>
+      </div>
+    </details>
 
     <BundleSection v-if="creds.length > 0" title="所需凭证" :count="creds.length">
       <div class="flex flex-wrap gap-1.5">

@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { useMutation, useQueryClient } from "@tanstack/vue-query";
-import { API, type WorkerInfo } from "@/api";
-import { K } from "@/queryKeys";
+import type { WorkerInfo } from "@/api";
 import { fmtGB, nodeStatusBadge } from "@/lib/format";
 import { fmtAge } from "@/i18n";
-import { requestConfirm } from "@/composables/useConfirm";
+import { useWorkerLifecycle } from "@/features/nodes/useWorkerLifecycle";
 import { useToast } from "@/composables/useToast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,109 +19,17 @@ import {
 import CopyButton from "@/components/CopyButton.vue";
 import HintTip from "@/components/HintTip.vue";
 import ProgressBar from "@/components/ProgressBar.vue";
+import NodeVersionRow from "@/features/nodes/components/NodeVersionRow.vue";
 import TextInput from "@/ui/TextInput.vue";
 import { Icon } from "@/components/Icon";
 
 const props = defineProps<{ worker: WorkerInfo; focused?: boolean }>();
 
-const qc = useQueryClient();
+const isRemoved = computed(() => props.worker.removed_at != null);
 const toast = useToast();
 
-const isRemoved = computed(() => props.worker.removed_at != null);
-
-const doUpdate = useMutation({
-  mutationFn: () => API.updateWorker(props.worker.worker_id),
-  onSuccess: () => toast.success("已发送更新信号，下次心跳生效"),
-  onError: (e: Error) => toast.error(`更新失败：${e.message}`),
-});
-
-const doRemove = useMutation({
-  mutationFn: () => API.removeWorker(props.worker.worker_id),
-  onSuccess: () => {
-    qc.invalidateQueries({ queryKey: [...K.workers] });
-    toast.success(`已移除节点 ${props.worker.worker_id}`);
-  },
-  onError: (e: Error) => toast.error(`移除失败：${e.message}`),
-});
-
-const lifecyclePending = computed(() => doUpdate.isPending.value || doRemove.isPending.value);
-
-async function confirmUpdate(): Promise<void> {
-  const ok = await requestConfirm({
-    title: `更新节点 ${props.worker.worker_id}？`,
-    description:
-      "向该 worker 发送更新信号 — 它会在下一次心跳收到后排空在手任务并退出，自动拉取最新代码后重新启动。",
-    confirmText: "更新",
-  });
-  if (ok) doUpdate.mutate();
-}
-
-async function confirmRemove(): Promise<void> {
-  const ok = await requestConfirm({
-    title: `移除节点 ${props.worker.worker_id}？`,
-    description:
-      "该节点将被永久移除，容器会在排空任务后自动停止。\n" +
-      "移除后该节点 ID 不可再注册 — 如需恢复，请启动新的 worker。",
-    confirmText: "移除",
-    tone: "danger",
-  });
-  if (ok) doRemove.mutate();
-}
-
-const pause = useMutation({
-  mutationFn: (next: boolean) => API.setWorkerPaused(props.worker.worker_id, next),
-  onSuccess: (_r, next) => {
-    qc.invalidateQueries({ queryKey: [...K.workers] });
-    toast.success(next ? "已暂停领新任务（在手任务继续）" : "已恢复");
-  },
-  onError: (e: Error) => toast.error(`暂停切换失败：${e.message}`),
-});
-
-const revoke = useMutation({
-  mutationFn: () => API.revokeWorkerLeases(props.worker.worker_id),
-  onSuccess: (r) => {
-    qc.invalidateQueries({ queryKey: [...K.workers] });
-    qc.invalidateQueries({ queryKey: [...K.batches] });
-    toast.success(`已释放 ${r.revoked} 条 lease，等待其他 worker 抢占`);
-  },
-  onError: (e: Error) => toast.error(`释放失败：${e.message}`),
-});
-
-const gc = useMutation({
-  mutationFn: () => API.workerGc(props.worker.worker_id),
-  onSuccess: () => {
-    toast.success("已发送清理信号，下次心跳生效");
-  },
-  onError: (e: Error) => toast.error(`触发失败：${e.message}`),
-});
-
-function onTogglePause(): void {
-  pause.mutate(!props.worker.operator_paused);
-}
-
-async function onRevokeAll(): Promise<void> {
-  const ok = await requestConfirm({
-    title: `立即释放此节点的所有 lease？`,
-    description:
-      "把这台节点持有的全部在手 lease 重置回 待分配，等其他 worker 抢占。\n" +
-      "已下载/已处理的中间产物会被丢弃；retry_count 会 +1，仍受 max_retries 限制。\n" +
-      "用于 worker 卡住但还在心跳的场景。",
-    confirmText: "立即释放",
-    tone: "danger",
-  });
-  if (ok) revoke.mutate();
-}
-
-async function onGc(): Promise<void> {
-  const ok = await requestConfirm({
-    title: `让节点立即清理缓存？`,
-    description:
-      "向该 worker 发送清理信号 — 下一次心跳生效，立即跑一次 venv LRU + shared 孤儿清理。\n" +
-      "正在使用的 bundle/venv 不会被清掉（受 in_use 锁保护）。",
-    confirmText: "清理缓存",
-  });
-  if (ok) gc.mutate();
-}
+// All mutations + confirm dialogs live in the composable now.
+const lc = useWorkerLifecycle(() => props.worker);
 
 const inflightTotal = computed(
   () =>
@@ -135,13 +41,7 @@ const inflightTotal = computed(
     props.worker.queue_uploading,
 );
 
-const status = computed(() =>
-  nodeStatusBadge(
-    !isRemoved.value,
-    props.worker.last_seen,
-    "已移除",
-  ),
-);
+const status = computed(() => nodeStatusBadge(!isRemoved.value, props.worker.last_seen, "已移除"));
 
 const diskPct = computed(() =>
   props.worker.disk_total_gb > 0
@@ -161,15 +61,6 @@ const draftInput = ref<InstanceType<typeof TextInput> | null>(null);
 watch(draft, (v) => {
   if (v !== null) void nextTick(() => draftInput.value?.focus());
 });
-const setCap = useMutation({
-  mutationFn: (n: number | null) => API.setWorkerCapacity(props.worker.worker_id, n),
-  onSuccess: (_r, n) => {
-    qc.invalidateQueries({ queryKey: [...K.workers] });
-    toast.success(n == null ? "已清除并发上限" : `已设并发上限 ${n}`);
-    draft.value = null;
-  },
-  onError: (e: Error) => toast.error(`设置失败：${e.message}`),
-});
 
 const effective = computed(() =>
   Math.min(props.worker.capacity, props.worker.desired_capacity ?? props.worker.capacity),
@@ -182,16 +73,12 @@ function startEdit() {
 
 function submitDraft() {
   const t = (draft.value ?? "").trim();
-  if (t === "") {
-    setCap.mutate(null);
-    return;
-  }
-  const n = Number(t);
-  if (!Number.isInteger(n) || n < 1 || n > props.worker.capacity) {
+  const next = t === "" ? null : Number(t);
+  if (next !== null && (!Number.isInteger(next) || next < 1 || next > props.worker.capacity)) {
     toast.error(`并发上限必须是 1–${props.worker.capacity} 的整数`);
     return;
   }
-  setCap.mutate(n);
+  lc.setCapacity.mutate(next, { onSuccess: () => (draft.value = null) });
 }
 
 function onKey(e: KeyboardEvent) {
@@ -209,19 +96,17 @@ function onKey(e: KeyboardEvent) {
     "
   >
     <Card :class="isRemoved ? 'opacity-50' : undefined">
-      <div class="flex items-start justify-between gap-2 border-b border-border/60 px-5 py-4">
+      <!-- 身份 -->
+      <div class="flex items-start justify-between gap-2 px-5 pb-3 pt-4">
         <div class="min-w-0">
           <div class="flex items-center gap-1 font-mono text-[13px] font-semibold">
             <span class="truncate">{{ worker.worker_id }}</span>
             <CopyButton :value="worker.worker_id" title="复制节点 ID" />
-            <HintTip
-              v-if="worker.version"
-              :text="`worker 上报的运行版本（来自 sathop 包元数据）— 排查问题时确认是不是最新镜像`"
-            >
-              <Badge tone="info" class="ml-1 font-mono">v{{ worker.version }}</Badge>
-            </HintTip>
           </div>
-          <div class="mt-0.5 truncate font-mono text-2xs text-muted-foreground" :title="worker.public_url ?? ''">
+          <div
+            class="mt-0.5 truncate font-mono text-2xs text-muted-foreground"
+            :title="worker.public_url ?? ''"
+          >
             {{ worker.public_url ?? "—" }}
           </div>
         </div>
@@ -242,7 +127,19 @@ function onKey(e: KeyboardEvent) {
         </div>
       </div>
 
+      <!-- 版本检查 + 更新：合二为一的锚点 -->
+      <div class="border-b border-border/60 px-5 pb-3">
+        <NodeVersionRow
+          :version="worker.version"
+          :pending="lc.pending.value"
+          :actionable="!isRemoved"
+          update-title="排空在手任务后拉取最新代码并重启该 worker"
+          @update="lc.confirmUpdate"
+        />
+      </div>
+
       <div class="space-y-4 px-5 py-4">
+        <!-- 健康 -->
         <div class="grid grid-cols-3 gap-3">
           <HintTip text="进程实时 CPU 占用，由 worker 上报">
             <div>
@@ -331,6 +228,7 @@ function onKey(e: KeyboardEvent) {
           </HintTip>
         </div>
 
+        <!-- 约束 + 动作 -->
         <div class="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3 text-2xs text-muted-foreground">
           <span class="flex items-center gap-1.5">
             <HintTip text="当前生效的并发上限 / 容器启动时声明的硬容量">
@@ -345,14 +243,14 @@ function onKey(e: KeyboardEvent) {
                 :model-value="draft"
                 @update:model-value="draft = $event"
                 @keydown="onKey"
-                :disabled="setCap.isPending.value"
+                :disabled="lc.setCapacity.isPending.value"
                 placeholder="env"
                 class="w-14 text-2xs tabular-nums"
               />
               <Button
                 type="button"
                 size="xs"
-                :disabled="setCap.isPending.value"
+                :disabled="lc.setCapacity.isPending.value"
                 @click="submitDraft"
               >
                 保存
@@ -361,7 +259,7 @@ function onKey(e: KeyboardEvent) {
                 type="button"
                 variant="ghost"
                 size="xs"
-                :disabled="setCap.isPending.value"
+                :disabled="lc.setCapacity.isPending.value"
                 class="text-muted-foreground hover:text-foreground"
                 @click="draft = null"
               >
@@ -400,13 +298,13 @@ function onKey(e: KeyboardEvent) {
                 type="button"
                 :variant="worker.operator_paused ? 'default' : 'outline'"
                 size="xs"
-                :disabled="pause.isPending.value"
+                :disabled="lc.pause.isPending.value"
                 :title="worker.operator_paused
                   ? '恢复领取新任务'
                   : '暂停领取新任务（在手的继续跑完）'"
-                @click="onTogglePause"
+                @click="lc.togglePause(worker.operator_paused)"
               >
-                {{ pause.isPending.value ? "…" : worker.operator_paused ? "恢复" : "暂停" }}
+                {{ lc.pause.isPending.value ? "…" : worker.operator_paused ? "恢复" : "暂停" }}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger as-child>
@@ -424,19 +322,16 @@ function onKey(e: KeyboardEvent) {
                   <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
                     运维
                   </DropdownMenuLabel>
-                  <DropdownMenuItem
-                    :disabled="gc.isPending.value"
-                    @select="onGc"
-                  >
+                  <DropdownMenuItem :disabled="lc.gc.isPending.value" @select="lc.confirmGc">
                     立即清理缓存
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    :disabled="revoke.isPending.value || inflightTotal === 0"
+                    :disabled="lc.revoke.isPending.value || inflightTotal === 0"
                     :title="inflightTotal === 0
                       ? '当前无在手 lease'
                       : `立即释放在手的 ${inflightTotal} 条 lease（丢弃中间产物）`"
                     class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
-                    @select="onRevokeAll"
+                    @select="lc.confirmRevoke(inflightTotal)"
                   >
                     释放在手 lease {{ inflightTotal > 0 ? `(${inflightTotal})` : '' }}
                   </DropdownMenuItem>
@@ -444,16 +339,15 @@ function onKey(e: KeyboardEvent) {
                   <DropdownMenuLabel class="text-mini font-medium tracking-label text-muted-foreground">
                     生命周期
                   </DropdownMenuLabel>
-                  <DropdownMenuItem
-                    :disabled="lifecyclePending"
-                    @select="confirmUpdate"
-                  >
+                  <!-- Always-available fallback; the prominent inline 更新 button
+                       (NodeVersionRow) only appears when a newer version exists. -->
+                  <DropdownMenuItem :disabled="lc.pending.value" @select="lc.confirmUpdate">
                     更新…
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    :disabled="lifecyclePending"
+                    :disabled="lc.pending.value"
                     class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
-                    @select="confirmRemove"
+                    @select="lc.confirmRemove"
                   >
                     移除…
                   </DropdownMenuItem>

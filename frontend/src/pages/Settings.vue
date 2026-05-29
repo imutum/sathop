@@ -1,18 +1,51 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
 import { K } from "@/queryKeys";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
+import { useVersionCheck } from "@/composables/useVersionCheck";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import CardSection from "@/components/CardSection.vue";
 import Field from "@/components/Field.vue";
 import PageHeader from "@/components/PageHeader.vue";
+import { Icon } from "@/components/Icon";
 
 const toast = useToast();
 const info = useQuery({ queryKey: [...K.orchInfo], queryFn: API.orchestratorInfo });
+
+// Same version check as the sidebar banner — but surfaced inline here so the
+// update action sits next to the freshness signal (检查 + 更新 together).
+const { latestTag, status, isFetching, refresh } = useVersionCheck(
+  () => info.data.value?.version,
+);
+const outdated = computed(() => status.value === "outdated");
+const versionLabel = computed(() => {
+  switch (status.value) {
+    case "current":
+      return "已是最新版本";
+    case "outdated":
+      return `有新版本 ${latestTag.value} 可用`;
+    case "loading":
+      return "正在检查更新…";
+    default:
+      return "无法检查最新版本";
+  }
+});
+const dotClass = computed(() => {
+  switch (status.value) {
+    case "current":
+      return "bg-success";
+    case "outdated":
+      return "bg-warning animate-pulse-soft";
+    case "loading":
+      return "bg-muted-foreground animate-pulse-soft";
+    default:
+      return "bg-muted-foreground";
+  }
+});
 
 const updating = ref(false);
 
@@ -51,15 +84,36 @@ async function confirmUpdateAndRestart() {
   <div class="space-y-6">
     <PageHeader title="设置" description="Orchestrator 当前运行时配置（只读）">
       <template #actions>
-        <Button
-          variant="outline"
-          size="sm"
-          :pending="updating"
-          pending-label="更新中…"
-          @click="confirmUpdateAndRestart"
-        >
-          更新并重启
-        </Button>
+        <div class="flex items-center gap-3">
+          <div class="hidden items-center gap-2 text-2xs text-muted-foreground sm:flex">
+            <span class="relative grid h-2 w-2 place-items-center">
+              <span :class="['absolute inset-0 rounded-full', dotClass]" aria-hidden />
+            </span>
+            <span class="font-mono text-foreground">v{{ info.data.value?.version ?? "?" }}</span>
+            <span :class="outdated ? 'text-warning' : ''">{{ versionLabel }}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              class="h-6 w-6 text-muted-foreground"
+              :disabled="isFetching"
+              title="重新检查最新版本"
+              aria-label="重新检查"
+              @click="refresh"
+            >
+              <Icon name="refresh" :size="12" :class="isFetching ? 'animate-spin' : ''" />
+            </Button>
+          </div>
+          <Button
+            :variant="outdated ? 'default' : 'outline'"
+            size="sm"
+            :pending="updating"
+            pending-label="更新中…"
+            @click="confirmUpdateAndRestart"
+          >
+            更新并重启
+          </Button>
+        </div>
       </template>
     </PageHeader>
 

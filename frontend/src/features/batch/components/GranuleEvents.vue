@@ -1,20 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useQuery } from "@tanstack/vue-query";
-import { API } from "@/api";
-import { K } from "@/queryKeys";
+import type { EventRow } from "@/api";
 import { fmtAge, levelLabel } from "@/i18n";
 import { Badge } from "@/components/ui/badge";
 import { stripBatchPrefix } from "@/lib/utils";
 
-const props = defineProps<{ granuleId: string; batchId: string }>();
-
-const q = useQuery({
-  queryKey: computed(() => [...K.granuleEvents, props.granuleId]),
-  queryFn: () => API.granuleEvents(props.granuleId, 50),
-});
-
-const rows = computed(() => q.data.value ?? []);
+// Pure presentational — fed by useGranuleDetail via GranuleExpandedDetail.
+// granuleId/batchId kept only for the stripped label + the "全屏" deep link.
+const props = defineProps<{ rows: EventRow[]; granuleId: string; batchId: string }>();
 
 const stripped = computed(() => stripBatchPrefix(props.granuleId, props.batchId));
 </script>
@@ -32,11 +25,7 @@ const stripped = computed(() => stripBatchPrefix(props.granuleId, props.batchId)
         全屏 →
       </RouterLink>
     </div>
-    <div v-if="q.isLoading.value" class="text-2xs text-muted-foreground">加载中…</div>
-    <div v-else-if="q.isError.value" class="text-2xs text-danger">
-      加载事件失败：{{ q.error.value?.message ?? "未知错误" }}
-    </div>
-    <div v-else-if="rows.length === 0" class="text-2xs text-muted-foreground">暂无事件</div>
+    <div v-if="rows.length === 0" class="text-2xs text-muted-foreground">暂无事件</div>
     <ul
       v-else
       class="max-h-56 space-y-1 overflow-auto rounded-lg border border-border/60 bg-background/40 p-2 font-mono"

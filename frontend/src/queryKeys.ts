@@ -25,6 +25,12 @@ export const K = {
   githubRelease: ["github-latest-release"],
 } as const;
 
+// SSE-driven invalidation: each backend `scope` nudge invalidates the keys
+// listed here (see useLiveStream). Keys NOT mentioned anywhere below — namely
+// K.inflight and K.stuck — intentionally have no SSE scope: they are expensive
+// scan queries that ride the 60s refetchInterval safety net only (Dashboard
+// further gates them behind `enabled`). The orchInfo / githubRelease version
+// keys are pulled on demand with their own long staleTime, also by design.
 export const SCOPE_KEYS: Record<Scope, readonly (readonly string[])[]> = {
   batches: [K.batches, K.overview, K.batch, K.granules],
   workers: [K.workers, K.overview],
@@ -34,3 +40,8 @@ export const SCOPE_KEYS: Record<Scope, readonly (readonly string[])[]> = {
   bundles: [K.bundles, K.bundleDetail],
   shared: [K.sharedFiles],
 };
+
+// Compile-time guard: adding a new Scope without wiring its keys here is a type
+// error, so SSE nudges can never silently fail to refresh a page.
+const _exhaustive: Record<Scope, readonly (readonly string[])[]> = SCOPE_KEYS;
+void _exhaustive;

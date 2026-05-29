@@ -14,15 +14,33 @@ const { connected } = useLiveStream();
 const route = useRoute();
 
 type NavItem = { to: string; label: string; icon: IconName; end?: boolean };
-const NAV: NavItem[] = [
-  { to: "/",          label: "总览",     icon: "dashboard", end: true },
-  { to: "/batches",   label: "批次",     icon: "batches" },
-  { to: "/bundles",   label: "任务包",   icon: "bundles" },
-  { to: "/shared",    label: "共享文件", icon: "shared" },
-  { to: "/workers",   label: "工作节点", icon: "workers" },
-  { to: "/receivers", label: "接收端",   icon: "receivers" },
-  { to: "/events",    label: "事件日志", icon: "events" },
-  { to: "/settings",  label: "设置",     icon: "settings" },
+type NavGroup = { label?: string; items: NavItem[] };
+// Grouped by task domain so new operators orient by intent, not a flat list:
+// 总览 → 工作流（跑任务）→ 基础设施（节点）→ 运维（审计/配置）.
+const NAV: NavGroup[] = [
+  { items: [{ to: "/", label: "总览", icon: "dashboard", end: true }] },
+  {
+    label: "工作流",
+    items: [
+      { to: "/batches", label: "批次", icon: "batches" },
+      { to: "/bundles", label: "任务包", icon: "bundles" },
+      { to: "/shared", label: "共享文件", icon: "shared" },
+    ],
+  },
+  {
+    label: "基础设施",
+    items: [
+      { to: "/workers", label: "工作节点", icon: "workers" },
+      { to: "/receivers", label: "接收端", icon: "receivers" },
+    ],
+  },
+  {
+    label: "运维",
+    items: [
+      { to: "/events", label: "事件日志", icon: "events" },
+      { to: "/settings", label: "设置", icon: "settings" },
+    ],
+  },
 ];
 
 const COLLAPSE_KEY = "sathop.sidebar.collapsed";

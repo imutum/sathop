@@ -36,7 +36,15 @@ const items = computed(() =>
 </script>
 
 <template>
-  <ul class="divide-y divide-border/60">
+  <!-- TransitionGroup: SSE prepends the newest event; new rows fade+slide in and
+       the rest glide down instead of jumping. prefers-reduced-motion disables it. -->
+  <TransitionGroup
+    tag="ul"
+    class="divide-y divide-border/60"
+    enter-active-class="transition-all duration-200 ease-out"
+    enter-from-class="opacity-0 -translate-y-1"
+    move-class="transition-transform duration-200 ease-out"
+  >
     <li
       v-for="{ e, tone, icon } in items"
       :key="e.id"
@@ -62,5 +70,5 @@ const items = computed(() =>
       </div>
       <span class="shrink-0 text-xs text-muted-foreground tabular-nums">{{ fmtAge(e.ts) }}</span>
     </li>
-  </ul>
+  </TransitionGroup>
 </template>

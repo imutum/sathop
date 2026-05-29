@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import CopyButton from "@/components/CopyButton.vue";
 import EmptyState from "@/components/EmptyState.vue";
+import HintTip from "@/components/HintTip.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
 import RowActions from "@/components/RowActions.vue";
@@ -140,24 +141,26 @@ function onUploaded() {
                   <TableHead class="px-5">名称</TableHead>
                   <TableHead>大小</TableHead>
                   <TableHead>SHA256</TableHead>
-                  <TableHead>描述</TableHead>
                   <TableHead>上传</TableHead>
                   <TableHead class="px-5 text-right">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 <TableRow v-for="f in files" :key="f.name">
-                  <TableCell class="px-5 py-3 font-mono text-[12px] font-medium">{{ f.name }}</TableCell>
+                  <TableCell class="px-5 py-3 font-mono text-[12px] font-medium">
+                    <span class="inline-flex items-center gap-1.5">
+                      {{ f.name }}
+                      <HintTip v-if="f.description" :text="f.description">
+                        <span class="text-muted-foreground/70"><Icon name="info" :size="12" /></span>
+                      </HintTip>
+                    </span>
+                  </TableCell>
                   <TableCell class="py-3 text-cell text-muted-foreground tabular-nums">
                     {{ fmtBytes(f.size) }}
                   </TableCell>
                   <TableCell class="py-3 text-cell">
                     <span class="font-mono" :title="f.sha256">{{ f.sha256.slice(0, 12) }}…</span>
                     <CopyButton :value="f.sha256" title="复制完整 SHA256" />
-                  </TableCell>
-                  <TableCell class="py-3 text-cell text-muted-foreground">
-                    <template v-if="f.description">{{ f.description }}</template>
-                    <span v-else class="text-muted-foreground/50">—</span>
                   </TableCell>
                   <TableCell class="py-3 text-cell text-muted-foreground">{{ fmtAge(f.uploaded_at) }}</TableCell>
                   <TableCell class="px-5 py-3 text-right">

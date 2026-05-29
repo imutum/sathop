@@ -1,27 +1,15 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { useQuery } from "@tanstack/vue-query";
-import { API } from "@/api";
-import { K } from "@/queryKeys";
+import type { TimingRow } from "@/api";
 import { TIMING_STAGE_ZH, fmtMs } from "@/i18n";
 
-const props = defineProps<{ granuleId: string }>();
-
-const q = useQuery({
-  queryKey: computed(() => [...K.granuleTiming, props.granuleId]),
-  queryFn: () => API.granuleTiming(props.granuleId),
-});
-
-const rows = computed(() => q.data.value ?? []);
+// Pure presentational — fed by useGranuleDetail via GranuleExpandedDetail.
+defineProps<{ stages: TimingRow[] }>();
 </script>
 
 <template>
-  <div v-if="q.isError.value" class="text-2xs text-danger">
-    加载阶段耗时失败：{{ q.error.value?.message ?? "未知错误" }}
-  </div>
-  <div v-else-if="rows.length > 0" class="flex flex-wrap gap-2">
+  <div v-if="stages.length > 0" class="flex flex-wrap gap-2">
     <span
-      v-for="r in rows"
+      v-for="r in stages"
       :key="r.id"
       class="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1 font-mono text-2xs shadow-soft"
     >

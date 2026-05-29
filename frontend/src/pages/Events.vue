@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
 import { API, type EventRow } from "@/api";
@@ -44,6 +44,29 @@ const rows = ref<EventRow[]>([]);
 const expanded = ref<Set<number>>(new Set());
 const loadingOlder = ref(false);
 const hasMoreOlder = ref(true);
+
+// 实时 / 历史 视图（持久化）。实时模式把最新事件放到底部并跟随滚动。
+const MODE_OPTIONS: { value: "history" | "live"; label: string }[] = [
+  { value: "history", label: "历史" },
+  { value: "live", label: "实时" },
+];
+const LIVE_KEY = "sathop.events.live";
+const mode = ref<"history" | "live">(localStorage.getItem(LIVE_KEY) === "1" ? "live" : "history");
+const live = computed(() => mode.value === "live");
+watch(mode, (m) => localStorage.setItem(LIVE_KEY, m === "live" ? "1" : "0"));
+
+const scrollEl = ref<HTMLElement | null>(null);
+const newCount = ref(0);
+
+function atBottom(): boolean {
+  const el = scrollEl.value;
+  return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+}
+function scrollToBottom(): void {
+  const el = scrollEl.value;
+  if (el) el.scrollTop = el.scrollHeight;
+  newCount.value = 0;
+}
 
 watch([filter, search, batchFilter, sourceFilter], ([f, s, b, src]) => {
   const next: Record<string, string> = {};
@@ -117,6 +140,25 @@ const hasActiveFilters = computed(
   () => !!(search.value || batchFilter.value || sourceFilter.value || filter.value !== "all"),
 );
 
+// 实时模式按时间正序（最新在底部）；历史模式维持 newest-first。
+const displayRows = computed(() => (live.value ? [...visible.value].reverse() : visible.value));
+
+// 新事件 prepend 到 rows。实时模式下：用户在底部则跟随，否则累计"N 条新"提示。
+// （实时模式隐藏"加载更早"，所以 rows 增长仅来自新事件 prepend。）
+watch(
+  () => rows.value.length,
+  (len, prev) => {
+    if (!live.value) return;
+    const added = len - (prev ?? len);
+    if (added <= 0) return;
+    if (atBottom()) void nextTick(scrollToBottom);
+    else newCount.value += added;
+  },
+);
+watch(mode, (m) => {
+  if (m === "live") void nextTick(scrollToBottom);
+});
+
 function isLong(msg: string) {
   return msg.length > 160 || msg.includes("\n");
 }
@@ -184,6 +226,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
           <option v-for="b in batches" :key="b" :value="b">{{ b }}</option>
         </SelectInput>
         <Segmented v-model="filter" :options="LEVEL_FILTERS" />
+        <Segmented v-model="mode" :options="MODE_OPTIONS" aria-label="实时或历史视图" />
         <Badge
           v-if="sourceFilter"
           variant="outline"
@@ -245,7 +288,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
         </Button>
       </div>
 
-      <div class="max-h-[70vh] overflow-auto font-mono">
+      <div ref="scrollEl" class="relative max-h-[70vh] overflow-auto font-mono">
         <QueryState :query="q" :is-empty="() => rows.length === 0">
           <template #loading>
             <div class="space-y-2 p-5">
@@ -272,7 +315,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
             />
             <ul v-else class="divide-y divide-border/50">
               <li
-                v-for="e in visible"
+                v-for="e in displayRows"
                 :key="e.id"
                 class="flex flex-wrap items-start gap-x-3 gap-y-1 px-5 py-2 text-cell transition-colors hover:bg-muted/40"
               >
@@ -313,7 +356,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
               </li>
             </ul>
             <div
-              v-if="rows.length > 0"
+              v-if="rows.length > 0 && !live"
               class="flex items-center justify-center border-t border-border/60 px-5 py-3"
             >
               <Button
@@ -331,6 +374,20 @@ function highlight(text: string, n: string): HighlightSeg[] {
             </div>
           </template>
         </QueryState>
+
+        <!-- 实时模式：用户上滚后新事件落底时的跳转提示 -->
+        <div
+          v-if="live && newCount > 0"
+          class="pointer-events-none sticky bottom-3 z-10 flex justify-center"
+        >
+          <button
+            type="button"
+            @click="scrollToBottom"
+            class="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-border bg-background/95 px-3 py-1 text-2xs font-medium text-foreground shadow-pop backdrop-blur transition-colors hover:border-primary/40 hover:text-primary"
+          >
+            ↓ {{ newCount }} 条新事件
+          </button>
+        </div>
       </div>
     </Card>
   </div>

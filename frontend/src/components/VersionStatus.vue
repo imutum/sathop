@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { API } from "@/api";
 import { K } from "@/queryKeys";
+import { useVersionCheck } from "@/composables/useVersionCheck";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -13,67 +14,18 @@ import { Icon } from "@/components/Icon";
 
 defineProps<{ collapsed?: boolean }>();
 
-const GITHUB_REPO = "imutum/sathop";
-const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
-const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
-const TAGS_API = `https://api.github.com/repos/${GITHUB_REPO}/tags?per_page=1`;
-
-function parseSemver(v: string): number[] {
-  const m = v.trim().match(/v?(\d+)\.(\d+)\.(\d+)/);
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0];
-}
-
-function compareSemver(a: string, b: string): number {
-  const pa = parseSemver(a);
-  const pb = parseSemver(b);
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] !== pb[i]) return pa[i] - pb[i];
-  }
-  return 0;
-}
-
 const info = useQuery({
   queryKey: [...K.orchInfo],
   queryFn: API.orchestratorInfo,
   staleTime: 60 * 60 * 1000,
 });
 
-const GH_HEADERS = { Accept: "application/vnd.github+json" } as const;
-
-async function fetchLatestRelease(): Promise<{ tag: string; htmlUrl: string }> {
-  const releaseR = await fetch(LATEST_RELEASE_API, { headers: GH_HEADERS });
-  if (releaseR.ok) {
-    const j = (await releaseR.json()) as { tag_name?: string; html_url?: string };
-    return { tag: j.tag_name ?? "", htmlUrl: j.html_url ?? RELEASES_URL };
-  }
-  if (releaseR.status !== 404) throw new Error(`GitHub ${releaseR.status}`);
-
-  const tagsR = await fetch(TAGS_API, { headers: GH_HEADERS });
-  if (!tagsR.ok) throw new Error(`GitHub ${tagsR.status}`);
-  const tags = (await tagsR.json()) as Array<{ name?: string }>;
-  const name = Array.isArray(tags) && tags.length > 0 ? tags[0].name ?? "" : "";
-  return {
-    tag: name,
-    htmlUrl: name ? `https://github.com/${GITHUB_REPO}/releases/tag/${name}` : RELEASES_URL,
-  };
-}
-
-const latest = useQuery({
-  queryKey: [...K.githubRelease],
-  queryFn: fetchLatestRelease,
-  staleTime: 30 * 60 * 1000,
-  retry: 1,
-});
-
+// Shared version check — same GitHub query the node cards use.
+const { latestTag, status, htmlUrl, isFetching, refresh: refreshLatest } = useVersionCheck(
+  () => info.data.value?.version,
+);
 const currentVersion = computed(() => info.data.value?.version ?? "");
-const latestTag = computed(() => latest.data.value?.tag ?? "");
-
-type Status = "loading" | "current" | "outdated" | "unknown";
-const status = computed<Status>(() => {
-  if (info.isPending.value || latest.isPending.value) return "loading";
-  if (latest.isError.value || !latestTag.value || !currentVersion.value) return "unknown";
-  return compareSemver(currentVersion.value, latestTag.value) >= 0 ? "current" : "outdated";
-});
+const busy = computed(() => info.isFetching.value || isFetching.value);
 
 const statusLabel = computed(() => {
   switch (status.value) {
@@ -83,12 +35,9 @@ const statusLabel = computed(() => {
       return `有新版本 ${latestTag.value} 可用`;
     case "loading":
       return "正在检查更新…";
-    case "unknown":
-      if (latest.isError.value) return "无法访问 GitHub（网络或限流）";
-      if (!latestTag.value) return "仓库暂未发布版本";
-      return "版本信息缺失";
+    default:
+      return "无法访问 GitHub（网络或限流）";
   }
-  return "";
 });
 
 const dotClass = computed(() => {
@@ -99,15 +48,14 @@ const dotClass = computed(() => {
       return "bg-warning animate-pulse-soft";
     case "loading":
       return "bg-muted-foreground animate-pulse-soft";
-    case "unknown":
+    default:
       return "bg-muted-foreground";
   }
-  return "bg-muted-foreground";
 });
 
 function refresh() {
   void info.refetch();
-  void latest.refetch();
+  refreshLatest();
 }
 </script>
 
@@ -128,6 +76,14 @@ function refresh() {
         <span v-if="!collapsed" class="truncate font-mono">
           {{ currentVersion ? `v${currentVersion}` : "—" }}
         </span>
+        <!-- Outdated is actionable: surface it on the always-visible button too,
+             not only inside the popover. -->
+        <Icon
+          v-if="!collapsed && status === 'outdated'"
+          name="alert"
+          :size="12"
+          class="ml-auto text-warning"
+        />
       </button>
     </PopoverTrigger>
     <PopoverContent side="top" align="start" class="w-64">
@@ -140,16 +96,12 @@ function refresh() {
           variant="ghost"
           size="icon-sm"
           class="h-6 w-6 text-muted-foreground"
-          :disabled="info.isFetching.value || latest.isFetching.value"
+          :disabled="busy"
           title="重新检查"
           aria-label="重新检查"
           @click="refresh"
         >
-          <Icon
-            name="refresh"
-            :size="13"
-            :class="info.isFetching.value || latest.isFetching.value ? 'animate-spin' : ''"
-          />
+          <Icon name="refresh" :size="13" :class="busy ? 'animate-spin' : ''" />
         </Button>
       </div>
 
@@ -171,17 +123,23 @@ function refresh() {
         最新发布版本：<span class="font-mono">{{ latestTag }}</span>
       </div>
 
+      <!-- Check + update live together: when behind, the path to the update
+           action is one click away (Settings hosts the orchestrator restart). -->
       <Button
+        v-if="status === 'outdated'"
         as-child
-        variant="outline"
+        variant="default"
         size="sm"
         class="mt-3 w-full"
       >
-        <a
-          :href="latest.data.value?.htmlUrl ?? RELEASES_URL"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
+        <RouterLink to="/settings">
+          <Icon name="download" :size="13" />
+          前往更新并重启
+        </RouterLink>
+      </Button>
+
+      <Button as-child variant="outline" size="sm" class="mt-2 w-full">
+        <a :href="htmlUrl" target="_blank" rel="noopener noreferrer">
           <Icon name="github" :size="13" />
           查看发布
           <Icon name="external" :size="11" class="text-muted-foreground" />

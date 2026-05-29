@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSathopUrl,
   isAbsolutePath,
   isPrivateHost,
   receiverDockerRun,
@@ -216,5 +217,25 @@ describe("docker run line continuation — always '\\' (never backtick)", () => 
     const out = receiverDockerRun(cfg);
     expect(out).toContain(" \\\n");
     expect(out).not.toMatch(/ `\n/);
+  });
+});
+
+describe("buildSathopUrl — orch URL → sathop:// pull URL", () => {
+  it("maps http → sathop and https → sathops", () => {
+    expect(buildSathopUrl("http://orch.example:8765", "tok")).toBe("sathop://tok@orch.example:8765");
+    expect(buildSathopUrl("https://orch.example", "tok")).toBe("sathops://tok@orch.example");
+  });
+
+  it("url-encodes the token (slashes, spaces)", () => {
+    expect(buildSathopUrl("http://h:1", "a/b c")).toBe("sathop://a%2Fb%20c@h:1");
+  });
+
+  it("strips trailing slashes from the path", () => {
+    expect(buildSathopUrl("http://h:1/", "t")).toBe("sathop://t@h:1");
+    expect(buildSathopUrl("http://h:1/base/", "t")).toBe("sathop://t@h:1/base");
+  });
+
+  it("returns a clearly-invalid sentinel for unparseable urls", () => {
+    expect(buildSathopUrl("not a url", "t")).toBe("sathop://INVALID@host:port");
   });
 });

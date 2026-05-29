@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import CopyButton from "@/components/CopyButton.vue";
 import HintTip from "@/components/HintTip.vue";
 import NodeLifecycleActions from "@/features/nodes/components/NodeLifecycleActions.vue";
+import NodeVersionRow from "@/features/nodes/components/NodeVersionRow.vue";
 import { useNodeLifecycle } from "@/features/nodes/useNodeLifecycle";
 import { Icon } from "@/components/Icon";
 import { computed } from "vue";
@@ -25,7 +26,7 @@ const lifecycle = useNodeLifecycle<ReceiverInfo>({
   enabledMessage: "已启用",
   disabledMessage: "已禁用，下次 pull 会被拒绝",
   deletedMessage: `已删除接收端 ${props.receiver.receiver_id}`,
-  restartMessage: "已发送重启信号，下次心跳生效",
+  restartMessage: "已发送更新信号，下次心跳生效",
   forgetConfirm: {
     title: `永久移除接收端 ${props.receiver.receiver_id}？`,
     description:
@@ -36,11 +37,11 @@ const lifecycle = useNodeLifecycle<ReceiverInfo>({
     tone: "danger",
   },
   restartConfirm: {
-    title: `重启接收端 ${props.receiver.receiver_id}？`,
+    title: `更新接收端 ${props.receiver.receiver_id}？`,
     description:
-      "向该接收端发送重启信号 — 它会在下一次心跳收到后立即退出，由容器 restart 策略拉起。\n" +
+      "向该接收端发送更新信号 — 它会在下一次心跳收到后立即退出，由容器 restart 策略拉取最新代码后拉起。\n" +
       "在手的拉取会被中断，未 ack 的对象会在重启后重新分发。",
-    confirmText: "重启",
+    confirmText: "更新",
   },
 });
 
@@ -49,23 +50,26 @@ const status = computed(() => nodeStatusBadge(props.receiver.enabled, props.rece
 
 <template>
   <Card>
-    <div class="flex items-start justify-between gap-2 border-b border-border/60 px-5 py-4">
+    <div class="flex items-start justify-between gap-2 px-5 pb-3 pt-4">
       <div class="min-w-0">
         <div class="flex items-center gap-1 font-mono text-[13px] font-semibold">
           <span class="truncate">{{ receiver.receiver_id }}</span>
           <CopyButton :value="receiver.receiver_id" title="复制接收端 ID" />
-          <HintTip
-            v-if="receiver.version"
-            :text="`接收端上报的运行版本（来自 sathop 包元数据）— 排查问题时确认是不是最新镜像`"
-          >
-            <Badge tone="info" class="ml-1 font-mono">v{{ receiver.version }}</Badge>
-          </HintTip>
         </div>
         <div class="mt-0.5 text-2xs text-muted-foreground">
           平台 · {{ PLATFORM_ZH[receiver.platform] ?? receiver.platform }}
         </div>
       </div>
       <Badge :tone="status.tone" dot>{{ status.label }}</Badge>
+    </div>
+
+    <div class="border-b border-border/60 px-5 pb-3">
+      <NodeVersionRow
+        :version="receiver.version"
+        :pending="lifecycle.pending.value"
+        update-title="中断在手拉取并拉取最新代码后重启该接收端"
+        @update="lifecycle.confirmRestart"
+      />
     </div>
 
     <div class="grid grid-cols-2 gap-4 px-5 py-4">
@@ -117,7 +121,7 @@ const status = computed(() => nodeStatusBadge(props.receiver.enabled, props.rece
         @restart="lifecycle.confirmRestart"
         disable-title="禁用此接收端（不再分到新对象，可点启用恢复）"
         forget-title="永久从注册表中删除（仅在已禁用时允许）"
-        restart-title="向该接收端发送重启信号（一次心跳内生效）"
+        restart-title="向该接收端发送更新信号（一次心跳内生效，拉取最新代码后重启）"
       />
     </div>
   </Card>

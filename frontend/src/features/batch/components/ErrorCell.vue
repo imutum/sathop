@@ -5,6 +5,9 @@ const props = defineProps<{
   error: string | null;
   stdoutTail?: string | null;
   stderrTail?: string | null;
+  // Folded in from the former standalone 重试 column — surfaced next to the
+  // failure reason where it's decision-relevant, not as its own table column.
+  retryCount?: number;
 }>();
 
 type View = "error" | "stdout" | "stderr";
@@ -41,6 +44,16 @@ const currentText = computed(() => {
 
 const currentEmpty = computed(() => currentText.value.length === 0);
 
+// Prepend "失败 N 次：" to the one-line / collapsed summaries (not the expanded
+// pre, which shows the raw stream verbatim).
+const retryNote = computed(() =>
+  props.retryCount && props.retryCount > 0 ? `失败 ${props.retryCount} 次` : "",
+);
+const summaryText = computed(() => {
+  const e = props.error || (hasAnyOutput.value ? "(无摘要 — 点击查看输出)" : "");
+  return retryNote.value ? `${retryNote.value}：${e}` : e;
+});
+
 function setView(v: View) {
   view.value = v;
 }
@@ -53,9 +66,9 @@ const tabClass = (active: boolean) =>
 
 <template>
   <template v-if="error || hasAnyOutput">
-    <span v-if="!isLong">{{ error }}</span>
+    <span v-if="!isLong">{{ summaryText }}</span>
     <span v-else-if="!open" class="block">
-      <span class="block truncate" title="点击查看完整错误">{{ error || "(无摘要 — 点击查看输出)" }}</span>
+      <span class="block truncate" title="点击查看完整错误">{{ summaryText }}</span>
       <button
         type="button"
         @click="open = true"

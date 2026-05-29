@@ -3,8 +3,9 @@ import { Icon, type IconName } from "@/components/Icon";
 import VersionStatus from "@/components/VersionStatus.vue";
 import { logout } from "@/composables/useAuthGate";
 
+type NavItem = { to: string; label: string; icon: IconName; end?: boolean };
 defineProps<{
-  nav: { to: string; label: string; icon: IconName; end?: boolean }[];
+  nav: { label?: string; items: NavItem[] }[];
   collapsed?: boolean;
 }>();
 </script>
@@ -25,44 +26,53 @@ defineProps<{
     </div>
 
     <nav class="flex-1 overflow-y-auto px-3 py-3">
-      <ul class="space-y-0.5">
-        <li v-for="n in nav" :key="n.to">
-          <RouterLink
-            v-slot="{ isActive, isExactActive, navigate, href }"
-            :to="n.to"
-            custom
-          >
-            <a
-              :href="href"
-              @click="navigate"
-              :title="collapsed ? n.label : undefined"
-              :class="[
-                'group relative flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors outline-none',
-                (n.end ? isExactActive : isActive)
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                collapsed ? 'justify-center' : '',
-              ]"
+      <div v-for="(group, gi) in nav" :key="gi" :class="gi > 0 ? 'mt-4' : ''">
+        <div
+          v-if="group.label && !collapsed"
+          class="px-2.5 pb-1 text-mini font-medium uppercase tracking-brand text-muted-foreground/70"
+        >
+          {{ group.label }}
+        </div>
+        <div v-else-if="group.label && collapsed" class="mx-auto mb-2 h-px w-6 bg-border" aria-hidden />
+        <ul class="space-y-0.5">
+          <li v-for="n in group.items" :key="n.to">
+            <RouterLink
+              v-slot="{ isActive, isExactActive, navigate, href }"
+              :to="n.to"
+              custom
             >
-              <span
+              <a
+                :href="href"
+                @click="navigate"
+                :title="collapsed ? n.label : undefined"
                 :class="[
-                  'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full transition-colors',
-                  (n.end ? isExactActive : isActive) ? 'bg-foreground' : 'bg-transparent',
+                  'group relative flex items-center gap-3 rounded-md px-2.5 py-2 text-sm transition-colors outline-none',
+                  (n.end ? isExactActive : isActive)
+                    ? 'bg-muted text-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                  collapsed ? 'justify-center' : '',
                 ]"
-                aria-hidden
-              />
-              <Icon
-                :name="n.icon"
-                :class="[
-                  'shrink-0 transition-colors',
-                  (n.end ? isExactActive : isActive) ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground',
-                ]"
-              />
-              <span v-if="!collapsed" class="truncate">{{ n.label }}</span>
-            </a>
-          </RouterLink>
-        </li>
-      </ul>
+              >
+                <span
+                  :class="[
+                    'absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full transition-colors',
+                    (n.end ? isExactActive : isActive) ? 'bg-foreground' : 'bg-transparent',
+                  ]"
+                  aria-hidden
+                />
+                <Icon
+                  :name="n.icon"
+                  :class="[
+                    'shrink-0 transition-colors',
+                    (n.end ? isExactActive : isActive) ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground',
+                  ]"
+                />
+                <span v-if="!collapsed" class="truncate">{{ n.label }}</span>
+              </a>
+            </RouterLink>
+          </li>
+        </ul>
+      </div>
     </nav>
 
     <div class="space-y-1 border-t border-border p-3">
