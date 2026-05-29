@@ -1,6 +1,7 @@
 """Orchestrator entrypoint."""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -42,10 +43,34 @@ def _print_banner() -> None:
         print(ln, flush=True)
 
 
+async def _sync_frontend() -> None:
+    """Keep a deployed dist in lockstep with the running code: after a code
+    upgrade the UI a version behind is refreshed to match.
+
+    Acts only on a dist that carries a `.version` stamp AND is stale — so it
+    never bootstraps a missing dist (the entrypoint's first-boot job) nor
+    clobbers a developer's stampless `npm run build`. Best-effort: a download
+    failure keeps the existing dist and never blocks startup."""
+    stamp = WEB_DIST / ".version"
+    if not stamp.is_file() or stamp.read_text().strip() == __version__:
+        return
+    try:
+        from .frontend_sync import ensure_frontend
+
+        # Short timeout: a hanging GitHub must not stall startup (and the
+        # healthcheck's 20s start_period) — fall back to the existing dist.
+        result = await ensure_frontend(__version__, timeout=15)
+        if result["action"] == "downloaded":
+            print(f"  Web UI synced → v{__version__}", flush=True)
+    except Exception as e:
+        logging.getLogger("sathop.orchestrator").warning("frontend sync skipped: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _print_banner()
     await init_db()
+    await _sync_frontend()
     bg = [
         asyncio.create_task(run_lease_sweeper()),
         asyncio.create_task(run_retention()),
@@ -68,7 +93,11 @@ app.include_router(api_router)
 
 @app.get("/api/health")
 async def health() -> dict:
-    return {"status": "ok", "version": __version__}
+    # web_sha lets the SPA detect a UI rebuild across reconnect and hard-reload
+    # into the new bundle (version alone misses same-version asset rebuilds).
+    stamp = WEB_DIST / ".sha256"
+    web_sha = stamp.read_text().strip() if stamp.is_file() else None
+    return {"status": "ok", "version": __version__, "web_sha": web_sha}
 
 
 if WEB_DIST.is_dir():
@@ -94,6 +123,10 @@ def run() -> None:
         host=settings.host,
         port=settings.port,
         reload=settings.dev,
+        # Backstop: force-close any connection still open 3s into shutdown so a
+        # lingering /api/stream can never hang the supervisor's restart. The
+        # restart endpoint signals streams to close first, so this rarely fires.
+        timeout_graceful_shutdown=3,
     )
 
 

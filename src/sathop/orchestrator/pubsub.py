@@ -48,6 +48,29 @@ def subscriber_count() -> int:
     return len(_subscribers)
 
 
+_shutdown_requested = False
+
+
+def request_shutdown() -> None:
+    """Signal active SSE streams to close so uvicorn's graceful shutdown isn't
+    blocked by idle long-lived connections. Publishes a wake event so a stream
+    parked in ``q.get()`` returns at once and observes the flag; new streams see
+    it at the top of their loop. ``timeout_graceful_shutdown`` is the backstop."""
+    global _shutdown_requested
+    _shutdown_requested = True
+    publish({"scope": "__shutdown__"})
+
+
+def is_shutting_down() -> bool:
+    return _shutdown_requested
+
+
+def reset_shutdown() -> None:
+    """Test helper — clear the flag between in-process test cases."""
+    global _shutdown_requested
+    _shutdown_requested = False
+
+
 _PENDING_EVENTS = "sathop_pending_events"
 
 

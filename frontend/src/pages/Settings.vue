@@ -74,9 +74,10 @@ async function confirmUpdateAndRestart() {
   try {
     await API.restartOrchestrator();
   } catch {
-    // Connection drop is expected — SIGTERM kills the process
+    // Connection drop is expected — the process is shutting down.
   }
-  // Page will reload when the server comes back via SSE reconnect
+  // The SSE stream drops, an overlay shows while it's down, and useLiveStream
+  // hard-reloads into the new build once the server returns (see useLiveStream).
 }
 </script>
 

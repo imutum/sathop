@@ -175,74 +175,33 @@ async def _gc_apply(s: AsyncSession, candidates: list[Bundle]) -> dict[str, Any]
 
 @router.post("/update-frontend")
 async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
-    """Download the frontend dist from the GitHub Release matching the running
-    version. Freshness is content-based: the release asset is sha256'd and
-    compared against the deployed stamp, so a same-version-but-rebuilt asset
-    (tag published before its dist was finalized) is still detected and
-    refreshed — a version-string check cannot tell those apart. The asset is
-    tiny and this is operator-triggered, so always fetching to hash it is
-    cheap. Triggered manually from the UI."""
-    import hashlib
-    import shutil
-    import tarfile
-    from io import BytesIO
-    from pathlib import Path
-
-    import httpx
-
-    repo_dir = Path(__file__).resolve().parents[4]
-    dist_dir = repo_dir / "frontend" / "dist"
-    stamp = dist_dir / ".sha256"
-
-    git_repo = os.environ.get("SATHOP_GIT_REPO", "https://github.com/imutum/sathop.git")
-    clean_repo = git_repo.removesuffix(".git")
-    url = os.environ.get(
-        "SATHOP_FRONTEND_URL",
-        f"{clean_repo}/releases/download/v{__version__}/frontend-dist.tar.gz",
-    )
+    """Force-refresh the frontend dist for the running version (content-hashed:
+    a same-version-but-rebuilt asset is still detected and refreshed). The dist
+    is also synced version-gated at every boot, so on a code upgrade the UI
+    catches up automatically — this endpoint is the operator's manual nudge."""
+    from ..frontend_sync import ensure_frontend
 
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
-            r = await client.get(url)
-            r.raise_for_status()
+        result = await ensure_frontend(__version__, force=True)
     except Exception as e:
         raise HTTPException(502, f"frontend download failed: {e}")
 
-    digest = hashlib.sha256(r.content).hexdigest()
-    if stamp.is_file() and stamp.read_text().strip() == digest:
-        return {"ok": True, "version": __version__, "action": "already_up_to_date"}
-
-    await log(s, "orchestrator", f"updating frontend → {digest[:12]}")
-    await commit_and_publish(s, Scope.EVENTS)
-
-    tmp_dir = dist_dir.parent / ".dist-tmp"
-    if tmp_dir.exists():
-        shutil.rmtree(tmp_dir)
-    tmp_dir.mkdir(parents=True)
-
-    with tarfile.open(fileobj=BytesIO(r.content), mode="r:gz") as tf:
-        tf.extractall(tmp_dir)
-
-    extracted_dist = tmp_dir / "dist"
-    if not extracted_dist.is_dir():
-        shutil.rmtree(tmp_dir)
-        raise HTTPException(502, "archive does not contain a dist/ directory")
-
-    if dist_dir.exists():
-        shutil.rmtree(dist_dir)
-    extracted_dist.rename(dist_dir)
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    stamp.write_text(digest)
-    await log(s, "orchestrator", f"frontend updated ({digest[:12]})")
-    await commit_and_publish(s, Scope.EVENTS)
-    return {"ok": True, "version": __version__, "action": "downloaded"}
+    if result["action"] == "downloaded":
+        await log(s, "orchestrator", f"frontend updated ({result.get('sha', '')[:12]})")
+        await commit_and_publish(s, Scope.EVENTS)
+    return {"ok": True, "version": result["version"], "action": result["action"]}
 
 
 @router.post("/restart")
 async def restart_orchestrator(s: AsyncSession = Depends(session)) -> dict:
-    """Self-restart: log, respond, then SIGTERM self. The entrypoint supervisor
-    loop catches the exit, does git pull, and restarts with new code."""
+    """Self-restart: signal SSE streams to close, log, respond, then SIGTERM
+    self. The entrypoint supervisor loop catches the clean exit (code 0), git
+    pulls, and restarts with new code. Closing streams first lets uvicorn's
+    graceful shutdown complete in milliseconds instead of hanging on the
+    long-lived /api/stream connection."""
+    from ..pubsub import request_shutdown
+
+    request_shutdown()
     await log(s, "orchestrator", "restart requested via UI")
     await commit_and_publish(s, Scope.EVENTS)
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,24 @@ import { useLiveStream } from "@/composables/useLiveStream";
 
 const { connected } = useLiveStream();
 const route = useRoute();
+
+// Once the stream has been up, a drop usually means the orchestrator is
+// restarting. After a short grace (to ignore brief network hiccups) show a
+// non-blocking overlay; it clears on reconnect — or the page hard-reloads
+// itself if the rebuilt UI differs (see useLiveStream).
+const showReconnecting = ref(false);
+let everConnected = false;
+let graceTimer: ReturnType<typeof setTimeout> | undefined;
+watch(connected, (v) => {
+  if (v) everConnected = true;
+  clearTimeout(graceTimer);
+  if (!v && everConnected) {
+    graceTimer = setTimeout(() => (showReconnecting.value = true), 1500);
+  } else {
+    showReconnecting.value = false;
+  }
+});
+onBeforeUnmount(() => clearTimeout(graceTimer));
 
 type NavItem = { to: string; label: string; icon: IconName; end?: boolean };
 type NavGroup = { label?: string; items: NavItem[] };
@@ -160,5 +178,25 @@ const isDark = computed(() => effective.value === "dark");
         </div>
       </main>
     </div>
+
+    <Transition
+      enter-active-class="transition-opacity duration-200"
+      leave-active-class="transition-opacity duration-150"
+      enter-from-class="opacity-0"
+      leave-to-class="opacity-0"
+    >
+      <div
+        v-if="showReconnecting"
+        class="fixed inset-0 z-50 grid place-items-center bg-background/70 backdrop-blur-sm"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="flex flex-col items-center gap-3 rounded-xl border border-border bg-background px-7 py-6 shadow-pop">
+          <Icon name="refresh" :size="22" class="animate-spin text-muted-foreground" />
+          <div class="text-sm font-medium text-foreground">正在连接服务…</div>
+          <div class="text-2xs text-muted-foreground">服务可能正在重启，恢复后将自动刷新</div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>

@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from ..config import require_token_or_query
-from ..pubsub import subscribe
+from ..pubsub import is_shutting_down, subscribe
 
 router = APIRouter(tags=["stream"], dependencies=[Depends(require_token_or_query)])
 
@@ -31,6 +31,11 @@ async def stream() -> StreamingResponse:
         yield b"event: ready\ndata: {}\n\n"
         with subscribe() as q:
             while True:
+                # Checked at the loop top so a stream that connects mid-shutdown,
+                # or one woken by request_shutdown()'s nudge, exits at once instead
+                # of hanging until uvicorn's graceful-shutdown timeout fires.
+                if is_shutting_down():
+                    break
                 try:
                     evt = await asyncio.wait_for(q.get(), timeout=_HEARTBEAT_SEC)
                 except TimeoutError:
@@ -43,12 +48,15 @@ async def stream() -> StreamingResponse:
                     _log.exception("SSE queue read failed; keeping connection alive")
                     yield b": error\n\n"
                     continue
+                if is_shutting_down():  # the wake nudge, or an event racing shutdown
+                    break
                 try:
                     yield f"data: {json.dumps(evt)}\n\n".encode()
                 except (TypeError, ValueError):
                     # A non-serializable event must not tear down every subscriber.
                     _log.warning("SSE event not JSON-serializable, dropping: %r", evt)
                     continue
+        yield b"event: shutdown\ndata: {}\n\n"
 
     return StreamingResponse(
         gen(),
