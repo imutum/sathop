@@ -20,32 +20,64 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import BatchSummary, GranuleRow
-from sathop.shared.state_machine import IN_FLIGHT_STATES
+from sathop.shared.state_machine import IN_FLIGHT_STATES, GranuleState
 
 from ..db import Batch, Granule, GranuleObject, GranuleStageTiming
 from ._helpers import object_is_exhausted
+
+# Rolling window for "recent" delivery rate (realtime ETA + throughput).
+_WINDOW_SEC = 60
+
+
+def _remaining_to_deliver(counts: dict[str, int]) -> int:
+    """Granules still expected to be delivered: everything in flight plus the
+    uploaded-but-not-yet-acked backlog. Excludes acked/deleted (delivered) and
+    failed/blacklisted (won't deliver without operator action)."""
+    return sum(counts.get(st, 0) for st in IN_FLIGHT_STATES) + counts.get(GranuleState.UPLOADED.value, 0)
+
+
+def _eta_from_recent(
+    counts: dict[str, int], recent_delivered: int, window_sec: int = _WINDOW_SEC
+) -> int | None:
+    """Remaining-seconds from the recent delivery rate. None when nothing was
+    delivered in the window (rate unknown) or nothing is left to deliver."""
+    if recent_delivered <= 0:
+        return None
+    remaining = _remaining_to_deliver(counts)
+    if remaining <= 0:
+        return None
+    return int(remaining * window_sec / recent_delivered)
+
+
+def _throughput_per_min(recent_delivered: int, window_sec: int = _WINDOW_SEC) -> float:
+    """Deliveries per minute over the rolling window. 0.0 when none recently —
+    a meaningful 'delivery stalled' signal, distinct from a None freshly-created
+    batch."""
+    return recent_delivered * 60.0 / window_sec
 
 
 async def summaries(s: AsyncSession, batches: list[Batch]) -> list[BatchSummary]:
     """Compose `BatchSummary` for each given Batch in one bulk pass.
 
-    Three aggregates run once each (state counts, exhausted-pull objects,
-    ETA extrapolation) and are zipped onto the input order. Empty input
-    returns []."""
+    Four aggregates run once each (state counts, exhausted-pull objects,
+    historical ETA, recent-delivery count) and are zipped onto the input order.
+    The recent-delivery count drives both realtime ETA and throughput, so it's
+    fetched once and the two are derived purely. Empty input returns []."""
     if not batches:
         return []
     ids = [b.batch_id for b in batches]
     counts_map = await state_counts(s, ids)
     exh_map = await _exhausted_by_batch(s, ids)
     eta_map = await eta_seconds(s, counts_map)
-    eta_rt_map = await eta_realtime(s, counts_map)
+    recent_map = await _recent_delivered(s, ids)
     return [
         _build_summary(
             b,
             counts=counts_map.get(b.batch_id, {}),
             objects_exhausted=exh_map.get(b.batch_id, 0),
             eta_seconds=eta_map.get(b.batch_id),
-            eta_realtime=eta_rt_map.get(b.batch_id),
+            eta_realtime=_eta_from_recent(counts_map.get(b.batch_id, {}), recent_map.get(b.batch_id, 0)),
+            throughput_per_min=_throughput_per_min(recent_map.get(b.batch_id, 0)),
         )
         for b in batches
     ]
@@ -92,12 +124,13 @@ async def eta_seconds(
     s: AsyncSession,
     counts_map: dict[str, dict[str, int]],
 ) -> dict[str, int | None]:
-    """Extrapolate remaining-seconds per Batch from closed upload-stage timings.
+    """Extrapolate remaining-seconds per Batch from closed deliver-stage timings.
 
     Heuristic: take the wall-time span between the earliest and latest stage
-    rows for the Batch, divide by the count of closed upload stages, then
-    multiply by the in-flight Granule count. Returns None when there's not
-    enough timing data (<3 closed uploads) or nothing left in flight."""
+    rows for the Batch, divide by the count of closed deliver stages (= granules
+    delivered to a receiver), then multiply by the remaining-to-deliver count.
+    Returns None when there's not enough timing data (<3 deliveries) or nothing
+    left to deliver."""
     if not counts_map:
         return {}
     batch_ids = list(counts_map)
@@ -107,7 +140,7 @@ async def eta_seconds(
                 GranuleStageTiming.batch_id,
                 func.min(GranuleStageTiming.started_at),
                 func.max(GranuleStageTiming.finished_at),
-                func.sum(case((GranuleStageTiming.stage == "upload", 1), else_=0)),
+                func.sum(case((GranuleStageTiming.stage == "deliver", 1), else_=0)),
             )
             .where(GranuleStageTiming.batch_id.in_(batch_ids))
             .group_by(GranuleStageTiming.batch_id)
@@ -122,46 +155,55 @@ async def eta_seconds(
         wall_sec = (last - first).total_seconds()
         if wall_sec <= 0:
             continue
-        remaining = sum(counts_map[batch_id].get(st, 0) for st in IN_FLIGHT_STATES)
+        remaining = _remaining_to_deliver(counts_map[batch_id])
         if remaining <= 0:
             continue
         out[batch_id] = int(remaining * wall_sec / done_n)
     return out
 
 
-async def eta_realtime(
+async def system_delivery_rate(
     s: AsyncSession,
-    counts_map: dict[str, dict[str, int]],
-    window_sec: int = 60,
-) -> dict[str, int | None]:
-    """ETA from recent throughput: uploads finished in the last `window_sec`."""
-    if not counts_map:
-        return {}
-    batch_ids = list(counts_map)
-    cutoff_start = datetime.now(UTC) - timedelta(seconds=window_sec)
+    state_counts: dict[str, int],
+    window_sec: int = _WINDOW_SEC,
+) -> tuple[float, int | None]:
+    """System-wide (all batches) delivery throughput (granules/min) and realtime
+    ETA, from deliver-stage closures in the recent window. Same definitions as
+    the per-batch figures, so the dashboard and a batch's progress tab agree."""
+    cutoff = datetime.now(UTC) - timedelta(seconds=window_sec)
+    recent = int(
+        await s.scalar(
+            select(func.count())
+            .select_from(GranuleStageTiming)
+            .where(GranuleStageTiming.stage == "deliver")
+            .where(GranuleStageTiming.finished_at >= cutoff)
+        )
+        or 0
+    )
+    return _throughput_per_min(recent, window_sec), _eta_from_recent(state_counts, recent, window_sec)
 
+
+async def _recent_delivered(
+    s: AsyncSession,
+    batch_ids: list[str],
+    window_sec: int = _WINDOW_SEC,
+) -> dict[str, int]:
+    """Per-Batch count of deliveries (deliver-stage closures) finished in the
+    last `window_sec`. One query feeds both the realtime ETA and the throughput
+    figure — keep them derived from this so they never disagree."""
+    if not batch_ids:
+        return {}
+    cutoff_start = datetime.now(UTC) - timedelta(seconds=window_sec)
     rows = (
         await s.execute(
-            select(
-                GranuleStageTiming.batch_id,
-                func.count(),
-            )
+            select(GranuleStageTiming.batch_id, func.count())
             .where(GranuleStageTiming.batch_id.in_(batch_ids))
-            .where(GranuleStageTiming.stage == "upload")
+            .where(GranuleStageTiming.stage == "deliver")
             .where(GranuleStageTiming.finished_at >= cutoff_start)
             .group_by(GranuleStageTiming.batch_id)
         )
     ).all()
-
-    out: dict[str, int | None] = dict.fromkeys(batch_ids, None)
-    for batch_id, recent_done in rows:
-        if recent_done <= 0:
-            continue
-        remaining = sum(counts_map[batch_id].get(st, 0) for st in IN_FLIGHT_STATES)
-        if remaining <= 0:
-            continue
-        out[batch_id] = int(remaining * window_sec / recent_done)
-    return out
+    return {batch_id: int(n) for batch_id, n in rows}
 
 
 def _build_summary(
@@ -171,6 +213,7 @@ def _build_summary(
     objects_exhausted: int,
     eta_seconds: int | None,
     eta_realtime: int | None,
+    throughput_per_min: float | None = None,
 ) -> BatchSummary:
     return BatchSummary(
         batch_id=batch.batch_id,
@@ -183,6 +226,7 @@ def _build_summary(
         objects_exhausted=objects_exhausted,
         eta_seconds=eta_seconds,
         eta_realtime=eta_realtime,
+        throughput_per_min=throughput_per_min,
     )
 
 

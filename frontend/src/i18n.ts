@@ -56,6 +56,7 @@ export const TIMING_STAGE_ZH: Record<TimingStage, string> = {
   process: "处理",
   upload_wait: "等上传",
   upload: "上传",
+  deliver: "交付",
 };
 
 export function stateLabel(s: GranuleState): string {
@@ -106,4 +107,12 @@ export function fmtPerMinute(count: number, ms: number): string {
   if (ms <= 0 || count <= 0) return "—";
   const perMin = (count * 60_000) / ms;
   return perMin >= 10 ? `${perMin.toFixed(0)}/min` : `${perMin.toFixed(1)}/min`;
+}
+
+// Server-computed delivery rate (granules/min). null = no data yet ("—"); 0 is
+// a real value ("0 条/分" = delivery stalled), so it must not collapse to "—".
+export function fmtThroughputPerMin(perMin: number | null): string {
+  if (perMin == null) return "—";
+  const v = perMin >= 10 ? perMin.toFixed(0) : perMin.toFixed(1);
+  return `${v} 条/分`;
 }

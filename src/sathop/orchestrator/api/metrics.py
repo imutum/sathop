@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sathop.shared.state_machine import NON_TERMINAL_STATES, GranuleState
 
 from .. import event_store, telemetry
-from ..config import require_token_or_query
+from ..config import require_token_or_query, settings
 from ..db import Batch, Granule, Receiver, Worker, session
 
 router = APIRouter(tags=["metrics"], dependencies=[Depends(require_token_or_query)])
@@ -47,7 +47,7 @@ def _age_seconds(now: datetime, ts: datetime | None) -> float:
 
 
 NON_TERMINAL = set(NON_TERMINAL_STATES)
-STUCK_AGE_HOURS = 6
+STUCK_AGE_HOURS = settings.stuck_age_hours
 
 
 async def _collect(s: AsyncSession) -> bytes:
@@ -102,7 +102,7 @@ async def _collect(s: AsyncSession) -> bytes:
     g_events24 = Gauge("sathop_events_24h", "Event count in the last 24h by level", ["level"], registry=reg)
     g_stuck = Gauge(
         "sathop_granules_stuck",
-        f"Granules in a non-terminal state for >{STUCK_AGE_HOURS}h, by state",
+        f"Granules in a non-terminal state for >{STUCK_AGE_HOURS:g}h, by state",
         ["state"],
         registry=reg,
     )

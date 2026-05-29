@@ -96,7 +96,7 @@ STATE_TABLE: dict[GranuleState, StateSpec] = {
         predecessor=GranuleState.UPLOADING,
         closes_stage="upload",
     ),
-    GranuleState.ACKED: StateSpec(non_terminal=True),
+    GranuleState.ACKED: StateSpec(non_terminal=True, closes_stage="deliver"),
     GranuleState.DELETED: StateSpec(),
     GranuleState.FAILED: StateSpec(retryable=True),
     GranuleState.BLACKLISTED: StateSpec(retryable=True),
@@ -478,9 +478,15 @@ def apply(
         case ObjectAcked():
             if snap.state != GranuleState.UPLOADED:
                 raise StateConflict(f"object-ack not accepted in state {snap.state.value!r}")
+            # Close the `deliver` stage: started when the granule entered
+            # UPLOADED (snap.updated_at), finished now. Duration = how long the
+            # product waited for the receiver — the receiver-bottleneck signal,
+            # and the rate source for delivery throughput / ETA.
+            stage = _stage_row_closing(snap, GranuleState.ACKED, now)
             return TransitionResult(
                 new_state=GranuleState.ACKED,
                 fields={"updated_at": now},
+                stage_rows=(stage,) if stage is not None else (),
             )
         case _:
             raise StateConflict(f"unknown event: {type(event).__name__}")

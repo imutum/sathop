@@ -19,6 +19,7 @@ import Field from "@/components/Field.vue";
 const props = defineProps<{ batchId: string; remaining: number; etaSeconds: number | null; etaRealtime: number | null }>();
 
 // 显示顺序：每对 (等待, 工作) 紧挨着，让用户一眼看出 sem 排队 vs 实际跑。
+// deliver 无 wait 配对，排在末尾——它是上传完成→receiver 确认的交付延迟。
 const STAGE_ORDER: TimingStage[] = [
   "download_wait",
   "download",
@@ -26,6 +27,7 @@ const STAGE_ORDER: TimingStage[] = [
   "process",
   "upload_wait",
   "upload",
+  "deliver",
 ];
 
 const q = useQuery({
@@ -35,7 +37,8 @@ const q = useQuery({
 });
 
 const data = computed(() => q.data.value);
-const doneCount = computed(() => data.value?.stages.upload.count ?? 0);
+// "完成" = 交付：数 deliver 阶段闭合（= receiver 已确认），与 BatchSummary 口径一致。
+const doneCount = computed(() => data.value?.stages.deliver.count ?? 0);
 </script>
 
 <template>
@@ -60,10 +63,10 @@ const doneCount = computed(() => data.value?.stages.upload.count ?? 0);
         <Field label="总耗时（端到端）" hint="wall clock">
           <span class="tabular-nums">{{ fmtDuration(data.wall_ms) }}</span>
         </Field>
-        <Field label="完成数据粒">
+        <Field label="已交付">
           <span class="tabular-nums">{{ doneCount }}</span>
         </Field>
-        <Field label="平均吞吐">
+        <Field label="平均交付吞吐" hint="全程平均">
           <span class="tabular-nums">{{ fmtPerMinute(doneCount, data.wall_ms) }}</span>
         </Field>
         <Field

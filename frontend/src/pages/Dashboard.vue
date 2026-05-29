@@ -24,6 +24,7 @@ import HintTip from "@/components/HintTip.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import Stat from "@/components/Stat.vue";
 import PipelineHealth from "@/features/batch/components/PipelineHealth.vue";
+import DeliveryStats from "@/features/batch/components/DeliveryStats.vue";
 import { pipelineSegments, pipelineTotals } from "@/features/batch/pipelineSummary";
 import NodeStat from "@/features/nodes/components/NodeStat.vue";
 import OnboardingCard from "@/components/onboarding/OnboardingCard.vue";
@@ -77,6 +78,8 @@ const activeReceivers = computed(
 );
 
 const hasChartData = computed(() => pipelineSegments(counts.value).length > 0);
+const throughputPerMin = computed(() => overview.data.value?.throughput_per_min ?? null);
+const etaRealtime = computed(() => overview.data.value?.eta_realtime ?? null);
 const active = computed(() => inflight.data.value ?? []);
 
 // Onboarding checklist reflects real cluster state, shown until all three done.
@@ -127,18 +130,18 @@ function fmtHours(h: number): string {
       <Stat
         label="进行中"
         :value="inflightTotal.toLocaleString()"
-        hint="lease ~ 待清理之间的活粒"
-        tooltip="待下载 / 下载中 / 待处理 / 处理中 / 待上传 / 待分发 / 待清理 七个阶段合计。不含 待分配 与 已完成。"
+        hint="lease ~ 待交付之间的活粒"
+        tooltip="待下载 / 下载中 / 待处理 / 处理中 / 待上传 / 上传中 / 待分发 七个阶段合计。不含 待分配 与 已交付。"
         to="/batches"
       >
         <template #icon><Icon name="pulse" :size="18" /></template>
       </Stat>
       <Stat
-        label="已完成"
+        label="已交付"
         :value="done.toLocaleString()"
         tone="good"
-        hint="终态计数"
-        tooltip="管线终态：receiver 已确认 + worker 上的产物已被 janitor 清掉，数据粒生命周期结束。"
+        hint="已交付计数"
+        tooltip="receiver 已确认（acked）或已清理（deleted）——数据粒已交付。"
         to="/batches"
       >
         <template #icon><Icon name="check" :size="18" /></template>
@@ -173,7 +176,14 @@ function fmtHours(h: number): string {
         <div v-if="!hasChartData" class="flex h-44 items-center justify-center">
           <EmptyState title="暂无数据粒" description="管线空闲，等待新批次注入" illustration="signal" />
         </div>
-        <PipelineHealth v-else :counts="counts" />
+        <template v-else>
+          <PipelineHealth :counts="counts" />
+          <DeliveryStats
+            class="mt-5"
+            :throughput-per-min="throughputPerMin"
+            :eta-seconds="etaRealtime"
+          />
+        </template>
       </CardSection>
 
       <CardSection title="节点" description="集群健康度">

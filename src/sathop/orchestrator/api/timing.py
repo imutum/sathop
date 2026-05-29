@@ -17,11 +17,13 @@ from ._helpers import get_or_404
 
 router = APIRouter(tags=["timing"], dependencies=[Depends(require_token)])
 
-# Six stages: each "real" stage paired with its sem-queue wait. `*_wait`
+# Worker stages: each "real" stage paired with its sem-queue wait. `*_wait`
 # series are absent on legacy data — the response keeps an all-zero stat for
 # them so the UI can render them unconditionally. `upload_wait` is also
 # missing when the worker omits upload_started_at (pre-upload-sem builds);
-# same handling.
+# same handling. `deliver` closes on receiver ack (UPLOADED→ACKED) and is
+# orchestrator-side, not a worker stage — its latency localises a receiver
+# bottleneck and feeds delivery throughput / ETA.
 _STAGES = (
     "download_wait",
     "download",
@@ -29,6 +31,7 @@ _STAGES = (
     "process",
     "upload_wait",
     "upload",
+    "deliver",
 )
 
 

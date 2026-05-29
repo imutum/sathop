@@ -11,11 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sathop.shared.state_machine import ACTIVE_STATES, NON_TERMINAL_STATES
 
 from .. import event_store
+from ..config import settings
 from ..db import Granule
+from .batch_readmodels import system_delivery_rate
 
 NON_TERMINAL = set(NON_TERMINAL_STATES)
 ACTIVE = set(ACTIVE_STATES)
-STUCK_AGE_HOURS = 6
+# Single source: the env-backed setting. Kept as a module symbol because admin.py
+# and tests import it; reads the configured value at import time.
+STUCK_AGE_HOURS = settings.stuck_age_hours
 
 
 def clamp_limit(limit: int, *, min_value: int = 1, max_value: int = 200) -> int:
@@ -63,11 +67,14 @@ async def admin_overview(s: AsyncSession, *, now: datetime) -> dict[str, Any]:
             )
         ).all()
     }
+    throughput_per_min, eta_realtime = await system_delivery_rate(s, state_counts)
     return {
         "state_counts": state_counts,
         "stuck_over_hours": STUCK_AGE_HOURS,
         "stuck_by_state": stuck,
         "last_events": event_store.last_n(10),
+        "throughput_per_min": throughput_per_min,
+        "eta_realtime": eta_realtime,
     }
 
 

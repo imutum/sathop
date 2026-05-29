@@ -11,16 +11,20 @@ type PipelineTotals = {
 };
 
 const PENDING: GranuleState[] = ["pending"];
+// In-flight = leased through delivery. `uploaded` (待分发) is worker-done but
+// NOT yet delivered, so it stays here, not in DONE. `uploading` was previously
+// dropped from every bucket — fixed.
 const ACTIVE: GranuleState[] = [
   "queued",
   "downloading",
   "downloaded",
   "processing",
   "processed",
+  "uploading",
   "uploaded",
-  "acked",
 ];
-const DONE: GranuleState[] = ["deleted"];
+// Done = delivered. Matches summary.ts (acked+deleted); "完成"=接收端确认.
+const DONE: GranuleState[] = ["acked", "deleted"];
 const FAILED: GranuleState[] = ["failed", "blacklisted"];
 
 function countStates(counts: PipelineStateCounts, states: GranuleState[]): number {

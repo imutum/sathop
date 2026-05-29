@@ -55,6 +55,9 @@ export type BatchSummary = {
   objects_exhausted: number;
   eta_seconds: number | null;
   eta_realtime: number | null;
+  // Recent delivery throughput (granules acked per minute, rolling window).
+  // 0 when nothing delivered recently (delivery stalled); null on a fresh batch.
+  throughput_per_min: number | null;
 };
 
 export type WorkerInfo = {
@@ -121,6 +124,9 @@ export type Overview = {
   stuck_over_hours: number;
   stuck_by_state: Partial<Record<GranuleState, number>>;
   last_events: EventRow[];
+  // System-wide delivery figures (all batches), same definition as per-batch.
+  throughput_per_min: number | null;
+  eta_realtime: number | null;
 };
 
 export type InFlightRow = {
@@ -203,15 +209,17 @@ export type ProgressRow = {
   detail: string | null;
 };
 
-// 6 阶段：每个"真实工作阶段"配一个 *_wait 表示在 sem 排队等槽位的时间。
-// 老批次的 *_wait 行不存在 → batch_timing 返回全零 stats，UI 可无脑渲染。
+// 各 worker 工作阶段配一个 *_wait 表示在 sem 排队等槽位的时间。`deliver` 在
+// receiver 确认时闭合（UPLOADED→ACKED），是 orchestrator 侧的交付延迟，非 worker
+// 阶段。老批次的 *_wait / deliver 行不存在 → batch_timing 返回全零 stats，UI 可无脑渲染。
 export type TimingStage =
   | "download_wait"
   | "download"
   | "process_wait"
   | "process"
   | "upload_wait"
-  | "upload";
+  | "upload"
+  | "deliver";
 
 export type TimingRow = {
   id: number;

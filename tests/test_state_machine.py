@@ -94,6 +94,7 @@ def test_state_predecessor_and_stage_closers_are_declarative():
         "processed": "process",
         "uploading": "upload_wait",
         "uploaded": "upload",
+        "acked": "deliver",
     }
 
 
@@ -373,6 +374,10 @@ def test_object_acked_uploaded_to_acked():
         max_retries=3,
     )
     assert result.new_state == GranuleState.ACKED
+    # Closes the deliver stage: uploaded-at (_PREV) → ack (_NOW).
+    assert [r.stage for r in result.stage_rows] == ["deliver"]
+    assert result.stage_rows[0].started_at == _PREV
+    assert result.stage_rows[0].finished_at == _NOW
 
 
 def test_object_acked_rejects_non_uploaded():

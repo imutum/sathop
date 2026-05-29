@@ -46,8 +46,8 @@ function pct(n: number): string {
 
 const chips = computed(() => [
   { key: "pending",  label: "待分配", value: pending.value,  tone: "text-muted-foreground",            dot: "bg-muted-foreground",        tip: "orchestrator 还没派给任何 worker 的数据粒" },
-  { key: "inflight", label: "进行中", value: inFlight.value, tone: "text-sky-600 dark:text-sky-400",   dot: "bg-sky-500 dark:bg-sky-400", tip: "已 lease ~ 待清理之间所有处理中状态的合计" },
-  { key: "done",     label: "已完成", value: done.value,     tone: "text-success",                     dot: "bg-success",                 tip: "终态：worker 上的产物已删除（全链路完成）" },
+  { key: "inflight", label: "进行中", value: inFlight.value, tone: "text-sky-600 dark:text-sky-400",   dot: "bg-sky-500 dark:bg-sky-400", tip: "已 lease 到待交付之间的所有状态合计（含上传中、待分发）；不含已交付" },
+  { key: "done",     label: "已交付", value: done.value,     tone: "text-success",                     dot: "bg-success",                 tip: "receiver 已确认（acked）或已清理（deleted）——已交付" },
   { key: "failed",   label: "异常",   value: failed.value,   tone: "text-danger",                      dot: "bg-danger",                  tip: "待重试 + 已拉黑（达到重试上限）的数据粒" },
 ]);
 </script>

@@ -174,10 +174,16 @@ class BatchSummary(BaseModel):
     # query, all granules) so a >200-granule batch's stuck-delivery signal
     # surfaces in the listing without relying on the client-side granule page.
     objects_exhausted: int = 0
-    # Wall-clock-extrapolated remaining seconds; None when sample <3 uploads
-    # or no in-flight granules.
+    # Wall-clock-extrapolated remaining seconds; None when sample <3 deliveries
+    # or nothing left to deliver. Both ETAs count down to delivery (acked), the
+    # batch's "done" definition — remaining includes the uploaded-but-not-yet-
+    # delivered backlog.
     eta_seconds: int | None = None
     eta_realtime: int | None = None
+    # Recent delivery throughput (granules acked per minute, rolling window).
+    # 0.0 when nothing delivered recently (a stalled-delivery signal); None on
+    # a freshly-created batch with no data yet.
+    throughput_per_min: float | None = None
 
 
 class GranuleBulkAdd(BaseModel):

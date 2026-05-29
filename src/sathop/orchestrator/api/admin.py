@@ -75,7 +75,7 @@ class OrchestratorInfo(BaseModel):
     max_inflight_per_worker: int
     max_retries: int
     max_pull_failures: int
-    stuck_age_hours: int
+    stuck_age_hours: float
     dev_mode: bool
     auth_open: bool
 
