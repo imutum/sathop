@@ -114,6 +114,9 @@ class GranuleHandler:
         storage: storage.Storage,
         progress: ProgressServer,
         stages: WorkerStages,
+        *,
+        download_concurrency: int | None = None,
+        process_concurrency: int | None = None,
     ) -> None:
         self.s = settings
         self.client = client
@@ -121,9 +124,19 @@ class GranuleHandler:
         self.storage = storage
         self.progress = progress
         self.stages = stages
-        self._download_sem = asyncio.Semaphore(settings.download_concurrency)
-        self._process_sem = asyncio.Semaphore(settings.process_concurrency)
+        dl = download_concurrency if download_concurrency is not None else settings.download_concurrency
+        pr = process_concurrency if process_concurrency is not None else settings.process_concurrency
+        self._download_sem = asyncio.Semaphore(dl)
+        self._process_sem = asyncio.Semaphore(pr)
         self._upload_sem = asyncio.Semaphore(settings.upload_concurrency)
+
+    def grow_download(self, delta: int) -> None:
+        for _ in range(max(0, delta)):
+            self._download_sem.release()
+
+    def grow_process(self, delta: int) -> None:
+        for _ in range(max(0, delta)):
+            self._process_sem.release()
 
     async def handle(self, item: LeaseItem) -> None:
         gid = item.granule_id

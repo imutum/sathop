@@ -68,11 +68,22 @@ const adminApi = {
 
 const nodeApi = {
   workers: () => getJson<WorkerInfo[]>("/api/workers"),
-  setWorkerCapacity: (workerId: string, desiredCapacity: number | null) =>
-    putJson<{ ok: boolean; desired_capacity: number | null }>(
-      `/api/workers/${encodeURIComponent(workerId)}/capacity`,
-      { desired_capacity: desiredCapacity },
+  setWorkerConcurrency: (
+    workerId: string,
+    body: { download_concurrency: number | null; process_concurrency: number | null },
+  ) =>
+    putJson<{ ok: boolean; download_concurrency: number | null; process_concurrency: number | null }>(
+      `/api/workers/${encodeURIComponent(workerId)}/concurrency`,
+      body,
     ),
+  setWorkersConcurrency: (
+    workerIds: string[],
+    body: { download_concurrency: number | null; process_concurrency: number | null },
+  ) =>
+    putJson<{ ok: boolean; applied: string[] }>("/api/workers/concurrency", {
+      worker_ids: workerIds,
+      ...body,
+    }),
   removeWorker: (workerId: string, force = false) =>
     deleteJson<{ ok: boolean }>(
       `/api/workers/${encodeURIComponent(workerId)}${force ? "?force=true" : ""}`,

@@ -75,7 +75,12 @@ class Worker(Base):
     queue_pending_upload: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     queue_uploading: Mapped[int] = mapped_column(Integer, default=0)
     paused: Mapped[bool] = mapped_column(Boolean, default=False)
-    desired_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Operator concurrency overrides; None = use the worker's env default.
+    download_concurrency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    process_concurrency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Live applied concurrency reported by the worker heartbeat.
+    live_download_concurrency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    live_process_concurrency: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ca_pem: Mapped[str | None] = mapped_column(Text, nullable=True)
     # One-shot "update" signal (was "restart"). SQL column keeps old name for
     # back-compat with existing DBs; Python attr is the canonical name.

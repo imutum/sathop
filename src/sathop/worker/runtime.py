@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import httpx
 import psutil
@@ -59,7 +60,9 @@ class Worker:
         self._gc_event = asyncio.Event()
         self._draining = False
         self._handlers: dict[str, asyncio.Task[None]] = {}
-        self._effective_capacity = s.capacity
+        self._live_download = s.download_concurrency
+        self._live_process = s.process_concurrency
+        self._reconfiguring = False
         self._ca_pem: str | None = None
         self._lease_backoff_factor = 1
         self.progress = ProgressServer(self.client, port=s.progress_port)
@@ -189,6 +192,8 @@ class Worker:
                     mem_percent=vm.percent,
                     paused=self._pause_lease or self._remote_pause,
                     active_granule_ids=list(self._handlers.keys()),
+                    download_concurrency=self._live_download,
+                    process_concurrency=self._live_process,
                     **stage_snapshot.heartbeat_fields(),
                 )
             )
@@ -223,23 +228,75 @@ class Worker:
             if task is not None and not task.done():
                 log.info("[%s] cancelling handler — orchestrator revoked lease", gid)
                 task.cancel()
-        desired = resp.desired_capacity
-        new_eff = min(self.s.capacity, max(0, desired)) if desired is not None else self.s.capacity
-        if new_eff != self._effective_capacity:
-            log.info(
-                "effective capacity %d → %d (env=%d, override=%s)",
-                self._effective_capacity,
-                new_eff,
-                self.s.capacity,
-                desired,
+        self._reconcile_concurrency(resp.download_concurrency, resp.process_concurrency)
+
+    def _reconcile_concurrency(self, ov_dl: int | None, ov_pr: int | None) -> None:
+        target_dl = ov_dl if ov_dl is not None else self.s.download_concurrency
+        target_pr = ov_pr if ov_pr is not None else self.s.process_concurrency
+        if target_dl == self._live_download and target_pr == self._live_process:
+            return
+        if self._reconfiguring:
+            return  # in-flight reconfig; re-evaluated next heartbeat
+        if target_dl < self._live_download or target_pr < self._live_process:
+            asyncio.create_task(self._apply_reconfig(target_dl, target_pr))  # shrink path
+            return
+        if target_dl > self._live_download:  # grow path (instant)
+            self._handler.grow_download(target_dl - self._live_download)
+            log.info("download concurrency %d -> %d (live grow)", self._live_download, target_dl)
+            self._live_download = target_dl
+        if target_pr > self._live_process:
+            self._handler.grow_process(target_pr - self._live_process)
+            log.info("process concurrency %d -> %d (live grow)", self._live_process, target_pr)
+            self._live_process = target_pr
+
+    async def _apply_reconfig(self, target_dl: int, target_pr: int) -> None:
+        # _reconfiguring gates leasing (not _draining) so this never trips the
+        # terminal drain watchdog. try/finally guarantees the flag clears even on
+        # cancellation/error — otherwise a stuck True would freeze all future
+        # reconciliation. On error live_* stay unchanged, so the next heartbeat retries.
+        self._reconfiguring = True
+        try:
+            log.warning(
+                "reconfig concurrency dl %d->%d pr %d->%d — draining in-flight",
+                self._live_download,
+                target_dl,
+                self._live_process,
+                target_pr,
             )
-            self._effective_capacity = new_eff
+            deadline = time.monotonic() + DRAIN_WATCHDOG_TIMEOUT_SEC
+            while self._handlers and time.monotonic() < deadline:
+                await asyncio.sleep(1)
+            if self._handlers:
+                log.warning(
+                    "reconfig drain timeout — rebuilding with %d in-flight (lease sweeper reclaims)",
+                    len(self._handlers),
+                )
+            self._handler = GranuleHandler(
+                self.s,
+                self.client,
+                self.downloader,
+                self.storage,
+                self.progress,
+                self.stages,
+                download_concurrency=target_dl,
+                process_concurrency=target_pr,
+            )
+            self._live_download, self._live_process = target_dl, target_pr
+            log.info("concurrency reconfig applied dl=%d pr=%d", target_dl, target_pr)
+        finally:
+            self._reconfiguring = False
 
     async def _pipeline_loop(self) -> None:
         while True:
-            ceiling = min(self._effective_capacity, self.s.process_concurrency + self.s.download_concurrency)
+            ceiling = self._live_download + self._live_process
             free = ceiling - len(self._handlers)
-            if free <= 0 or self._pause_lease or self._remote_pause or self._draining:
+            if (
+                free <= 0
+                or self._pause_lease
+                or self._remote_pause
+                or self._draining
+                or self._reconfiguring
+            ):
                 await asyncio.sleep(self.s.lease_poll_interval)
                 continue
             try:

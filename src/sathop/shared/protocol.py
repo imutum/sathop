@@ -44,7 +44,9 @@ class WorkerRegisterResponse(BaseModel):
 
 class WorkerHeartbeatResponse(BaseModel):
     ok: bool = True
-    desired_capacity: int | None = None
+    # Operator overrides pushed from the worker row; None = use worker env default.
+    download_concurrency: int | None = None
+    process_concurrency: int | None = None
     revoked_granule_ids: list[str] = Field(default_factory=list)
     update_requested: bool = False
     operator_paused: bool = False
@@ -81,6 +83,11 @@ class WorkerHeartbeat(BaseModel):
     queue_processing: int = 0
     queue_pending_upload: int = 0
     queue_uploading: int = 0
+    # Live applied concurrency the worker is currently running with, so the
+    # orchestrator/UI see ground truth instead of reverse-engineering from queue
+    # peaks. Default 0 so old/edge payloads still parse.
+    download_concurrency: int = 0
+    process_concurrency: int = 0
     # True while the worker is gating off new leases for any reason (currently
     # disk-watermark backpressure). Surfaces to operators so an "online but
     # idle" worker doesn't look like the orchestrator is starving it.

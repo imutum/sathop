@@ -55,35 +55,52 @@ const diskTone = computed<"bad" | "warn" | "accent">(() => {
   return "accent";
 });
 
-// Capacity editor: draft=null ⇒ display mode; draft=string ⇒ editing.
-const draft = ref<string | null>(null);
+// Two concurrency editors (下载 / 处理). dim===null ⇒ display mode; otherwise
+// that dimension is being edited. The override body always carries both fields,
+// so editing one preserves the other's current override.
+type Dim = "download" | "process";
+const editing = ref<Dim | null>(null);
+const draft = ref("");
 const draftInput = ref<InstanceType<typeof TextInput> | null>(null);
-watch(draft, (v) => {
+watch(editing, (v) => {
   if (v !== null) void nextTick(() => draftInput.value?.focus());
 });
 
-const effective = computed(() =>
-  Math.min(props.worker.capacity, props.worker.desired_capacity ?? props.worker.capacity),
-);
+// 节点流水线天花板 = 下载并发 + 处理并发（容量已派生，不再单列）。
+const dl = computed(() => ({
+  live: props.worker.live_download_concurrency,
+  override: props.worker.download_concurrency,
+}));
+const pr = computed(() => ({
+  live: props.worker.live_process_concurrency,
+  override: props.worker.process_concurrency,
+}));
 
-function startEdit() {
-  draft.value =
-    props.worker.desired_capacity != null ? String(props.worker.desired_capacity) : "";
+function startEdit(dim: Dim) {
+  const ov = dim === "download" ? dl.value.override : pr.value.override;
+  draft.value = ov != null ? String(ov) : "";
+  editing.value = dim;
 }
 
 function submitDraft() {
-  const t = (draft.value ?? "").trim();
+  const dim = editing.value;
+  if (dim === null) return;
+  const t = draft.value.trim();
   const next = t === "" ? null : Number(t);
-  if (next !== null && (!Number.isInteger(next) || next < 1 || next > props.worker.capacity)) {
-    toast.error(`并发上限必须是 1–${props.worker.capacity} 的整数`);
+  if (next !== null && (!Number.isInteger(next) || next < 1)) {
+    toast.error("并发必须是 ≥ 1 的整数，留空表示用节点默认值");
     return;
   }
-  lc.setCapacity.mutate(next, { onSuccess: () => (draft.value = null) });
+  const body = {
+    download_concurrency: dim === "download" ? next : dl.value.override,
+    process_concurrency: dim === "process" ? next : pr.value.override,
+  };
+  lc.setConcurrency.mutate(body, { onSuccess: () => (editing.value = null) });
 }
 
 function onKey(e: KeyboardEvent) {
   if (e.key === "Enter") submitDraft();
-  if (e.key === "Escape") draft.value = null;
+  if (e.key === "Escape") editing.value = null;
 }
 </script>
 
@@ -230,59 +247,88 @@ function onKey(e: KeyboardEvent) {
 
         <!-- 约束 + 动作 -->
         <div class="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-3 text-2xs text-muted-foreground">
-          <span class="flex items-center gap-1.5">
-            <HintTip text="当前生效的并发上限 / 容器启动时声明的硬容量">
-              <span>容量 {{ effective }}/{{ worker.capacity }}</span>
-            </HintTip>
-            <template v-if="draft !== null">
-              <TextInput
-                ref="draftInput"
-                type="number"
-                :min="1"
-                :max="worker.capacity"
-                :model-value="draft"
-                @update:model-value="draft = $event"
-                @keydown="onKey"
-                :disabled="lc.setCapacity.isPending.value"
-                placeholder="env"
-                class="w-14 text-2xs tabular-nums"
-              />
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <!-- 下载并发 -->
+            <span class="flex items-center gap-1.5">
+              <HintTip text="下载并发：当前 worker 实测生效值 / 运维下发的覆盖值（留空=节点默认）。调大瞬时生效；调小会触发一次短暂排空后重建">
+                <span>
+                  下载并发
+                  <span class="tabular-nums text-foreground">{{ dl.live ?? "-" }}</span>
+                  <span v-if="dl.override != null" class="text-muted-foreground">（覆盖 {{ dl.override }}）</span>
+                </span>
+              </HintTip>
+              <template v-if="editing === 'download'">
+                <TextInput
+                  ref="draftInput"
+                  type="number"
+                  :min="1"
+                  :model-value="draft"
+                  @update:model-value="draft = $event"
+                  @keydown="onKey"
+                  :disabled="lc.setConcurrency.isPending.value"
+                  placeholder="默认"
+                  class="w-14 text-2xs tabular-nums"
+                />
+                <Button type="button" size="xs" :disabled="lc.setConcurrency.isPending.value" @click="submitDraft">保存</Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  :disabled="lc.setConcurrency.isPending.value"
+                  class="text-muted-foreground hover:text-foreground"
+                  @click="editing = null"
+                >取消</Button>
+              </template>
               <Button
-                type="button"
-                size="xs"
-                :disabled="lc.setCapacity.isPending.value"
-                @click="submitDraft"
-              >
-                保存
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                :disabled="lc.setCapacity.isPending.value"
-                class="text-muted-foreground hover:text-foreground"
-                @click="draft = null"
-              >
-                取消
-              </Button>
-            </template>
-            <HintTip
-              v-else-if="!isRemoved"
-              :text="worker.desired_capacity != null
-                ? '修改运行时并发上限（不能超过容器声明的容量）'
-                : '人工限流：临时压低这台节点的并发上限'"
-            >
-              <Button
+                v-else-if="!isRemoved"
                 type="button"
                 variant="outline"
                 size="xs"
                 class="text-muted-foreground hover:text-foreground"
-                @click="startEdit"
-              >
-                {{ worker.desired_capacity != null ? "改" : "限流" }}
-              </Button>
-            </HintTip>
-          </span>
+                @click="startEdit('download')"
+              >改</Button>
+            </span>
+            <!-- 处理并发 -->
+            <span class="flex items-center gap-1.5">
+              <HintTip text="处理并发：当前 worker 实测生效值 / 运维下发的覆盖值（留空=节点默认）。调大瞬时生效；调小会触发一次短暂排空后重建">
+                <span>
+                  处理并发
+                  <span class="tabular-nums text-foreground">{{ pr.live ?? "-" }}</span>
+                  <span v-if="pr.override != null" class="text-muted-foreground">（覆盖 {{ pr.override }}）</span>
+                </span>
+              </HintTip>
+              <template v-if="editing === 'process'">
+                <TextInput
+                  ref="draftInput"
+                  type="number"
+                  :min="1"
+                  :model-value="draft"
+                  @update:model-value="draft = $event"
+                  @keydown="onKey"
+                  :disabled="lc.setConcurrency.isPending.value"
+                  placeholder="默认"
+                  class="w-14 text-2xs tabular-nums"
+                />
+                <Button type="button" size="xs" :disabled="lc.setConcurrency.isPending.value" @click="submitDraft">保存</Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  :disabled="lc.setConcurrency.isPending.value"
+                  class="text-muted-foreground hover:text-foreground"
+                  @click="editing = null"
+                >取消</Button>
+              </template>
+              <Button
+                v-else-if="!isRemoved"
+                type="button"
+                variant="outline"
+                size="xs"
+                class="text-muted-foreground hover:text-foreground"
+                @click="startEdit('process')"
+              >改</Button>
+            </span>
+          </div>
           <div class="flex flex-wrap items-center justify-end gap-1.5">
             <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
               <RouterLink

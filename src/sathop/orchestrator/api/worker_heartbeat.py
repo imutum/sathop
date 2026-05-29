@@ -10,13 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sathop.shared.protocol import WorkerHeartbeat
 from sathop.shared.state_machine import LEASED_STATES
 
-from ..db import Granule
+from ..db import Granule, Worker
 from ..telemetry import WorkerTelemetry, update_worker
 
 
-def apply_worker_heartbeat(worker_id: str, req: WorkerHeartbeat, now: datetime) -> None:
+def apply_worker_heartbeat(w: Worker, req: WorkerHeartbeat, now: datetime) -> bool:
+    """Ingest one heartbeat. Volatile display telemetry (cpu/disk/queues) goes to
+    in-memory telemetry; the worker's LIVE applied concurrency is ground truth the
+    UI compares against the override, so it lands on the DB row. Returns True when
+    a live value changed, so the caller commits (no write on a steady heartbeat)."""
     update_worker(
-        worker_id,
+        w.worker_id,
         WorkerTelemetry(
             last_seen=now,
             disk_used_gb=req.disk_used_gb,
@@ -33,6 +37,14 @@ def apply_worker_heartbeat(worker_id: str, req: WorkerHeartbeat, now: datetime) 
             paused=req.paused,
         ),
     )
+    changed = (
+        w.live_download_concurrency != req.download_concurrency
+        or w.live_process_concurrency != req.process_concurrency
+    )
+    if changed:
+        w.live_download_concurrency = req.download_concurrency
+        w.live_process_concurrency = req.process_concurrency
+    return changed
 
 
 async def revoked_active_granules(s: AsyncSession, req: WorkerHeartbeat) -> list[str]:

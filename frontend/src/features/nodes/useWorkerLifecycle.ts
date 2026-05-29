@@ -65,11 +65,12 @@ export function useWorkerLifecycle(worker: MaybeRefOrGetter<{ worker_id: string 
     onError: (e: Error) => toast.error(`触发失败：${e.message}`),
   });
 
-  const setCapacity = useMutation({
-    mutationFn: (n: number | null) => API.setWorkerCapacity(id(), n),
-    onSuccess: (_r, n) => {
+  const setConcurrency = useMutation({
+    mutationFn: (body: { download_concurrency: number | null; process_concurrency: number | null }) =>
+      API.setWorkerConcurrency(id(), body),
+    onSuccess: () => {
       refreshWorkers();
-      toast.success(n == null ? "已清除并发上限" : `已设并发上限 ${n}`);
+      toast.success("已下发并发设置，下次心跳收敛");
     },
     onError: (e: Error) => toast.error(`设置失败：${e.message}`),
   });
@@ -146,7 +147,7 @@ export function useWorkerLifecycle(worker: MaybeRefOrGetter<{ worker_id: string 
     pause,
     revoke,
     gc,
-    setCapacity,
+    setConcurrency,
     pending,
     confirmUpdate,
     confirmRemove,

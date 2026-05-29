@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,7 +121,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         return WorkerHeartbeatResponse(removed=True)
 
     now = utcnow()
-    apply_worker_heartbeat(req.worker_id, req, now)
+    live_changed = apply_worker_heartbeat(w, req, now)
 
     flapped = await record_version_flap(s, w, new_version=req.version, source=req.worker_id, kind="worker")
     renewed = await renew_worker_leases(s, req.worker_id, now)
@@ -132,11 +133,12 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         s, w, "gc_requested_at", source=w.worker_id, message="cache GC signal delivered to worker"
     )
 
-    if flapped or renewed or update_requested or gc_requested:
+    if flapped or renewed or update_requested or gc_requested or live_changed:
         await commit_and_publish(s, Scope.WORKERS)
 
     return WorkerHeartbeatResponse(
-        desired_capacity=w.desired_capacity,
+        download_concurrency=w.download_concurrency,
+        process_concurrency=w.process_concurrency,
         revoked_granule_ids=revoked,
         update_requested=update_requested,
         operator_paused=bool(w.operator_paused),
@@ -151,14 +153,14 @@ async def lease(req: LeaseRequest, s: AsyncSession = Depends(session)) -> LeaseR
 
 
 async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
-    worker = await _active_worker_or_403(s, req.worker_id)
+    await _active_worker_or_403(s, req.worker_id)  # 403 if removed/paused
     now = utcnow()
     expires = now + LEASE_DURATION
 
-    # Two clamps below req.capacity: queue-based backpressure (0 disables) and
-    # per-worker runtime override (belt-and-braces against an old worker that
-    # doesn't self-clamp).
-    limit = await lease_limit(s, worker, req)
+    # One clamp below req.capacity: the orchestrator-wide max-inflight cap
+    # (0 disables). Per-worker concurrency is the worker's own admission
+    # control now (download+process semaphores), reported back via heartbeat.
+    limit = await lease_limit(s, req)
     if limit <= 0:
         return LeaseResponse(items=[], lease_expires_at=expires)
 
@@ -238,21 +240,75 @@ async def deletable(worker_id: str, s: AsyncSession = Depends(session)) -> list[
     return [DeletableGranule(granule_id=gid, object_keys=keys) for gid, keys in by_granule.items()]
 
 
-@router.put("/{worker_id}/capacity")
-async def set_capacity(
+class ConcurrencyOverride(BaseModel):
+    """Operator concurrency override. None = clear (worker falls back to its env
+    default); positive int = push that target to the worker via heartbeat reply.
+    No upper bound — raw numbers, the human judges (CPU-core hint lives in the UI)."""
+
+    download_concurrency: int | None = None
+    process_concurrency: int | None = None
+
+
+class BulkConcurrencyOverride(ConcurrencyOverride):
+    worker_ids: list[str]
+
+
+def _validate_concurrency(body: ConcurrencyOverride) -> None:
+    for name, v in (
+        ("download_concurrency", body.download_concurrency),
+        ("process_concurrency", body.process_concurrency),
+    ):
+        if v is not None and v < 1:
+            raise HTTPException(422, f"{name} must be a positive int or null")
+
+
+@router.put("/concurrency")
+async def set_concurrency_bulk(body: BulkConcurrencyOverride, s: AsyncSession = Depends(session)) -> dict:
+    """Apply one concurrency override across many workers (unknown ids skipped)."""
+    _validate_concurrency(body)
+    applied: list[str] = []
+    for worker_id in body.worker_ids:
+        w = await s.get(Worker, worker_id)
+        if w is None:
+            continue
+        w.download_concurrency = body.download_concurrency
+        w.process_concurrency = body.process_concurrency
+        applied.append(worker_id)
+    if applied:
+        await log(
+            s,
+            "operator",
+            f"concurrency override -> dl={body.download_concurrency} pr={body.process_concurrency} "
+            f"({len(applied)} worker(s))",
+        )
+        await commit_and_publish(s, Scope.WORKERS)
+    return {"ok": True, "applied": applied}
+
+
+@router.put("/{worker_id}/concurrency")
+async def set_concurrency(
     worker_id: str,
-    desired_capacity: int | None = Body(default=None, embed=True),
+    body: ConcurrencyOverride,
     s: AsyncSession = Depends(session),
 ) -> dict:
-    """Runtime concurrency override. None clears it (back to env capacity).
-    Positive int clamps lease size + propagates to worker via heartbeat reply."""
-    if desired_capacity is not None and desired_capacity < 1:
-        raise HTTPException(422, "desired_capacity must be a positive int or null")
+    """Per-worker concurrency override. None on a field clears it (env default);
+    positive int propagates to the worker via the heartbeat reply, which converges
+    its live download/process semaphores (grow = instant, shrink = reconfig drain)."""
+    _validate_concurrency(body)
     w = await get_or_404(s, Worker, worker_id, "worker not found")
-    w.desired_capacity = desired_capacity
-    await log(s, worker_id, f"capacity override → {desired_capacity} (env cap {w.capacity})")
+    w.download_concurrency = body.download_concurrency
+    w.process_concurrency = body.process_concurrency
+    await log(
+        s,
+        worker_id,
+        f"concurrency override -> dl={body.download_concurrency} pr={body.process_concurrency}",
+    )
     await commit_and_publish(s, Scope.WORKERS)
-    return {"ok": True, "desired_capacity": desired_capacity}
+    return {
+        "ok": True,
+        "download_concurrency": body.download_concurrency,
+        "process_concurrency": body.process_concurrency,
+    }
 
 
 @router.post("/{worker_id}/update")

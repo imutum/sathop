@@ -4,8 +4,8 @@ Three concerns live here:
 
 1. **Quota policy** (`compute_lease_quota`) — the pure-function clamp that
    decides how many Granules a Worker may lease this round, given its
-   self-reported capacity, the orchestrator's per-Worker cap, and any
-   operator-set runtime override. Pure: testable without an AsyncSession.
+   self-reported capacity and the orchestrator's per-Worker cap. Pure:
+   testable without an AsyncSession.
 
 2. **Lease acquisition / renewal / revocation** — async helpers that flow
    through `apply_transition` (ADR-0003) so every state change goes through
@@ -32,7 +32,7 @@ from sathop.shared.state_machine import (
 )
 
 from ..config import settings
-from ..db import Batch, Granule, GranuleObject, Worker
+from ..db import Batch, Granule, GranuleObject
 from ._transition import apply_transition
 from .progress import evict_granule
 
@@ -44,22 +44,18 @@ def compute_lease_quota(
     *,
     current_inflight: int,
     max_inflight_per_worker: int,
-    desired_capacity: int | None,
 ) -> int:
     """How many new Granules this Worker may lease this round.
 
-    Pure: takes already-fetched state, returns the clamp. Three clamps:
+    Pure: takes already-fetched state, returns the clamp. Two clamps:
       - Worker self-reports capacity (`requested`)
       - Orchestrator-wide cap minus what the Worker still holds
         (`max_inflight_per_worker - current_inflight`), 0 disables
-      - Operator runtime override (`desired_capacity`, None means unset)
     Returns the minimum of the active clamps, never negative.
     """
     limit = requested
     if max_inflight_per_worker > 0:
         limit = min(limit, max(0, max_inflight_per_worker - current_inflight))
-    if desired_capacity is not None:
-        limit = min(limit, max(0, desired_capacity))
     return limit
 
 
@@ -78,7 +74,7 @@ async def count_worker_inflight(s: AsyncSession, worker_id: str) -> int:
     return int(pre or 0) + int(post or 0)
 
 
-async def lease_limit(s: AsyncSession, worker: Worker, req: LeaseRequest) -> int:
+async def lease_limit(s: AsyncSession, req: LeaseRequest) -> int:
     """Async wrapper: fetch the Worker's current inflight count, then ask
     `compute_lease_quota` for the policy answer. Kept as a thin adapter so
     the quota policy itself stays pure-function testable."""
@@ -89,7 +85,6 @@ async def lease_limit(s: AsyncSession, worker: Worker, req: LeaseRequest) -> int
         req.capacity,
         current_inflight=current_inflight,
         max_inflight_per_worker=settings.max_inflight_per_worker,
-        desired_capacity=worker.desired_capacity,
     )
 
 

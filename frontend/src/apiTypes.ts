@@ -78,7 +78,12 @@ export type WorkerInfo = {
   queue_pending_upload: number;
   queue_uploading: number;
   paused: boolean;
-  desired_capacity: number | null;
+  // Operator concurrency overrides (null = worker's env default).
+  download_concurrency: number | null;
+  process_concurrency: number | null;
+  // Live values the worker reports as currently applied (null until reported).
+  live_download_concurrency: number | null;
+  live_process_concurrency: number | null;
   operator_paused: boolean;
   removed_at: string | null;
 };

@@ -48,7 +48,10 @@ async def list_workers(s: AsyncSession = Depends(session)) -> list[dict]:
             "version": w.version,
             "capacity": w.capacity,
             "public_url": w.public_url,
-            "desired_capacity": w.desired_capacity,
+            "download_concurrency": w.download_concurrency,
+            "process_concurrency": w.process_concurrency,
+            "live_download_concurrency": w.live_download_concurrency,
+            "live_process_concurrency": w.live_process_concurrency,
             "operator_paused": bool(w.operator_paused),
             "removed_at": w.removed_at.isoformat() if w.removed_at else None,
         }
