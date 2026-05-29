@@ -55,6 +55,10 @@ Both vocabularies are deliberate and stable: rename ADR-0004 explains why we did
 One of 11 values in the **Granule**'s lifecycle (pending → queued → downloading → … → uploaded → acked → deleted, plus failed/blacklisted). Declared in `shared/state_machine.py::STATE_TABLE`.
 _Avoid_: status, phase
 
+**Reap**:
+Hard-delete a **Granule** and every row that references it (objects, stage timings), children before parent. Distinct from the soft `deleted` **State** / `DeleteConfirmed` **GranuleEvent**, which mark a Granule's outputs gone but keep the row alive for the UI — reaping removes the row itself. The single owner of the child-table set and delete order is `orchestrator/reaping.py::reap_granules`, called by both the batch-delete handler and the retention sweeper.
+_Avoid_: purge, cascade, cleanup
+
 ### State machine (this design)
 
 **GranuleEvent**:

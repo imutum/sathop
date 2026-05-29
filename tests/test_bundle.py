@@ -14,7 +14,7 @@ import pytest
 
 from sathop.shared.bundle_manifest import BundleManifest
 from sathop.shared.bundle_python_deps import python_deps_source
-from sathop.shared.protocol import parse_bundle_ref
+from sathop.shared.bundle_ref import parse_bundle_ref
 from sathop.worker import bundle
 
 _MANIFEST_TEMPLATE = (

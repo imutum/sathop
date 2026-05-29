@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop import __version__
-from sathop.shared.protocol import format_bundle_ref
+from sathop.shared.bundle_ref import format_bundle_ref
 from sathop.shared.state_machine import Scope
 
 from ..config import require_token, settings

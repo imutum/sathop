@@ -21,7 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.bundle_archive import detect_wrapper_dir
 from sathop.shared.bundle_manifest import BundleManifest, parse_shared_files
-from sathop.shared.protocol import BundleDetail, BundleSummary, format_bundle_ref
+from sathop.shared.bundle_ref import format_bundle_ref
+from sathop.shared.protocol import BundleDetail, BundleSummary
 from sathop.shared.state_machine import Scope
 
 from ..config import require_token, settings

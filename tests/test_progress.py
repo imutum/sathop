@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from sathop.orchestrator import db as orch_db
 from sathop.orchestrator.api.progress import _clear as clear_progress
-from sathop.orchestrator.api.progress import evict_granule
+from sathop.orchestrator.api.progress import evict_granule, evict_granules
 from sathop.orchestrator.db import Batch, Granule
 from sathop.orchestrator.main import app
 from sathop.shared.protocol import GranuleState
@@ -104,8 +104,23 @@ async def test_batch_latest_unknown_batch_returns_empty(client):
 
 
 async def test_evict_clears_progress(client):
+    """evict_granule takes only the granule id — batch_id is self-resolved from
+    the stored entry to clean the private batch index."""
     client.post("/api/granules/g1/progress", json={"step": "a", "batch_id": "b1"})
     assert len(client.get("/api/granules/g1/progress").json()) == 1
-    evict_granule("g1", "b1")
+    evict_granule("g1")
     assert len(client.get("/api/granules/g1/progress").json()) == 0
     assert client.get("/api/batches/b1/progress/latest").json() == {}
+
+
+async def test_evict_granules_bulk(client):
+    for gid in ("g1", "g2"):
+        client.post(f"/api/granules/{gid}/progress", json={"step": "a", "batch_id": "b1"})
+    assert set(client.get("/api/batches/b1/progress/latest").json().keys()) == {"g1", "g2"}
+    evict_granules(["g1", "g2"])
+    assert client.get("/api/batches/b1/progress/latest").json() == {}
+    assert client.get("/api/granules/g1/progress").json() == []
+
+
+def test_evict_unknown_granule_is_noop():
+    evict_granule("never-seen")  # no entry, no batch index → must not raise

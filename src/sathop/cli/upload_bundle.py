@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from sathop.cli.validate_bundle import validate as _validate
+from sathop.shared.bundle_validate import validate as _validate
 from sathop.shared.config import add_orch_args, resolve_orch_or_exit
 from sathop.shared.http import make_sync_orch_client
 

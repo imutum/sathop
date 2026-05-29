@@ -35,3 +35,13 @@ def object_is_pullable() -> ColumnElement[bool]:
         object_is_pending(),
         func.coalesce(GranuleObject.failed_pulls, 0) < settings.max_pull_failures,
     )
+
+
+def all_objects_acked() -> ColumnElement[bool]:
+    """Aggregate predicate: every GranuleObject row in the current filter/group
+    has acked_at set. One canonical home for "are all of a granule's objects
+    acked?" — used both as a HAVING clause (workers.deletable, grouped per
+    granule) and as a scalar over one granule (receivers.ack's UPLOADED→ACKED
+    gate). Callers scope deleted_at themselves: ack counts every row, deletable
+    only non-deleted ones."""
+    return func.count() == func.count(GranuleObject.acked_at)

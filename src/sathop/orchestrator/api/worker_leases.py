@@ -171,5 +171,5 @@ async def revoke_worker_leases(s: AsyncSession, worker_id: str, now) -> int:
             RevokedByOperator(granule_id=granule.granule_id),
             now=now,
         )
-        evict_granule(granule.granule_id, granule.batch_id)
+        evict_granule(granule.granule_id)
     return len(rows)

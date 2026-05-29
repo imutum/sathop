@@ -213,20 +213,6 @@ class SharedFile(Base):
     uploaded_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
 
 
-class GranuleProgress(Base):
-    """Bundle-reported checkpoint timeline, one row per reported step.
-    batch_id is denormalized so batch-level queries don't have to join granules."""
-
-    __tablename__ = "granule_progress"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    granule_id: Mapped[str] = mapped_column(String, ForeignKey("granules.granule_id"), index=True)
-    batch_id: Mapped[str] = mapped_column(String, index=True)
-    ts: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, index=True)
-    step: Mapped[str] = mapped_column(String)
-    pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
 class GranuleStageTiming(Base):
     """Closed-stage durations: one row per granule per (download, process,
     upload) attempt. Inserted at the transition that closes each stage; failed
@@ -271,6 +257,7 @@ async def init_db() -> None:
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_columns)
+        await conn.run_sync(_drop_obsolete_tables)
 
 
 def _ensure_columns(sync_conn) -> None:
@@ -316,6 +303,33 @@ def _ensure_columns(sync_conn) -> None:
                 # drop shouldn't crash-loop the orchestrator — surface it so the
                 # operator can drop it by hand.
                 log.exception("failed to drop obsolete column %s.%s", table_name, name)
+
+
+# Tables the model no longer declares but old DBs still carry. Listed
+# explicitly (not "any table absent from metadata") because the orchestrator
+# owns the whole DB and a typo'd __tablename__ must not silently drop live data.
+#   granule_progress — progress went fully in-memory (see api/progress.py); the
+#   table was inert but accumulated dead rows after delete_batch stopped touching it.
+_OBSOLETE_TABLES = ("granule_progress",)
+
+
+def _drop_obsolete_tables(sync_conn) -> None:
+    """Drop whole tables the model retired, mirroring the column-drop half of
+    `_ensure_columns` at the table grain. A leftover table is inert, so a failed
+    drop is logged, not fatal."""
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import text
+
+    log = logging.getLogger("sathop.orchestrator.db")
+    present = set(sa_inspect(sync_conn).get_table_names())
+    for name in _OBSOLETE_TABLES:
+        if name not in present:
+            continue
+        try:
+            sync_conn.execute(text(f'DROP TABLE "{name}"'))
+            log.info("dropped obsolete table %s", name)
+        except Exception:
+            log.exception("failed to drop obsolete table %s", name)
 
 
 async def shutdown_db() -> None:

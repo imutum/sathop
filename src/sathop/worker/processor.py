@@ -23,7 +23,6 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from ._paths import safe_segment
 from .bundle import BundleHandle
 
 
@@ -199,13 +198,17 @@ async def run_bundle(
     batch_id: str,
     inputs: list[Path],
     meta: dict,
-    work_root: Path,
+    work_dir: Path,
     execution_env: dict[str, str] | None = None,
     progress_url: str | None = None,
 ) -> ProcessResult:
-    work_dir = Path(tempfile.mkdtemp(prefix=f"g-{safe_segment(granule_id)}-", dir=work_root))
-    input_dir = work_dir / "input"
-    output_dir = work_dir / bundle.manifest.outputs.watch_dir
+    # work_dir is the caller's per-granule directory; the caller owns its
+    # cleanup. We run inside a scratch subdir and stage outputs into
+    # work_dir/output, so the caller's single rmtree(work_dir) reaps the run
+    # scratch and the staged outputs alike — no orphan tree left behind.
+    run_dir = Path(tempfile.mkdtemp(prefix="run-", dir=work_dir))
+    input_dir = run_dir / "input"
+    output_dir = run_dir / bundle.manifest.outputs.watch_dir
     input_dir.mkdir(parents=True)
     output_dir.mkdir(parents=True)
 
@@ -217,7 +220,7 @@ async def run_bundle(
             bundle,
             granule_id=granule_id,
             batch_id=batch_id,
-            work_dir=work_dir,
+            work_dir=run_dir,
             input_dir=input_dir,
             output_dir=output_dir,
             meta=meta,
@@ -262,8 +265,9 @@ async def run_bundle(
         if not outputs:
             return ProcessResult(False, [], stdout, stderr + "\n[no outputs produced]", proc.returncode or 0)
 
-        # Copy outputs out of work_dir before cleanup, so caller keeps them.
-        kept_root = work_root / "_staged" / safe_segment(granule_id)
+        # Move outputs into the caller-owned work_dir before dropping the run
+        # scratch, so they survive until the caller reaps work_dir post-upload.
+        kept_root = work_dir / "output"
         kept_root.mkdir(parents=True, exist_ok=True)
         kept = []
         for p in outputs:
@@ -276,4 +280,4 @@ async def run_bundle(
         return ProcessResult(True, kept, stdout, stderr, 0)
 
     finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        shutil.rmtree(run_dir, ignore_errors=True)

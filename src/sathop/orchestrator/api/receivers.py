@@ -27,7 +27,7 @@ from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, Receiver, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ._helpers import get_or_404, object_is_pullable
+from ._helpers import all_objects_acked, get_or_404, object_is_pullable
 from ._transition import apply_transition
 from .one_shot import consume_one_shot_signal, record_version_flap, signal_one_shot
 
@@ -147,12 +147,10 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
     obj.acked_at = now
     obj.acked_by = req.receiver_id
 
-    siblings = (
-        (await s.execute(select(GranuleObject).where(GranuleObject.granule_id == obj.granule_id)))
-        .scalars()
-        .all()
-    )
-    if g is not None and all(o.acked_at is not None for o in siblings):
+    # Flush so the just-set acked_at is visible to the aggregate count below.
+    await s.flush()
+    all_acked = await s.scalar(select(all_objects_acked()).where(GranuleObject.granule_id == obj.granule_id))
+    if g is not None and all_acked:
         await apply_transition(
             s,
             g,

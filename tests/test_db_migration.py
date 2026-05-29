@@ -9,7 +9,7 @@ import sqlite3
 
 from sqlalchemy import create_engine, insert, inspect, text
 
-from sathop.orchestrator.db import Base, Worker, _ensure_columns
+from sathop.orchestrator.db import Base, Worker, _drop_obsolete_tables, _ensure_columns
 
 
 def test_ensure_columns_drops_obsolete_not_null_column(tmp_path):
@@ -35,5 +35,25 @@ def test_ensure_columns_drops_obsolete_not_null_column(tmp_path):
         with engine.begin() as conn:
             conn.execute(insert(Worker).values(worker_id="w1", version="0.6.6", capacity=4))
             assert conn.execute(text("SELECT count(*) FROM workers")).scalar() == 1
+    finally:
+        engine.dispose()
+
+
+def test_drop_obsolete_tables_sheds_granule_progress(tmp_path):
+    """Existing DBs carry the retired `granule_progress` table (progress is now
+    in-memory). Startup must drop it so dead rows don't linger forever."""
+    db = tmp_path / "legacy.db"
+    raw = sqlite3.connect(str(db))
+    raw.execute("CREATE TABLE granule_progress (id INTEGER PRIMARY KEY, granule_id TEXT, step TEXT)")
+    raw.execute("INSERT INTO granule_progress (granule_id, step) VALUES ('g1', 'read')")
+    raw.commit()
+    raw.close()
+
+    engine = create_engine(f"sqlite:///{db}")
+    try:
+        with engine.begin() as conn:
+            Base.metadata.create_all(conn)  # model no longer declares granule_progress
+            _drop_obsolete_tables(conn)
+            assert "granule_progress" not in inspect(conn).get_table_names()
     finally:
         engine.dispose()

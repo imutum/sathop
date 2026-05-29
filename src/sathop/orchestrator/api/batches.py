@@ -5,17 +5,17 @@ from __future__ import annotations
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.bundle_manifest import InputsSchema, parse_shared_files
+from sathop.shared.bundle_ref import parse_bundle_ref
 from sathop.shared.protocol import (
     BatchCreate,
     BatchSummary,
     GranuleBulkAdd,
     GranuleCreate,
     GranuleRow,
-    parse_bundle_ref,
 )
 from sathop.shared.state_machine import (
     CANCELLABLE_STATES,
@@ -34,14 +34,13 @@ from ..db import (
     Bundle,
     Granule,
     GranuleObject,
-    GranuleProgress,
-    GranuleStageTiming,
     SharedFile,
     session,
     utcnow,
 )
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from ..reaping import reap_granules
 from ._helpers import get_or_404, object_is_exhausted
 from ._transition import apply_transition
 from .batch_readmodels import (
@@ -51,7 +50,7 @@ from .batch_readmodels import (
     summary,
     summary_just_created,
 )
-from .progress import evict_granule
+from .progress import evict_granule, evict_granules
 
 router = APIRouter(prefix="/batches", tags=["batches"], dependencies=[Depends(require_token)])
 
@@ -287,7 +286,7 @@ async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depen
         now=utcnow(),
         conflict_message=lambda g, _e: f"cannot cancel granule in state {g.state!r}",
     )
-    evict_granule(granule_id, batch_id)
+    evict_granule(granule_id)
     await log(
         s, "admin", f"cancelled granule {granule_id}", level="warn", granule_id=granule_id, batch_id=batch_id
     )
@@ -334,7 +333,7 @@ async def cancel_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dic
             now=now,
             on_conflict="skip",
         )
-        evict_granule(g.granule_id, batch_id)
+        evict_granule(g.granule_id)
     if rows:
         await log(s, "admin", f"cancelled batch {batch_id}: {len(rows)} granules blacklisted", level="warn")
     await commit_and_publish(s, Scope.BATCHES if rows else None)
@@ -348,7 +347,7 @@ async def delete_batch(
     s: AsyncSession = Depends(session),
 ) -> dict:
     """Hard-delete a batch and every row that references it (granules,
-    objects, progress checkpoints, stage timings, scoped events).
+    objects, stage timings, scoped events).
 
     Refuses by default if any granule is mid-flight on a worker — cancel the
     batch first so the worker drops the lease cleanly, or pass `?force=true`
@@ -375,17 +374,8 @@ async def delete_batch(
 
     granule_ids = await _batch_granule_ids(s, batch_id)
 
-    counts = {"granules": 0, "objects": 0, "progress": 0, "stage_timings": 0, "events": 0}
-    if granule_ids:
-        for table, key in (
-            (GranuleObject, "objects"),
-            (GranuleProgress, "progress"),
-            (GranuleStageTiming, "stage_timings"),
-        ):
-            r = await s.execute(delete(table).where(table.granule_id.in_(granule_ids)))
-            counts[key] = getattr(r, "rowcount", 0) or 0
-        r = await s.execute(delete(Granule).where(Granule.batch_id == batch_id))
-        counts["granules"] = getattr(r, "rowcount", 0) or 0
+    counts = await reap_granules(s, granule_ids)
+    counts["events"] = 0
 
     await s.delete(b)
     await log(
@@ -397,4 +387,5 @@ async def delete_batch(
     await commit_and_publish(s, Scope.BATCHES)
     if granule_ids:
         counts["events"] = event_store.evict_by_granule_ids(set(granule_ids))
+        evict_granules(granule_ids)
     return {"ok": True, **counts}
