@@ -45,6 +45,7 @@ from .worker_leases import (
     LEASE_DURATION,
     claim_pending_granules,
     lease_limit,
+    reclaim_inactive_leases,
     renew_worker_leases,
     revoke_worker_leases,
 )
@@ -133,6 +134,16 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     live_changed = apply_worker_heartbeat(w, req, now)
 
     flapped = await record_version_flap(s, w, new_version=req.version, source=req.worker_id, kind="worker")
+    # Reclaim orch-restart orphans BEFORE renewing, so renew only touches leases the
+    # worker still actually holds. Skip when active_granule_ids is absent (None) —
+    # a pre-reconcile worker, whose leases we must not revoke blindly.
+    reclaimed = (
+        await reclaim_inactive_leases(s, req.worker_id, req.active_granule_ids, now)
+        if req.active_granule_ids is not None
+        else 0
+    )
+    if reclaimed:
+        await log(s, req.worker_id, f"reclaimed {reclaimed} orphaned lease(s) (heartbeat reconcile)")
     renewed = await renew_worker_leases(s, req.worker_id, now)
     revoked = await revoked_active_granules(s, req)
     update_requested = await consume_one_shot_signal(
@@ -142,8 +153,8 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         s, w, "gc_requested_at", source=w.worker_id, message="cache GC signal delivered to worker"
     )
 
-    if flapped or renewed or update_requested or gc_requested or live_changed:
-        await commit_and_publish(s, Scope.WORKERS)
+    if flapped or reclaimed or renewed or update_requested or gc_requested or live_changed:
+        await commit_and_publish(s, Scope.WORKERS, Scope.BATCHES if reclaimed else None)
 
     return WorkerHeartbeatResponse(
         download_concurrency=w.download_concurrency,

@@ -168,3 +168,48 @@ async def revoke_worker_leases(s: AsyncSession, worker_id: str, now) -> int:
         )
         evict_granule(granule.granule_id)
     return len(rows)
+
+
+async def reclaim_inactive_leases(
+    s: AsyncSession,
+    worker_id: str,
+    active_ids: list[str],
+    now,
+    grace_sec: int = 60,
+) -> int:
+    """Reclaim leases the orchestrator still pins to `worker_id` that the worker's
+    reported active set no longer covers — orphans from an orchestrator restart:
+    a state event was swallowed during the restart window, the worker hit a 409 on
+    the next event and dropped the granule (LeaseRevoked), but the orch kept the
+    lease and the heartbeat renewed it forever, wedging the granule with no worker
+    behind it. The grace window on `updated_at` protects a just-leased granule the
+    worker hasn't started reporting in `active_ids` yet (a granule it is actually
+    tracking — even blocked on a semaphore — is already in the set).
+
+    An orphaned lease is effectively an expired one, so reclaim it like the sweeper:
+    straight back to PENDING with NO retry_count bump (unlike operator revoke). The
+    granule didn't fail — penalising its retry budget would let repeated orch
+    restarts silently blacklist healthy work."""
+    sel = (
+        select(Granule.granule_id)
+        .where(Granule.leased_by == worker_id)
+        .where(Granule.state.in_(LEASED_STATES))
+        .where(Granule.updated_at < now - timedelta(seconds=grace_sec))
+    )
+    if active_ids:
+        sel = sel.where(Granule.granule_id.not_in(active_ids))
+    ids = (await s.execute(sel)).scalars().all()
+    if not ids:
+        return 0
+    # Re-assert the predicate at write time (sweeper carve-out, ADR-0002) so a
+    # granule a concurrent event advanced between SELECT and UPDATE is left alone.
+    result = await s.execute(
+        update(Granule)
+        .where(Granule.granule_id.in_(ids))
+        .where(Granule.leased_by == worker_id)
+        .where(Granule.state.in_(LEASED_STATES))
+        .values(state=GranuleState.PENDING.value, leased_by=None, lease_expires_at=None, updated_at=now)
+    )
+    for gid in ids:
+        evict_granule(gid)
+    return getattr(result, "rowcount", 0) or 0

@@ -92,11 +92,13 @@ class WorkerHeartbeat(BaseModel):
     # disk-watermark backpressure). Surfaces to operators so an "online but
     # idle" worker doesn't look like the orchestrator is starving it.
     paused: bool = False
-    # Granule IDs the worker currently has an active asyncio handler task for.
-    # Orchestrator diff-checks against DB (state in LEASED_STATES, leased_by =
-    # this worker) and returns any stragglers as `revoked_granule_ids` so the
-    # worker can cancel ghost work after a batch/granule cancel.
-    active_granule_ids: list[str] = Field(default_factory=list)
+    # Granule IDs the worker currently has an active asyncio handler task for
+    # (includes ones blocked on a semaphore, i.e. still 'queued'). Two-way reconcile:
+    # the orchestrator returns active IDs it no longer credits to this worker as
+    # `revoked_granule_ids` (worker drops ghost work), AND reclaims its own leases
+    # NOT in this set (orch-restart orphans). None = field absent (pre-reconcile
+    # worker) → orchestrator skips the reclaim half rather than risk revoking real work.
+    active_granule_ids: list[str] | None = None
 
 
 class ReceiverRegister(BaseModel):

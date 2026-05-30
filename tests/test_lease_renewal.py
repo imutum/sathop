@@ -344,3 +344,66 @@ async def test_reregister_scopes_reclaim_to_self(client):
         g = await s.get(Granule, "g-w2")
         assert g.state == GranuleState.DOWNLOADING.value
         assert g.leased_by == "w2"
+
+
+# ─── Heartbeat reconcile: reclaim orch-restart orphans ────────────────────
+
+
+async def _age_granules(gids: list[str], minutes: int) -> None:
+    async with orch_db._session_maker() as s:
+        for gid in gids:
+            (await s.get(Granule, gid)).updated_at = utcnow() - timedelta(minutes=minutes)
+        await s.commit()
+
+
+async def test_heartbeat_reclaims_orphaned_lease(client):
+    """Granule leased to w1, frozen (old updated_at), but NOT in the worker's
+    reported active set → an orch-restart orphan the heartbeat reclaims to PENDING."""
+    gids = await _seed_worker_with_leased_granules("w1")
+    await _age_granules(gids, minutes=5)  # older than the reclaim grace window
+    payload = _heartbeat_payload("w1")
+    payload["active_granule_ids"] = []  # worker reports nothing in-flight
+    assert client.post("/api/workers/heartbeat", json=payload).status_code == 200
+    async with orch_db._session_maker() as s:
+        for gid in gids:
+            g = await s.get(Granule, gid)
+            assert g.state == GranuleState.PENDING.value, (gid, g.state)
+            assert g.leased_by is None
+            assert g.retry_count == 0  # reclaim is sweeper-style: no retry penalty
+
+
+async def test_heartbeat_does_not_reclaim_active_granule(client):
+    """A granule the worker still actively holds (in active set) is never reclaimed,
+    even if its state hasn't advanced for a while (e.g. a long download)."""
+    gids = await _seed_worker_with_leased_granules("w1")
+    await _age_granules(gids, minutes=5)
+    payload = _heartbeat_payload("w1")
+    payload["active_granule_ids"] = gids
+    client.post("/api/workers/heartbeat", json=payload)
+    async with orch_db._session_maker() as s:
+        for gid in gids:
+            assert (await s.get(Granule, gid)).leased_by == "w1"
+
+
+async def test_heartbeat_does_not_reclaim_fresh_lease(client):
+    """A just-leased granule not yet in the worker's active set must survive — the
+    grace window on updated_at guards the lease→handler-report gap."""
+    gids = await _seed_worker_with_leased_granules("w1")  # updated_at defaults to now
+    payload = _heartbeat_payload("w1")
+    payload["active_granule_ids"] = []
+    client.post("/api/workers/heartbeat", json=payload)
+    async with orch_db._session_maker() as s:
+        for gid in gids:
+            assert (await s.get(Granule, gid)).leased_by == "w1"
+
+
+async def test_heartbeat_without_active_ids_skips_reclaim(client):
+    """A pre-reconcile worker omits active_granule_ids (None) → the orchestrator
+    must not reclaim its leases, or it would revoke real in-flight work."""
+    gids = await _seed_worker_with_leased_granules("w1")
+    await _age_granules(gids, minutes=5)
+    payload = _heartbeat_payload("w1")  # no active_granule_ids key → None
+    client.post("/api/workers/heartbeat", json=payload)
+    async with orch_db._session_maker() as s:
+        for gid in gids:
+            assert (await s.get(Granule, gid)).leased_by == "w1"
