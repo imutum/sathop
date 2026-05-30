@@ -181,7 +181,10 @@ while true; do
   [ -n "$STOPPING" ] && exit 0
   SLOT="$(slot_dir "$RUN_VER")"
   echo "[entrypoint] Starting sathop.$ROLE (v$RUN_VER, candidate=$CANDIDATE) ..."
-  cd "$SLOT"
+  # Run from REPO_DIR (not the slot): components resolve ./data relative to CWD,
+  # so the data dir must stay fixed across versions. The slot supplies only the
+  # venv (on PATH); its editable install resolves the right per-version src.
+  cd "$REPO_DIR"
   export PATH="$SLOT/.venv/bin:$BASE_PATH"
   START_TS=$(date +%s)
   set +e
