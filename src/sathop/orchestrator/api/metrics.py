@@ -121,7 +121,7 @@ async def _collect(s: AsyncSession) -> bytes:
     }
     # deleted = cumulative delivered, from the persistent counter (avoids scanning
     # the huge terminal deleted rows). Still emitted as sathop_granules{state="deleted"}.
-    state_counts["deleted"] = int(await s.scalar(select(func.coalesce(func.sum(Batch.delivered_count), 0))))
+    state_counts["deleted"] = int(await s.scalar(select(func.coalesce(func.sum(Batch.delivered_count), 0))) or 0)
     for st in GranuleState:
         g_granules.labels(state=st.value).set(state_counts.get(st.value, 0))
 

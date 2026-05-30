@@ -62,7 +62,7 @@ async def admin_overview(s: AsyncSession, *, now: datetime) -> dict[str, Any]:
     }
     # deleted = cumulative delivered, read from the persistent counter instead of
     # COUNTing the (huge, terminal) deleted rows.
-    state_counts["deleted"] = int(await s.scalar(select(func.coalesce(func.sum(Batch.delivered_count), 0))))
+    state_counts["deleted"] = int(await s.scalar(select(func.coalesce(func.sum(Batch.delivered_count), 0))) or 0)
     stuck = {
         state: count
         for state, count in (
