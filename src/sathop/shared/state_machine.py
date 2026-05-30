@@ -261,6 +261,18 @@ class ObjectAcked(BaseModel):
     granule_id: str
 
 
+class ReconcileOrphanDeleted(BaseModel):
+    """Orchestrator backstop for the acked→deleted gap. An ACKED granule whose
+    uploading worker is gone (removed / purged / restarted under a fresh id)
+    never receives a worker DeleteConfirmed, so it strands in ACKED forever. The
+    data already reached the receiver (ACKED ⟹ acked) and the worker's local copy
+    left with it, so the orchestrator self-confirms the deletion — same terminal
+    shape as DeleteConfirmed. Emitted only by the background orphan sweep; never
+    deserialised from the wire."""
+
+    granule_id: str
+
+
 # Union of every event `apply()` handles — wire-format GranuleEvent plus the
 # five orchestrator-internal triggers. `apply_transition()` types its `event`
 # parameter against this so internal-event call sites (worker_leases.claim /
@@ -275,6 +287,7 @@ AnyGranuleEvent = (
     | RetryGranule
     | RequeueGranule
     | ObjectAcked
+    | ReconcileOrphanDeleted
 )
 
 
@@ -519,6 +532,19 @@ def apply(
                 new_state=GranuleState.ACKED,
                 fields={"updated_at": now},
                 stage_rows=(stage,) if stage is not None else (),
+            )
+        case ReconcileOrphanDeleted():
+            # Orchestrator self-confirm of an orphaned ACKED granule. Guarded to
+            # ACKED so a concurrent worker DeleteConfirmed that already moved it to
+            # DELETED makes this a skip (on_conflict="skip" at the call site). Same
+            # terminal shape as DeleteConfirmed — objects_deleted_at routes it
+            # through the rowcount-gated delete path, counted exactly once.
+            if snap.state != GranuleState.ACKED:
+                raise StateConflict(f"orphan-reconcile not accepted in state {snap.state.value!r}")
+            return TransitionResult(
+                new_state=GranuleState.DELETED,
+                fields={"updated_at": now},
+                objects_deleted_at=now,
             )
         case _:
             raise StateConflict(f"unknown event: {type(event).__name__}")

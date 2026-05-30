@@ -35,6 +35,13 @@ class Settings:
     # coarse "something's wrong" alarm — live bottleneck reading is done off the
     # per-stage WIP numbers, not this threshold.
     stuck_age_hours: float = float(os.getenv("SATHOP_STUCK_AGE_HOURS", "6"))
+    # acked→deleted backstop: how long a worker's heartbeat may lapse before the
+    # orchestrator treats it as gone and self-confirms the deletion of any ACKED
+    # granule it still owns (the worker janitor would otherwise do it). Must comfortably
+    # exceed a normal restart/deploy window so a worker mid-restart keeps its own
+    # cleanup right. 0 = judge liveness by removed_at / row existence only (most
+    # conservative — a stale-but-registered worker still counts as live).
+    acked_orphan_grace_sec: int = int(os.getenv("SATHOP_ACKED_ORPHAN_GRACE_SEC", "600"))
 
 
 settings = Settings()
