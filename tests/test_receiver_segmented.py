@@ -90,17 +90,9 @@ def _make_receiver(
         pull_segment_min_bytes=threshold,
     )
     r = Receiver(s)
-    captured: list[AckReport] = []
-
-    class StubClient:
-        async def ack(self, req: AckReport) -> None:
-            captured.append(req)
-
-        async def aclose(self) -> None:
-            pass
-
-    r.client = StubClient()  # type: ignore[assignment]
-    return r, captured
+    # Single-fetch tests with no flusher running: the ack report sits in the
+    # buffer queue — assert on it directly (see test_receiver_main).
+    return r, r._acks._q
 
 
 # ─── byte-range arithmetic ────────────────────────────────────────────────

@@ -20,9 +20,16 @@ from pathlib import Path
 
 import pytest
 
+from sathop.receiver.ack_buffer import AckBuffer
 from sathop.receiver.config import Settings
 from sathop.receiver.runtime import Receiver
-from sathop.shared.protocol import AckReport, PullItem, PullRequest, PullResponse
+from sathop.shared.protocol import AckBatch, AckReport, PullItem, PullRequest, PullResponse
+
+
+async def _pump(r: Receiver) -> None:
+    """Run the pull pipeline and the ack flusher together, the way run() does —
+    so buffered acks actually reach the stub's /ack/batch."""
+    await asyncio.gather(r._pull_loop(), r._acks.loop())
 
 
 def _serve_static(payload: bytes, *, slow_path: str | None = None, slow_delay: float = 0.0):
@@ -64,8 +71,9 @@ class _StubOrchClient:
         self._idx += 1
         return PullResponse(items=items)
 
-    async def ack(self, req: AckReport) -> None:
-        self.acks.append(req)
+    async def ack_batch(self, batch: AckBatch):
+        self.acks.extend(batch.acks)
+        return None
 
     async def aclose(self) -> None:
         pass
@@ -91,6 +99,7 @@ def _make_receiver(
     r = Receiver(s)
     stub = _StubOrchClient(pull_responses or [])
     r.client = stub  # type: ignore[assignment]
+    r._acks = AckBuffer(stub)  # buffer must flush to the stub, not the real client
     return r, stub
 
 
@@ -125,7 +134,7 @@ async def test_pipeline_drains_all_offered_items(tmp_path):
         # Two RPCs: first 5 items, then [] forever.
         items = [_item(i, payload, port) for i in range(5)]
         r, stub = _make_receiver(tmp_path, concurrent_pulls=2, pull_responses=[items, []])
-        task = asyncio.create_task(r._pull_loop())
+        task = asyncio.create_task(_pump(r))
         try:
             await _drain_until(stub, 5)
             assert {a.object_id for a in stub.acks} == {0, 1, 2, 3, 4}
@@ -161,7 +170,7 @@ async def test_pipeline_does_not_stall_siblings_on_straggler(tmp_path):
         ]
         r, stub = _make_receiver(tmp_path, concurrent_pulls=2, pull_responses=[items, []])
         t0 = time.monotonic()
-        task = asyncio.create_task(r._pull_loop())
+        task = asyncio.create_task(_pump(r))
         try:
             await _drain_until(stub, 4, timeout=3.0)
             elapsed = time.monotonic() - t0
@@ -203,7 +212,7 @@ async def test_pipeline_dedups_inflight_object_ids(tmp_path):
         # re-offer. Without dedup we'd ack 6 times (3 fetched + 3 redundant);
         # with dedup, exactly 3.
         r, stub = _make_receiver(tmp_path, concurrent_pulls=2, pull_responses=[items, items, []])
-        task = asyncio.create_task(r._pull_loop())
+        task = asyncio.create_task(_pump(r))
         try:
             await _drain_until(stub, 3)
             # Wait a tick to make sure the second-RPC re-offer doesn't sneak
@@ -242,7 +251,7 @@ async def test_pipeline_worker_survives_bad_object(tmp_path):
         )
         items = [bad, _item(1, payload, port), _item(2, payload, port)]
         r, stub = _make_receiver(tmp_path, concurrent_pulls=2, pull_responses=[items, []])
-        task = asyncio.create_task(r._pull_loop())
+        task = asyncio.create_task(_pump(r))
         try:
             await _drain_until(stub, 3)
             by_id = {a.object_id: a for a in stub.acks}

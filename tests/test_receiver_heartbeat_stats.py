@@ -107,9 +107,6 @@ def _make_recv(tmp_path: Path) -> ReceiverAgent:
     r = ReceiverAgent(s)
 
     class Stub:
-        async def ack(self, _: AckReport) -> None:
-            pass
-
         async def aclose(self) -> None:
             pass
 

@@ -17,6 +17,7 @@ from sathop.shared.periodic import run_periodic
 from sathop.shared.protocol import AckReport, PullItem, PullRequest, ReceiverHeartbeat, ReceiverRegister
 
 from . import puller
+from .ack_buffer import AckBuffer
 from .agent import OrchestratorClient
 from .config import Settings
 from .health import HealthServer
@@ -100,6 +101,7 @@ class Receiver:
         self._ssl_ctx = self._init_ssl_context()
         self._pull_client: httpx.AsyncClient = self._build_pull_client()
         self._health = HealthServer(s.health_port)
+        self._acks = AckBuffer(self.client)
         self._draining = False
         self._inflight: set[int] = set()
 
@@ -193,6 +195,7 @@ class Receiver:
 
         def create_tasks(tg: asyncio.TaskGroup) -> None:
             tg.create_task(self._heartbeat_loop())
+            tg.create_task(self._acks.loop())
             tg.create_task(self._pull_loop())
             tg.create_task(self._drain_watchdog_loop())
             tg.create_task(self._health.serve())
@@ -293,11 +296,9 @@ class Receiver:
     async def _fetch_one_inner(self, item: PullItem) -> None:
         self.stats.begin()
         outcome = await self._pull_one(item)
-        try:
-            await self._ack_outcome(item, outcome)
-        finally:
-            self._log_outcome(item, outcome)
-            self.stats.end(outcome.pulled_bytes)
+        self._ack_outcome(item, outcome)  # non-blocking enqueue
+        self._log_outcome(item, outcome)
+        self.stats.end(outcome.pulled_bytes)
 
     async def _pull_one(self, item: PullItem) -> PullOutcome:
         dest = self.s.storage_dir / item.object_key
@@ -310,22 +311,20 @@ class Receiver:
         dest.unlink(missing_ok=True)
         return PullOutcome.mismatch(item, sha, size)
 
-    async def _ack_outcome(self, item: PullItem, outcome: PullOutcome) -> None:
-        # Ack is best-effort: a network-failed ack of either flavour just
-        # means the orchestrator will re-offer this object on the next pull,
-        # and we converge after at most max_pull_failures rounds. Propagating
-        # would crash the pull worker task — much worse than a stale offer.
-        report = AckReport(
-            receiver_id=self.s.receiver_id,
-            object_id=item.object_id,
-            sha256=outcome.sha,
-            success=outcome.success,
-            error=outcome.error,
+    def _ack_outcome(self, item: PullItem, outcome: PullOutcome) -> None:
+        # Buffered (non-blocking): the AckBuffer coalesces per-object reports into
+        # batched POSTs and retries on a flush blip. Ack stays best-effort — a
+        # dropped ack just re-offers the object on the next pull, converging after
+        # at most max_pull_failures rounds — so this never blocks the pull worker.
+        self._acks.enqueue(
+            AckReport(
+                receiver_id=self.s.receiver_id,
+                object_id=item.object_id,
+                sha256=outcome.sha,
+                success=outcome.success,
+                error=outcome.error,
+            )
         )
-        try:
-            await self.client.ack(report)
-        except Exception as e:
-            log.warning("ack for %s failed: %s", item.object_key, e)
 
     @staticmethod
     def _log_outcome(item: PullItem, outcome: PullOutcome) -> None:

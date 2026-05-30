@@ -174,3 +174,68 @@ async def test_success_ack_clears_offering_independent_of_counter(client):
     assert r.json()["ok"] is True
     r = client.post("/api/receivers/pull", json={"receiver_id": "r1", "limit": 10})
     assert r.json()["items"] == []
+
+
+# ─── batched ingress (/ack/batch) ──────────────────────────────────────────
+
+
+def _ack(object_id: int, *, success: bool = True, sha256: str = "abc", error: str | None = None) -> dict:
+    return {"receiver_id": "r1", "object_id": object_id, "sha256": sha256, "success": success, "error": error}
+
+
+async def test_batch_acks_all_objects_and_transitions_granule(client):
+    """Both of a granule's objects acked in ONE batch → UPLOADED→ACKED in the
+    same transaction (batched all_objects_acked gate)."""
+    id1, id2 = await _seed_two_objects()
+    r = client.post("/api/receivers/ack/batch", json={"acks": [_ack(id1), _ack(id2)]})
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    assert await _granule_state() == GranuleState.ACKED.value
+
+
+async def test_batch_partial_ack_leaves_granule_uploaded(client):
+    id1, _id2 = await _seed_two_objects()
+    r = client.post("/api/receivers/ack/batch", json={"acks": [_ack(id1)]})
+    assert r.status_code == 200
+    assert await _granule_state() == GranuleState.UPLOADED.value
+
+
+async def test_batch_failed_acks_increment_and_retire(client):
+    """Three failures for the same object in one batch (applied in list order)
+    exhaust it — no longer offered."""
+    obj_id = await _seed()
+    r = client.post(
+        "/api/receivers/ack/batch",
+        json={"acks": [_ack(obj_id, success=False, sha256="", error=f"e{i}") for i in range(3)]},
+    )
+    assert r.status_code == 200, r.text
+    assert client.post("/api/receivers/pull", json={"receiver_id": "r1", "limit": 10}).json()["items"] == []
+
+
+async def test_batch_skips_unknown_object_applies_rest(client):
+    """A missing object_id is skipped (never fails the batch); the real one acks."""
+    obj_id = await _seed()
+    r = client.post("/api/receivers/ack/batch", json={"acks": [_ack(999_999), _ack(obj_id)]})
+    assert r.status_code == 200, r.text
+    assert await _granule_state() == GranuleState.ACKED.value
+
+
+async def test_batch_mixed_success_and_failure(client):
+    """One success + one failure across two objects in a single batch: the
+    success acks (no transition — other object still pending), the failure bumps
+    its counter."""
+    id1, id2 = await _seed_two_objects()
+    r = client.post(
+        "/api/receivers/ack/batch",
+        json={"acks": [_ack(id1), _ack(id2, success=False, sha256="", error="boom")]},
+    )
+    assert r.status_code == 200, r.text
+    assert await _granule_state() == GranuleState.UPLOADED.value  # id2 not acked
+    async with orch_db._session_maker() as s:
+        assert (await s.get(GranuleObject, id2)).failed_pulls == 1
+
+
+async def test_batch_empty_is_noop(client):
+    r = client.post("/api/receivers/ack/batch", json={"acks": []})
+    assert r.status_code == 200
+    assert r.json()["ok"] is True

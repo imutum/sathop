@@ -8,6 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
+    AckBatch,
+    AckBatchResponse,
     AckReport,
     PullItem,
     PullRequest,
@@ -170,6 +172,88 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
     await log(s, req.receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id, batch_id=bid)
     await commit_and_publish(s, Scope.BATCHES)
     return {"ok": True}
+
+
+async def _apply_ack(s: AsyncSession, a: AckReport, obj: GranuleObject, bid: str | None, now) -> bool:
+    """Apply one ack to its (already-loaded) object. Returns True if it became
+    acked (so the caller checks that granule for UPLOADED→ACKED). Mirrors the
+    single /ack body minus the per-call commit; on a non-fatal issue (failed
+    pull, sha mismatch) it logs and returns False — never raises."""
+    if not a.success:
+        obj.failed_pulls = (obj.failed_pulls or 0) + 1
+        exhausted = obj.failed_pulls >= settings.max_pull_failures
+        await log(
+            s,
+            a.receiver_id,
+            f"pull failed ({obj.failed_pulls}/{settings.max_pull_failures}): {a.error}"
+            + (" — giving up, no further offers" if exhausted else ""),
+            level="error" if exhausted else "warn",
+            granule_id=obj.granule_id,
+            batch_id=bid,
+        )
+        return False
+    if a.sha256 != obj.sha256:
+        await log(
+            s,
+            a.receiver_id,
+            f"sha256 mismatch object_id={a.object_id}",
+            level="error",
+            granule_id=obj.granule_id,
+            batch_id=bid,
+        )
+        return False
+    obj.acked_at = now
+    obj.acked_by = a.receiver_id
+    await log(s, a.receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id, batch_id=bid)
+    return True
+
+
+@router.post("/ack/batch", response_model=AckBatchResponse)
+async def ack_batch(req: AckBatch, s: AsyncSession = Depends(session)) -> AckBatchResponse:
+    """Batched twin of /ack: apply a receiver's buffered ack reports in ONE
+    transaction, paying the per-request cost once. Objects + granules are bulk-
+    loaded; acks apply in list order; granules whose objects all become acked
+    transition UPLOADED→ACKED in the same commit. A missing object or a
+    sha-mismatched success is skipped (logged) — never fails the batch."""
+    if not req.acks:
+        return AckBatchResponse()
+    oids = list({a.object_id for a in req.acks})
+    objs = (await s.execute(select(GranuleObject).where(GranuleObject.id.in_(oids)))).scalars().all()
+    by_id = {o.id: o for o in objs}
+    gids = list({o.granule_id for o in objs})
+    g_by_id = {
+        g.granule_id: g
+        for g in (await s.execute(select(Granule).where(Granule.granule_id.in_(gids)))).scalars().all()
+    }
+    now = utcnow()
+    acked_granules: set[str] = set()
+    for a in req.acks:
+        obj = by_id.get(a.object_id)
+        if obj is None:
+            continue
+        g = g_by_id.get(obj.granule_id)
+        if await _apply_ack(s, a, obj, g.batch_id if g else None, now):
+            acked_granules.add(obj.granule_id)
+
+    # Flush so the just-set acked_at is visible, then promote in one query every
+    # touched granule whose objects are now all acked (batched all_objects_acked).
+    if acked_granules:
+        await s.flush()
+        done = (
+            await s.execute(
+                select(GranuleObject.granule_id)
+                .where(GranuleObject.granule_id.in_(acked_granules))
+                .group_by(GranuleObject.granule_id)
+                .having(all_objects_acked())
+            )
+        ).scalars().all()
+        for gid in done:
+            g = g_by_id.get(gid)
+            if g is not None:
+                await apply_transition(s, g, ObjectAcked(granule_id=gid), now=now, on_conflict="skip")
+
+    await commit_and_publish(s, Scope.BATCHES)
+    return AckBatchResponse()
 
 
 @router.post("/{receiver_id}/restart")

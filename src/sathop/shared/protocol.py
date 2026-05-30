@@ -293,6 +293,19 @@ class AckReport(BaseModel):
     error: str | None = None
 
 
+class AckBatch(BaseModel):
+    """A receiver's buffered ack reports, flushed together so the orchestrator
+    pays its per-request cost once per batch instead of once per delivered
+    object — the delivery-path twin of WorkerEventBatch. Applied in list order;
+    a missing object or sha-mismatched success is skipped, never fails the batch."""
+
+    acks: list[AckReport]
+
+
+class AckBatchResponse(BaseModel):
+    ok: bool = True
+
+
 class DeletableGranule(BaseModel):
     granule_id: str
     object_keys: list[str]

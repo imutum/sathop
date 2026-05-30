@@ -13,6 +13,7 @@ import pytest
 
 from sathop.receiver.agent import OrchestratorClient
 from sathop.shared.protocol import (
+    AckBatch,
     AckReport,
     PullRequest,
     PullResponse,
@@ -117,18 +118,25 @@ async def test_pull_parses_response_into_pullresponse(captured_client):
     assert it.size == 100
 
 
-async def test_ack_posts_ackreport(captured_client):
+async def test_ack_batch_posts_to_batch_endpoint(captured_client):
     c, captured = captured_client
     try:
-        await c.ack(AckReport(receiver_id="r1", object_id=7, sha256="deadbeef", success=True))
+        await c.ack_batch(
+            AckBatch(
+                acks=[
+                    AckReport(receiver_id="r1", object_id=7, sha256="deadbeef", success=True),
+                    AckReport(receiver_id="r1", object_id=8, sha256="", success=False, error="boom"),
+                ]
+            )
+        )
     finally:
         await c.aclose()
 
-    assert captured[0].url.path == "/api/receivers/ack"
+    assert captured[0].url.path == "/api/receivers/ack/batch"
     body = json.loads(captured[0].content)
-    assert body["object_id"] == 7
-    assert body["success"] is True
-    assert body["error"] is None
+    assert [a["object_id"] for a in body["acks"]] == [7, 8]
+    assert body["acks"][0]["success"] is True
+    assert body["acks"][1]["error"] == "boom"
 
 
 async def test_401_raises_auth_token_invalid():

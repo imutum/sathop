@@ -38,7 +38,10 @@ def _serve(payload: bytes):
 
 
 def _make_receiver(tmp_path: Path) -> tuple[Receiver, list[AckReport]]:
-    """Build a Receiver with a stub OrchestratorClient that just captures acks."""
+    """Build a Receiver and expose its ack buffer's queue as the captured list.
+    `_fetch_one_inner` now enqueues (non-blocking) instead of POSTing, and these
+    tests drive a single fetch with no flusher running, so the report sits in the
+    buffer — assert on it directly."""
     settings = Settings(
         receiver_id="r1",
         orchestrator_url="http://orch.test",
@@ -49,17 +52,7 @@ def _make_receiver(tmp_path: Path) -> tuple[Receiver, list[AckReport]]:
         platform="linux",
     )
     r = Receiver(settings)
-    captured: list[AckReport] = []
-
-    class StubClient:
-        async def ack(self, req: AckReport) -> None:
-            captured.append(req)
-
-        async def aclose(self) -> None:
-            pass
-
-    r.client = StubClient()  # type: ignore[assignment]
-    return r, captured
+    return r, r._acks._q
 
 
 async def test_fetch_one_happy_path(tmp_path):
