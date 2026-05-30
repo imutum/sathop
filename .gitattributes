@@ -1,0 +1,3 @@
+# Container shell scripts must keep LF endings — a CRLF checkout on Windows
+# would corrupt the shebang and break the entrypoint inside the Linux image.
+*.sh text eol=lf
