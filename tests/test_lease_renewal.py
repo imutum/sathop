@@ -303,3 +303,44 @@ async def test_heartbeat_empty_active_returns_no_revokes(client):
     payload["active_granule_ids"] = []
     body = client.post("/api/workers/heartbeat", json=payload).json()
     assert body["revoked_granule_ids"] == []
+
+
+# ─── Re-register reclaims orphaned leases ─────────────────────────────────
+
+
+async def test_reregister_reclaims_orphaned_leases(client):
+    """A restarted worker re-registers with no in-flight state, so its still-pinned
+    leases are orphans the heartbeat would renew forever — register must reclaim
+    them to PENDING for re-lease."""
+    gids = await _seed_worker_with_leased_granules("w1")
+    r = client.post("/api/workers/register", json={"worker_id": "w1", "version": "t", "capacity": 4})
+    assert r.status_code == 200, r.text
+    async with orch_db._session_maker() as s:
+        for gid in gids:
+            g = await s.get(Granule, gid)
+            assert g.state == GranuleState.PENDING.value, (gid, g.state)
+            assert g.leased_by is None
+            assert g.lease_expires_at is None
+
+
+async def test_reregister_scopes_reclaim_to_self(client):
+    """w1's re-register must not disturb w2's leases."""
+    await _seed_worker_with_leased_granules("w1")
+    async with orch_db._session_maker() as s:
+        s.add(Worker(worker_id="w2", version="t", capacity=4))
+        s.add(
+            Granule(
+                granule_id="g-w2",
+                batch_id="b",
+                state=GranuleState.DOWNLOADING.value,
+                inputs=[],
+                leased_by="w2",
+                lease_expires_at=utcnow() + timedelta(minutes=30),
+            )
+        )
+        await s.commit()
+    client.post("/api/workers/register", json={"worker_id": "w1", "version": "t", "capacity": 4})
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, "g-w2")
+        assert g.state == GranuleState.DOWNLOADING.value
+        assert g.leased_by == "w2"

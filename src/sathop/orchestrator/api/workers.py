@@ -91,6 +91,7 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
     w = await s.get(Worker, req.worker_id)
     if w is not None and w.removed_at is not None:
         raise HTTPException(410, "worker has been removed — start a new worker with a different ID")
+    reclaimed = 0
     if w is None:
         w = Worker(
             worker_id=req.worker_id,
@@ -108,7 +109,15 @@ async def register(req: WorkerRegister, s: AsyncSession = Depends(session)) -> W
         if req.ca_pem is not None:
             w.ca_pem = req.ca_pem
         w.last_seen = utcnow()
-    await commit_and_publish(s, Scope.WORKERS)
+        # A re-registering worker is a fresh process with no in-flight state (register
+        # runs once at startup; a heartbeat-404 re-register hits the `w is None` branch
+        # instead). Any lease still pinned to it is therefore an orphan the heartbeat
+        # would otherwise renew forever — wedging those granules in a leased state.
+        # Reclaim them to PENDING so they get re-leased and reprocessed.
+        reclaimed = await revoke_worker_leases(s, req.worker_id, utcnow())
+        if reclaimed:
+            await log(s, req.worker_id, f"re-register reclaimed {reclaimed} orphaned lease(s)")
+    await commit_and_publish(s, Scope.WORKERS, Scope.BATCHES if reclaimed else None)
     return WorkerRegisterResponse()
 
 
