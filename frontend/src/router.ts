@@ -5,6 +5,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 // browser history, tab labels and screen readers reflect the active page.
 const childRoutes: RouteRecordRaw[] = [
   { path: "", name: "dashboard", component: () => import("./pages/Dashboard.vue"), meta: { title: "总览" } },
+  { path: "health", name: "health", component: () => import("./pages/Health.vue"), meta: { title: "健康诊断" } },
   { path: "settings", name: "settings", component: () => import("./pages/Settings.vue"), meta: { title: "设置" } },
   { path: "workers", name: "workers", component: () => import("./pages/Workers.vue"), meta: { title: "工作节点" } },
   { path: "receivers", name: "receivers", component: () => import("./pages/Receivers.vue"), meta: { title: "接收端" } },

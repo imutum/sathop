@@ -55,6 +55,7 @@ const NAV: NavGroup[] = [
   {
     label: "运维",
     items: [
+      { to: "/health", label: "健康诊断", icon: "health" },
       { to: "/events", label: "事件日志", icon: "events" },
       { to: "/settings", label: "设置", icon: "settings" },
     ],
