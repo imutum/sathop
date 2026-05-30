@@ -2,9 +2,8 @@
 import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
-import { API, type BatchSummary, type GranuleState } from "@/api";
+import { API, type BatchSummary } from "@/api";
 import { K } from "@/queryKeys";
-import { stateLabel } from "@/i18n";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,11 +11,10 @@ import CardSection from "@/components/CardSection.vue";
 import CopyButton from "@/components/CopyButton.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
-import Stat from "@/components/Stat.vue";
 import PipelineHealth from "@/features/batch/components/PipelineHealth.vue";
 import DeliveryStats from "@/features/batch/components/DeliveryStats.vue";
 import BatchProgressCell from "@/features/batch/components/BatchProgressCell.vue";
-import { pipelineSegments, pipelineTotals } from "@/features/batch/pipelineSummary";
+import { pipelineSegments } from "@/features/batch/pipelineSummary";
 import {
   completedTotal,
   errorTotal,
@@ -37,21 +35,6 @@ const bundles = useQuery({ queryKey: [...K.bundles], queryFn: API.bundles });
 const batches = useQuery({ queryKey: [...K.batches], queryFn: API.batches });
 
 const counts = computed(() => overview.data.value?.state_counts ?? {});
-const stuck = computed(() => overview.data.value?.stuck_by_state ?? {});
-const stuckTotal = computed(() => Object.values(stuck.value).reduce((a, b) => a + (b ?? 0), 0));
-const pipeline = computed(() => pipelineTotals(counts.value));
-const failed = computed(() => pipeline.value.failed);
-const inflightTotal = computed(() => pipeline.value.active);
-const done = computed(() => pipeline.value.done);
-
-const stuckHint = computed(() =>
-  stuckTotal.value > 0
-    ? Object.entries(stuck.value)
-        .map(([k, v]) => `${stateLabel(k as GranuleState)} ${v}`)
-        .join(" · ")
-    : "一切正常",
-);
-const stuckHours = computed(() => overview.data.value?.stuck_over_hours ?? 6);
 
 const activeWorkers = computed(
   () =>
@@ -123,48 +106,6 @@ const showOnboarding = computed(
     </Alert>
 
     <OnboardingCard v-if="showOnboarding" :status="onboardStatus" />
-
-    <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
-      <Stat
-        label="进行中"
-        :value="inflightTotal.toLocaleString()"
-        hint="lease ~ 待交付之间的活粒"
-        tooltip="待下载 / 下载中 / 待处理 / 处理中 / 待上传 / 上传中 / 待分发 七个阶段合计。不含 待分配 与 已交付。"
-        to="/batches"
-      >
-        <template #icon><Icon name="pulse" :size="18" /></template>
-      </Stat>
-      <Stat
-        label="已交付"
-        :value="done.toLocaleString()"
-        tone="good"
-        hint="已交付计数"
-        tooltip="receiver 已确认（acked）或已清理（deleted）——数据粒已交付。"
-        to="/batches"
-      >
-        <template #icon><Icon name="check" :size="18" /></template>
-      </Stat>
-      <Stat
-        label="异常"
-        :value="failed.toLocaleString()"
-        :tone="failed > 0 ? 'bad' : 'default'"
-        :hint="failed > 0 ? '点击查看错误事件' : '本周期无异常'"
-        tooltip="待重试 + 已拉黑数据粒之和。已拉黑表示达到自动重试上限，需手动重置。"
-        :to="failed > 0 ? '/events?level=error' : '/batches'"
-      >
-        <template #icon><Icon name="alert" :size="18" /></template>
-      </Stat>
-      <Stat
-        :label="`卡住 > ${stuckHours} 小时`"
-        :value="stuckTotal.toLocaleString()"
-        :tone="stuckTotal > 0 ? 'warn' : 'default'"
-        :hint="stuckHint"
-        tooltip="非终态、且最近一次状态推进发生在 N 小时之前的数据粒。点击进健康诊断查看逐粒明细。"
-        to="/health"
-      >
-        <template #icon><Icon name="settings" :size="18" /></template>
-      </Stat>
-    </div>
 
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
       <CardSection title="管道健康" description="各阶段当前驻留的数据粒分布" class="lg:col-span-2">
