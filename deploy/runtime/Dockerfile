@@ -14,7 +14,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates git curl \
+       ca-certificates git curl tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -36,4 +36,7 @@ RUN mkdir -p /app/data /app/repo /data/archive
 COPY deploy/runtime/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+# tini as PID 1: reaps zombies (worker forks bundle subprocesses) and forwards
+# SIGTERM to the supervisor, which re-forwards it to the running component so its
+# graceful-drain handler fires on `docker stop` instead of being SIGKILLed.
+ENTRYPOINT ["/usr/bin/tini", "--", "/app/entrypoint.sh"]

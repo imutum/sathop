@@ -135,6 +135,13 @@ sync_deps() {
 #   other = crash (exponential backoff, then retry)
 export PATH="$REPO_DIR/.venv/bin:$PATH"
 
+# tini (PID 1) forwards SIGTERM here on `docker stop`. Re-forward it to the
+# running component so its graceful-drain handler fires, and set STOPPING so a
+# TERM-initiated exit stops the container rather than looping into a restart.
+STOPPING=
+on_term() { STOPPING=1; [ -n "${CHILD:-}" ] && kill -TERM "$CHILD" 2>/dev/null || true; }
+trap on_term TERM INT
+
 BACKOFF=1
 MAX_BACKOFF=60
 STABLE_THRESHOLD=30
@@ -148,14 +155,29 @@ while true; do
   fi
   sync_deps
 
+  [ -n "$STOPPING" ] && exit 0   # TERM arrived during install — don't start
   echo "[entrypoint] Starting sathop.$ROLE ..."
   cd "$REPO_DIR"
   START_TS=$(date +%s)
   set +e
-  python -m "sathop.$ROLE.main"
-  EXIT_CODE=$?
+  # Background + wait (not a foreground exec) so on_term can deliver SIGTERM to
+  # the component for a graceful drain. `wait` returns 128+signo when a trapped
+  # signal interrupts it, so re-wait until the child actually exits.
+  python -m "sathop.$ROLE.main" &
+  CHILD=$!
+  [ -n "$STOPPING" ] && kill -TERM "$CHILD" 2>/dev/null || true  # TERM raced the start
+  wait "$CHILD"; EXIT_CODE=$?
+  # A trapped signal makes `wait` return early (128+signo) while the child keeps
+  # draining — re-wait until it's actually gone so EXIT_CODE is the child's own.
+  while kill -0 "$CHILD" 2>/dev/null; do wait "$CHILD"; EXIT_CODE=$?; done
+  CHILD=
   set -e
   ELAPSED=$(( $(date +%s) - START_TS ))
+
+  if [ -n "$STOPPING" ]; then
+    echo "[entrypoint] SIGTERM received — container stopping after drain."
+    exit 0
+  fi
 
   if [ "$EXIT_CODE" -eq 42 ]; then
     echo "[entrypoint] Process removed (exit 42) — stopping container."
