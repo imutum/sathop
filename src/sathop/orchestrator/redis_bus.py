@@ -40,7 +40,15 @@ def init() -> None:
     import redis
     import redis.asyncio as aredis
 
-    _sync = redis.from_url(settings.redis_url, decode_responses=True)
+    # The sync client runs on the request event loop (hot-path KV/list ops), so a
+    # stalled Redis must fail fast rather than block the loop indefinitely — the
+    # bounded reads keep Redis unsaturated, this timeout is the backstop.
+    _sync = redis.from_url(
+        settings.redis_url,
+        decode_responses=True,
+        socket_timeout=3,
+        socket_connect_timeout=3,
+    )
     _async = aredis.from_url(settings.redis_url, decode_responses=True)
     _sync.ping()
     log.info("redis bus enabled (workers=%d)", settings.orch_workers)

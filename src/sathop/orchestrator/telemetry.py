@@ -13,11 +13,14 @@ it lives off the state DB. Two backends behind one sync API:
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
 from . import redis_bus
 from .db import Receiver, Worker
+
+_log = logging.getLogger("sathop.orch.telemetry")
 
 # Generous safety-net TTL refreshed on every beat; liveness within the sweep
 # window is decided by last_seen, not by expiry. Truly-gone nodes that were
@@ -73,7 +76,12 @@ def _load_worker(s: str) -> WorkerTelemetry:
 def update_worker(worker_id: str, t: WorkerTelemetry) -> None:
     r = _r()
     if r is not None:
-        r.set(_wkey(worker_id), _dump_worker(t), ex=_TTL)
+        # Best-effort: a Redis hiccup must not 500 the heartbeat (which would
+        # stop lease renewal). DB columns are the stale fallback meanwhile.
+        try:
+            r.set(_wkey(worker_id), _dump_worker(t), ex=_TTL)
+        except Exception:
+            _log.warning("telemetry.update_worker: redis unavailable", exc_info=False)
         return
     _workers[worker_id] = t
 
@@ -81,8 +89,11 @@ def update_worker(worker_id: str, t: WorkerTelemetry) -> None:
 def get_worker(worker_id: str) -> WorkerTelemetry | None:
     r = _r()
     if r is not None:
-        raw = r.get(_wkey(worker_id))
-        return _load_worker(raw) if raw else None
+        try:
+            raw = r.get(_wkey(worker_id))
+            return _load_worker(raw) if raw else None
+        except Exception:
+            return None
     return _workers.get(worker_id)
 
 
@@ -139,7 +150,10 @@ def _load_receiver(s: str) -> ReceiverTelemetry:
 def update_receiver(receiver_id: str, t: ReceiverTelemetry) -> None:
     r = _r()
     if r is not None:
-        r.set(_rkey(receiver_id), _dump_receiver(t), ex=_TTL)
+        try:
+            r.set(_rkey(receiver_id), _dump_receiver(t), ex=_TTL)
+        except Exception:
+            _log.warning("telemetry.update_receiver: redis unavailable", exc_info=False)
         return
     _receivers[receiver_id] = t
 
@@ -147,8 +161,11 @@ def update_receiver(receiver_id: str, t: ReceiverTelemetry) -> None:
 def get_receiver(receiver_id: str) -> ReceiverTelemetry | None:
     r = _r()
     if r is not None:
-        raw = r.get(_rkey(receiver_id))
-        return _load_receiver(raw) if raw else None
+        try:
+            raw = r.get(_rkey(receiver_id))
+            return _load_receiver(raw) if raw else None
+        except Exception:
+            return None
     return _receivers.get(receiver_id)
 
 

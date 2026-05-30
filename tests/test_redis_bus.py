@@ -67,6 +67,23 @@ def test_events_redis_roundtrip(redis_on):
     assert event_store.prune_before(now - timedelta(days=1)) == 1
 
 
+def test_redis_reads_are_bounded(redis_on, monkeypatch):
+    """The read paths must scan a bounded window, never the whole list — the
+    regression that saturated Redis and stalled the event loop was last_n/query
+    pulling all 20k entries every call."""
+    monkeypatch.setattr(event_store, "_SCAN_CAP", 5)
+    now = utcnow()
+    # Oldest event carries a rare source; it sits beyond the scan cap from head.
+    event_store.append(ts=now, level="info", source="rare", message="oldest")
+    for i in range(10):
+        event_store.append(ts=now, level="info", source="common", message=f"e{i}")
+    # query scans only the newest _SCAN_CAP entries → never reaches the rare one.
+    assert event_store.query(source="rare") == []
+    assert len(event_store.query(source="common", limit=100)) == 5
+    # last_n is bounded by its own n regardless of list length.
+    assert len(event_store.last_n(3)) == 3
+
+
 # ── telemetry ───────────────────────────────────────────────────────────────
 
 

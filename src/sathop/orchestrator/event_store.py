@@ -13,6 +13,7 @@ Two interchangeable backends behind one sync API (callers are unchanged):
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from collections import deque
 from dataclasses import dataclass
@@ -20,9 +21,17 @@ from datetime import datetime
 
 from . import redis_bus
 
+_log = logging.getLogger("sathop.orch.event_store")
+
 _MAX_EVENTS = 20_000
 _K = "sathop:events"
 _SEQ = "sathop:events:seq"
+# Cap how deep a single read scans the Redis list. The list holds up to
+# _MAX_EVENTS; pulling all of them over the wire + json.loads on the event loop
+# (the read paths run sync) is what saturated Redis and stalled the loop. The
+# feed is newest-first, so this window covers the live view and recent
+# pagination; older/filtered matches beyond it are dropped (display-only data).
+_SCAN_CAP = 2_000
 
 
 @dataclass(slots=True)
@@ -68,21 +77,27 @@ def append(
 ) -> int:
     r = _r()
     if r is not None:
-        eid = int(r.incr(_SEQ))
-        e = {
-            "id": eid,
-            "ts": ts.isoformat(),
-            "level": level,
-            "source": source,
-            "granule_id": granule_id,
-            "batch_id": batch_id,
-            "message": message,
-        }
-        p = r.pipeline()
-        p.lpush(_K, json.dumps(e))
-        p.ltrim(_K, 0, _MAX_EVENTS - 1)
-        p.execute()
-        return eid
+        # Best-effort: events are display-only, so a Redis hiccup must never 500
+        # the hot transition/heartbeat path that logs them.
+        try:
+            eid = int(r.incr(_SEQ))
+            e = {
+                "id": eid,
+                "ts": ts.isoformat(),
+                "level": level,
+                "source": source,
+                "granule_id": granule_id,
+                "batch_id": batch_id,
+                "message": message,
+            }
+            p = r.pipeline()
+            p.lpush(_K, json.dumps(e))
+            p.ltrim(_K, 0, _MAX_EVENTS - 1)
+            p.execute()
+            return eid
+        except Exception:
+            _log.warning("event_store.append: redis unavailable, dropping event", exc_info=False)
+            return -1
     global _next_id
     with _lock:
         eid = _next_id
@@ -146,7 +161,7 @@ def query(
 
     r = _r()
     if r is not None:
-        return emit(_redis_newest_first(r))
+        return emit(json.loads(x) for x in r.lrange(_K, 0, _SCAN_CAP - 1))
     with _lock:
         return emit(_event_dict(e) for e in reversed(_store))
 
@@ -154,7 +169,9 @@ def query(
 def last_n(n: int) -> list[dict]:
     r = _r()
     if r is not None:
-        return _redis_newest_first(r)[:n]
+        # Bounded LRANGE — this is the overview's per-second call; pulling the
+        # whole list here was the primary Redis-saturation / loop-stall source.
+        return [json.loads(x) for x in r.lrange(_K, 0, n - 1)]
     with _lock:
         out: list[dict] = []
         for e in reversed(_store):
@@ -168,7 +185,11 @@ def count_by_level_since(since: datetime) -> dict[str, int]:
     counts: dict[str, int] = {}
     r = _r()
     if r is not None:
-        for e in _redis_newest_first(r):
+        # Bounded scan: counts the most recent _SCAN_CAP events within the
+        # window. Undercounts only if more than that many landed in the window
+        # — acceptable for a coarse dashboard gauge, and never a full-list pull.
+        for x in r.lrange(_K, 0, _SCAN_CAP - 1):
+            e = json.loads(x)
             if datetime.fromisoformat(e["ts"]) < since:
                 break
             counts[e["level"]] = counts.get(e["level"], 0) + 1

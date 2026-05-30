@@ -12,6 +12,7 @@ active, then superseded by stage-timing rows. Two backends behind one API:
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterable
 
 from fastapi import APIRouter, Depends
@@ -22,6 +23,8 @@ from .. import redis_bus
 from ..config import require_token
 from ..db import utcnow
 from ..pubsub import publish
+
+_log = logging.getLogger("sathop.orch.progress")
 
 router = APIRouter(tags=["progress"], dependencies=[Depends(require_token)])
 
@@ -61,13 +64,18 @@ def evict_granule(granule_id: str) -> None:
     the granule id. A granule with no timeline is a clean no-op."""
     r = _r()
     if r is not None:
-        first = r.lindex(_tkey(granule_id), 0)
-        batch_id = json.loads(first).get("batch_id") if first else None
-        p = r.pipeline()
-        p.delete(_tkey(granule_id))
-        if batch_id:
-            p.hdel(_bkey(batch_id), granule_id)
-        p.execute()
+        # Hot path (every UploadCompleted / lease reclaim) — best-effort so a
+        # Redis hiccup never breaks the transition that triggered the evict.
+        try:
+            first = r.lindex(_tkey(granule_id), 0)
+            batch_id = json.loads(first).get("batch_id") if first else None
+            p = r.pipeline()
+            p.delete(_tkey(granule_id))
+            if batch_id:
+                p.hdel(_bkey(batch_id), granule_id)
+            p.execute()
+        except Exception:
+            _log.warning("progress.evict_granule: redis unavailable", exc_info=False)
         return
     entries = _by_granule.pop(granule_id, None)
     if not entries:
@@ -97,14 +105,17 @@ async def ingress(granule_id: str, event: ProgressEvent) -> dict:
     r = _r()
     if r is not None:
         raw = json.dumps(entry)
-        p = r.pipeline()
-        p.rpush(_tkey(granule_id), raw)
-        p.ltrim(_tkey(granule_id), -_MAX_ENTRIES_PER_GRANULE, -1)
-        p.expire(_tkey(granule_id), _TTL)
-        if batch_id:
-            p.hset(_bkey(batch_id), granule_id, raw)
-            p.expire(_bkey(batch_id), _TTL)
-        p.execute()
+        try:
+            p = r.pipeline()
+            p.rpush(_tkey(granule_id), raw)
+            p.ltrim(_tkey(granule_id), -_MAX_ENTRIES_PER_GRANULE, -1)
+            p.expire(_tkey(granule_id), _TTL)
+            if batch_id:
+                p.hset(_bkey(batch_id), granule_id, raw)
+                p.expire(_bkey(batch_id), _TTL)
+            p.execute()
+        except Exception:
+            _log.warning("progress.ingress: redis unavailable", exc_info=False)
     else:
         timeline = _by_granule.setdefault(granule_id, [])
         if len(timeline) < _MAX_ENTRIES_PER_GRANULE:
