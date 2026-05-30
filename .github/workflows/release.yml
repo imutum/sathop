@@ -1,8 +1,12 @@
-name: Release images
+name: Release
 
-# Runtime image rebuilds ONLY when dependencies change (uv.lock).
-# Tag pushes upload the frontend asset to GitHub Releases.
-# Manual dispatch always rebuilds.
+# Two independent artifacts, both keyed to the same version:
+#   1. Runtime Docker image (deps shell only) — rebuilt when uv.lock /
+#      deploy/runtime change, or on a tag. Source is NOT baked in.
+#   2. sathop-bundle.tar.gz (backend src + uv.lock + pyproject + prebuilt
+#      frontend/dist) — one self-contained package per tag, uploaded as a
+#      Release asset. The entrypoint downloads + extracts it at boot. Frontend
+#      and backend ship together, so they can never drift.
 
 on:
   push:
@@ -37,12 +41,13 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
+  image:
     needs: check-lock
     if: |
       always() && (
         needs.check-lock.outputs.changed == 'true' ||
-        github.event_name == 'workflow_dispatch'
+        github.event_name == 'workflow_dispatch' ||
+        startsWith(github.ref, 'refs/tags/v')
       )
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -80,7 +85,9 @@ jobs:
           cache-from: type=gha,scope=runtime
           cache-to: type=gha,mode=max,scope=runtime
 
-  upload-frontend:
+  bundle:
+    # One self-contained tarball per tag: backend source + deps manifest +
+    # prebuilt frontend, so a deployed version can't have a mismatched UI.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -92,7 +99,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci && npm run build
         working-directory: frontend
-      - run: tar -czf frontend-dist.tar.gz -C frontend dist
+      - name: Package bundle
+        run: tar -czf sathop-bundle.tar.gz src pyproject.toml uv.lock frontend/dist
       - uses: softprops/action-gh-release@v2
         with:
-          files: frontend-dist.tar.gz
+          files: sathop-bundle.tar.gz

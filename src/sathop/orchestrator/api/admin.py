@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import os
 import platform
+import re
 import signal
 import sys
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
@@ -268,41 +271,67 @@ async def reset_pull_failures(
     return {"reset": n}
 
 
-@router.post("/update-frontend")
-async def update_frontend(s: AsyncSession = Depends(session)) -> dict:
-    """Force-refresh the frontend dist for the running version (content-hashed:
-    a same-version-but-rebuilt asset is still detected and refreshed). The dist
-    is also synced version-gated at every boot, so on a code upgrade the UI
-    catches up automatically — this endpoint is the operator's manual nudge."""
-    from ..frontend_sync import ensure_frontend
+def _repo_root() -> Path:
+    """Repo root the entrypoint installs into (/app/repo). admin.py lives at
+    <root>/src/sathop/orchestrator/api/admin.py — five parents up."""
+    return Path(__file__).resolve().parents[4]
 
+
+def _bundle_asset_url(version: str) -> str:
+    base = os.environ.get("SATHOP_GIT_REPO", "https://github.com/imutum/sathop.git").removesuffix(".git")
+    return f"{base}/releases/download/v{version}/sathop-bundle.tar.gz"
+
+
+class UpgradeRequest(BaseModel):
+    version: str
+
+
+def _trigger_shutdown() -> None:
+    """Close SSE streams, then SIGTERM self after a beat so the HTTP response
+    flushes first. The entrypoint supervisor catches the clean exit (code 0)."""
+    from ..pubsub import request_shutdown
+
+    request_shutdown()
+    asyncio.get_running_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
+
+
+@router.post("/upgrade")
+async def upgrade_orchestrator(req: UpgradeRequest, s: AsyncSession = Depends(session)) -> dict:
+    """Install a specific release on the next boot, then self-restart.
+
+    Writes the target to `.pending-version`; the entrypoint consumes it once —
+    downloading that version's self-contained bundle (backend + the matching
+    prebuilt frontend, one package so they can't drift), extracting it, and
+    relaunching. We HEAD the release asset first so a bad version fails here with
+    a clear error instead of crash-looping the container after the restart."""
+    version = req.version.strip().lstrip("v")
+    if not re.match(r"^\d+\.\d+", version):
+        raise HTTPException(422, f"invalid version: {req.version!r}")
+
+    url = _bundle_asset_url(version)
     try:
-        result = await ensure_frontend(__version__, force=True)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as c:
+            (await c.head(url)).raise_for_status()
     except Exception as e:
-        raise HTTPException(502, f"frontend download failed: {e}")
+        raise HTTPException(502, f"release v{version} not downloadable: {e}")
 
-    if result["action"] == "downloaded":
-        await log(s, "orchestrator", f"frontend updated ({result.get('sha', '')[:12]})")
-        await commit_and_publish(s, Scope.EVENTS)
-    return {"ok": True, "version": result["version"], "action": result["action"]}
+    (_repo_root() / ".pending-version").write_text(version)
+    await log(s, "orchestrator", f"upgrade to v{version} requested via UI")
+    await commit_and_publish(s, Scope.EVENTS)
+    _trigger_shutdown()
+    return {"ok": True, "version": version}
 
 
 @router.post("/restart")
 async def restart_orchestrator(s: AsyncSession = Depends(session)) -> dict:
-    """Self-restart: signal SSE streams to close, log, respond, then SIGTERM
-    self. The entrypoint supervisor loop catches the clean exit (code 0), git
-    pulls, and restarts with new code. Closing streams first lets uvicorn's
-    graceful shutdown complete in milliseconds instead of hanging on the
-    long-lived /api/stream connection."""
-    from ..pubsub import request_shutdown
-
-    request_shutdown()
+    """Self-restart at the same version: signal SSE streams to close, log,
+    respond, then SIGTERM self. The entrypoint supervisor catches the clean exit
+    (code 0) and relaunches the installed version unchanged (no `.pending-version`,
+    so it sticks). Closing streams first lets uvicorn's graceful shutdown finish
+    in milliseconds instead of hanging on the long-lived /api/stream connection."""
     await log(s, "orchestrator", "restart requested via UI")
     await commit_and_publish(s, Scope.EVENTS)
-
-    import asyncio
-
-    asyncio.get_running_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    _trigger_shutdown()
     return {"ok": True}
 
 

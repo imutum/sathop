@@ -30,6 +30,8 @@ const versionLabel = computed(() => {
       return `有新版本 ${latestTag.value} 可用`;
     case "loading":
       return "正在检查更新…";
+    case "unchecked":
+      return "点击检查最新版本";
     default:
       return "无法检查最新版本";
   }
@@ -47,37 +49,46 @@ const dotClass = computed(() => {
   }
 });
 
-const updating = ref(false);
+const busy = ref(false);
 
-async function confirmUpdateAndRestart() {
+async function confirmUpgrade() {
+  const target = latestTag.value.replace(/^v/, "");
   const ok = await requestConfirm({
-    title: "更新并重启 Orchestrator？",
-    description: "将更新前端资源、拉取最新代码并重启进程。期间服务短暂不可用（约 3-5 秒）。",
-    confirmText: "确认更新",
+    title: `升级到 v${target} 并重启？`,
+    description:
+      "将下载该版本的自包含发布包（后端 + 配套前端，同一个包，永不串版），解压后重启进程。" +
+      "期间服务短暂不可用（约 5-15 秒，取决于下载速度）。",
+    confirmText: "确认升级",
     tone: "danger",
   });
   if (!ok) return;
-
-  updating.value = true;
+  busy.value = true;
   try {
-    const r = await API.updateFrontend();
-    if (r.action === "downloaded") {
-      toast.success(`前端 v${r.version} 下载完成，正在重启…`);
-    } else {
-      toast.success("前端已是最新，正在重启…");
-    }
+    await API.upgradeOrchestrator(target);
+    toast.success(`正在升级到 v${target} 并重启…`);
   } catch (e: any) {
-    toast.error(`前端更新失败：${e.message ?? e}`);
-    updating.value = false;
+    toast.error(`升级失败：${e.message ?? e}`);
+    busy.value = false;
     return;
   }
+  // The SSE stream drops, an overlay shows while it's down, and useLiveStream
+  // hard-reloads into the new build once the server returns (see useLiveStream).
+}
+
+async function confirmRestart() {
+  const ok = await requestConfirm({
+    title: "重启 Orchestrator？",
+    description: "在当前版本重启进程（清理内存态、重新读取配置）。期间服务短暂不可用（约 3-5 秒）。",
+    confirmText: "确认重启",
+    tone: "danger",
+  });
+  if (!ok) return;
+  busy.value = true;
   try {
     await API.restartOrchestrator();
   } catch {
     // Connection drop is expected — the process is shutting down.
   }
-  // The SSE stream drops, an overlay shows while it's down, and useLiveStream
-  // hard-reloads into the new build once the server returns (see useLiveStream).
 }
 </script>
 
@@ -98,21 +109,31 @@ async function confirmUpdateAndRestart() {
               size="icon-sm"
               class="h-6 w-6 text-muted-foreground"
               :disabled="isFetching"
-              title="重新检查最新版本"
-              aria-label="重新检查"
+              title="检查最新版本（手动，不自动轮询）"
+              aria-label="检查更新"
               @click="refresh"
             >
               <Icon name="refresh" :size="12" :class="isFetching ? 'animate-spin' : ''" />
             </Button>
           </div>
           <Button
-            :variant="outdated ? 'default' : 'outline'"
+            v-if="outdated"
+            variant="default"
             size="sm"
-            :pending="updating"
-            pending-label="更新中…"
-            @click="confirmUpdateAndRestart"
+            :pending="busy"
+            pending-label="升级中…"
+            @click="confirmUpgrade"
           >
-            更新并重启
+            升级到 {{ latestTag }} 并重启
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            :pending="busy"
+            pending-label="重启中…"
+            @click="confirmRestart"
+          >
+            重启
           </Button>
         </div>
       </template>

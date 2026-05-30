@@ -8,84 +8,129 @@ case "$ROLE" in
   *) echo "ERROR: SATHOP_ROLE=$ROLE is not valid (orchestrator / worker / receiver)" >&2; exit 1 ;;
 esac
 
-# ── Git configuration ─────────────────────────────────────────────────
+# ── Release bundle configuration ──────────────────────────────────────
+# One self-contained tarball per version (backend src + uv.lock + prebuilt
+# frontend/dist), so frontend and backend can never drift. NO git pull, NO hot
+# update: a (re)start installs a *pinned* version and sticks with it.
 REPO_DIR="/app/repo"
 GIT_REPO="${SATHOP_GIT_REPO:-https://github.com/imutum/sathop.git}"
-GIT_REF="${SATHOP_GIT_REF:-main}"
+ASSET_BASE="${GIT_REPO%.git}"                 # → https://github.com/<owner>/<repo>
+ASSET_NAME="sathop-bundle.tar.gz"
+INSTALLED_STAMP="$REPO_DIR/.sathop-version"   # concrete version currently extracted
+PENDING_STAMP="$REPO_DIR/.pending-version"    # one-shot upgrade target written by the UI
 
+# curl auth header for a private release asset (public repo needs none).
+CURL_AUTH=()
 if [ -n "${SATHOP_GIT_TOKEN:-}" ]; then
-  GIT_REPO="${GIT_REPO/https:\/\//https://${SATHOP_GIT_TOKEN}@}"
+  CURL_AUTH=(-H "Authorization: token ${SATHOP_GIT_TOKEN}")
 fi
 
-git config --global --add safe.directory "$REPO_DIR"
-
-# ── Helper: clone or pull ────────────────────────────────────────────
-update_repo() {
-  if [ -d "$REPO_DIR/.git" ]; then
-    echo "[entrypoint] Pulling $GIT_REF ..."
-    cd "$REPO_DIR"
-    git remote set-url origin "$GIT_REPO"
-    git fetch origin "$GIT_REF" --depth=1 --quiet
-    git checkout FETCH_HEAD --quiet
-    git clean -fd --quiet
+# ── Helper: asset URL for a version ("latest" or a concrete X) ────────
+asset_url() {
+  local ver="$1"
+  if [ "$ver" = "latest" ]; then
+    echo "${ASSET_BASE}/releases/latest/download/${ASSET_NAME}"
   else
-    echo "[entrypoint] Cloning $GIT_REF ..."
-    git clone --depth=1 --branch "$GIT_REF" "$GIT_REPO" "$REPO_DIR" --quiet
-    cd "$REPO_DIR"
+    echo "${ASSET_BASE}/releases/download/v${ver#v}/${ASSET_NAME}"
+  fi
+}
+
+# ── Helper: download + extract a version into REPO_DIR (atomic-ish) ───
+# Downloads to a tmp file, extracts to a staging dir, then replaces the
+# version-owned trees in REPO_DIR. The process isn't running yet during install,
+# so there's no concurrent reader to protect — staging just guards against a
+# half-downloaded archive clobbering a working install.
+install_bundle() {
+  local ver="$1" url tmp staging
+  url="$(asset_url "$ver")"
+  tmp="$REPO_DIR/.bundle.tgz.tmp"
+  staging="$REPO_DIR/.staging"
+
+  echo "[entrypoint] Fetching $ASSET_NAME ($ver) ..."
+  if ! curl -fSL "${CURL_AUTH[@]}" "$url" -o "$tmp"; then
+    echo "[entrypoint] download failed: $url" >&2
+    rm -f "$tmp"
+    return 1
+  fi
+
+  rm -rf "$staging"
+  mkdir -p "$staging"
+  if ! tar -xzf "$tmp" -C "$staging"; then
+    echo "[entrypoint] archive extract failed" >&2
+    rm -rf "$tmp" "$staging"
+    return 1
+  fi
+  rm -f "$tmp"
+  if [ ! -f "$staging/pyproject.toml" ] || [ ! -d "$staging/src" ]; then
+    echo "[entrypoint] bundle missing src/ or pyproject.toml" >&2
+    rm -rf "$staging"
+    return 1
+  fi
+
+  # Swap version-owned trees; keep everything else in REPO_DIR (e.g. stamps).
+  rm -rf "$REPO_DIR/src" "$REPO_DIR/frontend"
+  cp -a "$staging/." "$REPO_DIR/"
+  rm -rf "$staging"
+
+  # Record the concrete version (resolves "latest" to its real number).
+  local concrete
+  concrete=$(grep -m1 '^version' "$REPO_DIR/pyproject.toml" | sed -E 's/.*"([^"]+)".*/\1/')
+  echo "${concrete:-$ver}" > "$INSTALLED_STAMP"
+  echo "[entrypoint] Installed v${concrete:-$ver}."
+}
+
+# ── Helper: ensure the desired version is installed ───────────────────
+# Precedence: a one-shot UI upgrade (.pending-version) wins once, then we stick
+# with whatever is installed (so restarts/crashes never change version), and only
+# fall back to $SATHOP_VERSION on a truly empty first boot.
+ensure_bundle() {
+  local desired installed
+  installed=$(cat "$INSTALLED_STAMP" 2>/dev/null || echo "")
+
+  if [ -f "$PENDING_STAMP" ]; then
+    desired=$(cat "$PENDING_STAMP")
+    rm -f "$PENDING_STAMP"            # consume: a UI upgrade is a one-time action
+    echo "[entrypoint] UI upgrade requested → v${desired#v}"
+  elif [ -n "$installed" ]; then
+    desired="$installed"             # stick with the installed version on restart
+  else
+    desired="${SATHOP_VERSION:-latest}"  # first boot bootstrap
+  fi
+
+  # "latest" is only resolved on first boot; once something is installed we keep
+  # it, so a restart can't silently jump to a newer release.
+  if [ "$desired" = "latest" ] && [ -n "$installed" ]; then
+    return 0
+  fi
+  if [ "${desired#v}" = "$installed" ] && [ -d "$REPO_DIR/src" ]; then
+    return 0
+  fi
+
+  if ! install_bundle "$desired"; then
+    if [ -d "$REPO_DIR/src" ]; then
+      echo "[entrypoint] keeping installed v${installed} (upgrade to v${desired#v} failed)" >&2
+      return 0                       # soft-fail: stay on the working version
+    fi
+    return 1                         # first boot, no fallback → caller retries
   fi
 }
 
 # ── Helper: dependency sync ──────────────────────────────────────────
 sync_deps() {
   if [ -f /app/.uv-lock-hash ]; then
-    CURRENT=$(sha256sum uv.lock | awk '{print $1}')
+    CURRENT=$(sha256sum "$REPO_DIR/uv.lock" | awk '{print $1}')
     BAKED=$(awk '{print $1}' /app/.uv-lock-hash)
     if [ "$CURRENT" != "$BAKED" ]; then
       echo "[entrypoint] WARNING: uv.lock changed — rebuild runtime image for faster starts"
     fi
   fi
   echo "[entrypoint] uv sync --extra $ROLE ..."
-  uv sync --frozen --extra "$ROLE" --quiet
-}
-
-# ── Helper: frontend (orchestrator, first boot only) ────────────────
-# Subsequent updates are operator-triggered via Settings → "更新并重启".
-fetch_frontend() {
-  [ "$ROLE" = "orchestrator" ] || return 0
-
-  if [ -f "$REPO_DIR/frontend/dist/index.html" ]; then
-    return 0
-  fi
-
-  VERSION=$("$REPO_DIR/.venv/bin/python" -c "
-import tomllib
-with open('$REPO_DIR/pyproject.toml','rb') as f:
-    print(tomllib.load(f)['project']['version'])
-" 2>/dev/null || echo "")
-
-  [ -n "$VERSION" ] || return 0
-
-  CLEAN_REPO=$(echo "${SATHOP_GIT_REPO:-https://github.com/imutum/sathop.git}" | sed 's|\.git$||')
-  FRONTEND_URL="${SATHOP_FRONTEND_URL:-${CLEAN_REPO}/releases/download/v${VERSION}/frontend-dist.tar.gz}"
-
-  CURL_OPTS=(-fsSL)
-  if [ -n "${SATHOP_GIT_TOKEN:-}" ] && echo "$FRONTEND_URL" | grep -q "github.com"; then
-    CURL_OPTS+=(-H "Authorization: token ${SATHOP_GIT_TOKEN}")
-  fi
-
-  echo "[entrypoint] First boot — downloading frontend v${VERSION} ..."
-  if curl "${CURL_OPTS[@]}" "$FRONTEND_URL" | tar -xz -C "$REPO_DIR/frontend/"; then
-    echo "$VERSION" > "$REPO_DIR/frontend/dist/.version"
-    echo "[entrypoint] Frontend ready."
-  else
-    echo "[entrypoint] Frontend download failed — use Settings UI to retry."
-  fi
+  ( cd "$REPO_DIR" && uv sync --frozen --extra "$ROLE" --quiet )
 }
 
 # ── Supervisor loop ──────────────────────────────────────────────────
-# Each iteration: git pull → dep sync → (orchestrator: frontend check) → start.
-# Exit codes:
-#   0   = update requested (git pull + restart process)
+# Each iteration: ensure version → dep sync → start. Exit codes:
+#   0   = restart requested (re-evaluates .pending-version → applies a UI upgrade)
 #   42  = removed by orchestrator (break loop → container stops)
 #   other = crash (exponential backoff, then retry)
 export PATH="$REPO_DIR/.venv/bin:$PATH"
@@ -95,12 +140,16 @@ MAX_BACKOFF=60
 STABLE_THRESHOLD=30
 
 while true; do
-  update_repo
+  if ! ensure_bundle; then
+    echo "[entrypoint] no usable bundle yet, retrying in ${BACKOFF}s ..." >&2
+    sleep "$BACKOFF"
+    BACKOFF=$(( BACKOFF * 2 )); [ "$BACKOFF" -gt "$MAX_BACKOFF" ] && BACKOFF=$MAX_BACKOFF
+    continue
+  fi
   sync_deps
-  fetch_frontend
 
   echo "[entrypoint] Starting sathop.$ROLE ..."
-  cd /app
+  cd "$REPO_DIR"
   START_TS=$(date +%s)
   set +e
   python -m "sathop.$ROLE.main"
@@ -112,7 +161,7 @@ while true; do
     echo "[entrypoint] Process removed (exit 42) — stopping container."
     break
   elif [ "$EXIT_CODE" -eq 0 ]; then
-    echo "[entrypoint] Update requested — pulling latest code ..."
+    echo "[entrypoint] Restart requested ..."
     BACKOFF=1
   else
     if [ "$ELAPSED" -ge "$STABLE_THRESHOLD" ]; then
@@ -120,9 +169,6 @@ while true; do
     fi
     echo "[entrypoint] Process crashed (exit $EXIT_CODE), retrying in ${BACKOFF}s ..."
     sleep "$BACKOFF"
-    BACKOFF=$(( BACKOFF * 2 ))
-    if [ "$BACKOFF" -gt "$MAX_BACKOFF" ]; then
-      BACKOFF=$MAX_BACKOFF
-    fi
+    BACKOFF=$(( BACKOFF * 2 )); [ "$BACKOFF" -gt "$MAX_BACKOFF" ] && BACKOFF=$MAX_BACKOFF
   fi
 done
