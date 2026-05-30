@@ -93,18 +93,33 @@ async def sweep_orphaned_acked() -> int:
     if grace > 0 and now - _STARTED_AT < timedelta(seconds=grace):
         return 0  # cold start: let workers re-heartbeat before trusting telemetry absence
     async with get_session_maker()() as s:
-        registered = (
-            (await s.execute(select(Worker.worker_id).where(Worker.removed_at.is_(None)))).scalars().all()
-        )
         if grace > 0:
             cutoff = now - timedelta(seconds=grace)
-            live_ids = [
-                wid
-                for wid in registered
-                if (t := telemetry.get_worker(wid)) is not None and t.last_seen >= cutoff
-            ]
+            if db.is_postgres():
+                # Liveness from the Worker row (heartbeats persist last_seen there
+                # in PG mode), so it's correct across processes and orch restarts.
+                live_ids = (
+                    await s.execute(
+                        select(Worker.worker_id)
+                        .where(Worker.removed_at.is_(None))
+                        .where(Worker.last_seen >= cutoff)
+                    )
+                ).scalars().all()
+            else:
+                registered = (
+                    (await s.execute(select(Worker.worker_id).where(Worker.removed_at.is_(None))))
+                    .scalars()
+                    .all()
+                )
+                live_ids = [
+                    wid
+                    for wid in registered
+                    if (t := telemetry.get_worker(wid)) is not None and t.last_seen >= cutoff
+                ]
         else:
-            live_ids = list(registered)
+            live_ids = (
+                (await s.execute(select(Worker.worker_id).where(Worker.removed_at.is_(None)))).scalars().all()
+            )
         orphans = (
             (
                 await s.execute(

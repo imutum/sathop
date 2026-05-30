@@ -22,7 +22,7 @@ from sathop.shared.state_machine import (
     Scope,
 )
 
-from .. import telemetry
+from .. import db, telemetry
 from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, Receiver, Worker, session, utcnow
 from ..pubsub import commit_and_publish
@@ -54,15 +54,24 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
     r = await get_or_404(s, Receiver, req.receiver_id, "receiver not registered")
     now = utcnow()
 
-    telemetry.update_receiver(
-        req.receiver_id,
-        telemetry.ReceiverTelemetry(
-            last_seen=now,
-            disk_free_gb=req.disk_free_gb,
-            queue_pulling=req.queue_pulling or 0,
-            recent_pull_bps=req.recent_pull_bps or 0,
-        ),
-    )
+    # PG (multi-process): telemetry must be cross-process → write it to the
+    # Receiver row (receiver_snapshot's DB fallback reads it back). SQLite: keep
+    # it in-memory to avoid WAL churn.
+    if db.is_postgres():
+        r.last_seen = now
+        r.disk_free_gb = req.disk_free_gb
+        r.queue_pulling = req.queue_pulling or 0
+        r.recent_pull_bps = req.recent_pull_bps or 0
+    else:
+        telemetry.update_receiver(
+            req.receiver_id,
+            telemetry.ReceiverTelemetry(
+                last_seen=now,
+                disk_free_gb=req.disk_free_gb,
+                queue_pulling=req.queue_pulling or 0,
+                recent_pull_bps=req.recent_pull_bps or 0,
+            ),
+        )
 
     flapped = await record_version_flap(
         s, r, new_version=req.version, source=req.receiver_id, kind="receiver"
@@ -71,7 +80,7 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
         s, r, "restart_requested_at", source=req.receiver_id, message="restart signal delivered to receiver"
     )
 
-    if flapped or restart_requested:
+    if flapped or restart_requested or db.is_postgres():
         await commit_and_publish(s, Scope.RECEIVERS)
 
     return ReceiverHeartbeatResponse(restart_requested=restart_requested)
