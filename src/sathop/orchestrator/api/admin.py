@@ -13,17 +13,19 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop import __version__
 from sathop.shared.bundle_ref import format_bundle_ref
-from sathop.shared.state_machine import Scope
+from sathop.shared.state_machine import GranuleState, RequeueGranule, Scope
 
 from ..config import require_token, settings
-from ..db import Batch, Bundle, session, utcnow
+from ..db import Batch, Bundle, Granule, GranuleObject, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from ._helpers import object_is_exhausted
+from ._transition import apply_transition
 from .admin_readmodels import (
     NON_TERMINAL,
     STUCK_AGE_HOURS,
@@ -32,6 +34,7 @@ from .admin_readmodels import (
     in_flight_granule_rows,
     stuck_granule_rows,
 )
+from .progress import evict_granule
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_token)])
 
@@ -202,6 +205,41 @@ async def _gc_apply(s: AsyncSession, candidates: list[Bundle]) -> dict[str, Any]
             unlinked.append(sha)
 
     return {"deleted": deleted_meta, "freed_bytes": freed, "unlinked_blobs": len(unlinked)}
+
+
+@router.post("/requeue-undeliverable")
+async def requeue_undeliverable(
+    batch_id: str | None = None,
+    s: AsyncSession = Depends(session),
+) -> dict:
+    """Re-queue UPLOADED granules whose objects are exhausted — the receiver gave
+    up after max_pull_failures (typically the hosting worker lost the output files
+    on restart, so the presigned URLs 404). Each resets to PENDING for a full
+    re-download/process/upload and its dead object rows are dropped. Scope with
+    ?batch_id=, else sweeps every batch."""
+    now = utcnow()
+    stmt = (
+        select(Granule)
+        .where(Granule.state == GranuleState.UPLOADED.value)
+        .where(
+            select(GranuleObject.id)
+            .where(GranuleObject.granule_id == Granule.granule_id)
+            .where(object_is_exhausted())
+            .exists()
+        )
+    )
+    if batch_id:
+        stmt = stmt.where(Granule.batch_id == batch_id)
+    granules = (await s.execute(stmt)).scalars().all()
+    for g in granules:
+        # Query pre-filters state==UPLOADED, so apply()'s guard is unreachable here.
+        await apply_transition(s, g, RequeueGranule(granule_id=g.granule_id), now=now)
+        await s.execute(delete(GranuleObject).where(GranuleObject.granule_id == g.granule_id))
+        evict_granule(g.granule_id)
+    if granules:
+        await log(s, "admin", f"re-queued {len(granules)} undeliverable granule(s)")
+    await commit_and_publish(s, Scope.BATCHES if granules else None)
+    return {"requeued": len(granules)}
 
 
 @router.post("/update-frontend")

@@ -244,6 +244,15 @@ class RetryGranule(BaseModel):
     granule_id: str
 
 
+class RequeueGranule(BaseModel):
+    """Operator re-queues an UPLOADED granule whose delivery is permanently stuck —
+    its objects exhausted their pull retries (typically the hosting worker lost the
+    output files on restart). Resets to PENDING for a full re-download/process/upload;
+    the handler drops the dead object rows so the re-upload starts clean."""
+
+    granule_id: str
+
+
 class ObjectAcked(BaseModel):
     """All siblings of one of this granule's objects are now acked — the
     receiver-side handler decides the precondition, apply() does the
@@ -258,7 +267,15 @@ class ObjectAcked(BaseModel):
 # revoke, receivers.ack, batches.cancel / retry) type-check without forcing
 # them to import Annotated. Runtime is unaffected: apply() match-cases on the
 # concrete class regardless of the static union.
-AnyGranuleEvent = GranuleEvent | ClaimByLease | RevokedByOperator | CancelGranule | RetryGranule | ObjectAcked
+AnyGranuleEvent = (
+    GranuleEvent
+    | ClaimByLease
+    | RevokedByOperator
+    | CancelGranule
+    | RetryGranule
+    | RequeueGranule
+    | ObjectAcked
+)
 
 
 # Tail caps applied by apply() — matches old mark_failed semantics so a
@@ -465,6 +482,21 @@ def apply(
         case RetryGranule():
             if snap.state.value not in RETRYABLE_STATES:
                 raise StateConflict(f"retry not accepted in state {snap.state.value!r}")
+            return TransitionResult(
+                new_state=GranuleState.PENDING,
+                fields={
+                    "retry_count": 0,
+                    "error": None,
+                    "leased_by": None,
+                    "lease_expires_at": None,
+                    "updated_at": now,
+                },
+            )
+        case RequeueGranule():
+            if snap.state != GranuleState.UPLOADED:
+                raise StateConflict(f"requeue not accepted in state {snap.state.value!r}")
+            # Object rows are dropped by the handler (objects_deleted_at is wired to
+            # the DELETE path + delivered counter, so it must not be reused here).
             return TransitionResult(
                 new_state=GranuleState.PENDING,
                 fields={
