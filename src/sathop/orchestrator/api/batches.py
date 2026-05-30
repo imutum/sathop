@@ -26,7 +26,7 @@ from sathop.shared.state_machine import (
     Scope,
 )
 
-from .. import event_store
+from .. import db, event_store
 from ..bundle_schema import validate_granule
 from ..config import require_token
 from ..db import (
@@ -376,6 +376,10 @@ async def delete_batch(
 
     counts = await reap_granules(s, granule_ids)
     counts["events"] = 0
+    # PG: drop this batch's events in the same txn as the reap (Event has no FK to
+    # granules, so order is free). SQLite: the in-memory deque is swept post-commit.
+    if granule_ids and db.is_postgres():
+        counts["events"] = await event_store.evict_by_granule_ids_db(s, set(granule_ids))
 
     await s.delete(b)
     await log(
@@ -385,7 +389,8 @@ async def delete_batch(
         level="warn",
     )
     await commit_and_publish(s, Scope.BATCHES)
-    if granule_ids:
+    if granule_ids and not db.is_postgres():
         counts["events"] = event_store.evict_by_granule_ids(set(granule_ids))
+    if granule_ids:
         evict_granules(granule_ids)
     return {"ok": True, **counts}

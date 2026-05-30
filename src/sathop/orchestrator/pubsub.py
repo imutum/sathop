@@ -31,8 +31,14 @@ _notify_q: asyncio.Queue[str] = asyncio.Queue(maxsize=4096)
 
 def _dsn() -> str:
     """Plain libpq DSN for a raw asyncpg connection (LISTEN/NOTIFY needs the
-    driver directly, not the SQLAlchemy '+asyncpg' URL)."""
-    return settings.database_url.replace("+asyncpg", "", 1)
+    driver directly, not the SQLAlchemy '+asyncpg' URL). Strip '+asyncpg' from
+    the scheme component only, so a password that happens to contain that literal
+    is never corrupted."""
+    from urllib.parse import urlparse, urlunparse
+
+    p = urlparse(settings.database_url)
+    return urlunparse((p.scheme.replace("+asyncpg", ""), p.netloc, p.path, p.params, p.query, p.fragment))
+
 
 _subscribers: set[asyncio.Queue[dict]] = set()
 _QUEUE_MAX = 512
@@ -117,9 +123,13 @@ def publish(event: dict) -> None:
     if db.is_postgres() and event.get("scope") != "__shutdown__":
         try:
             _notify_q.put_nowait(json.dumps(event))
+            return
         except asyncio.QueueFull:
-            log.warning("notify queue full, dropping nudge: %s", event)
-        return
+            # Sender is stalled: shed the cross-process fan-out but still deliver
+            # to THIS process's subscribers (in PG mode local delivery normally
+            # rides the NOTIFY round-trip, so a bare drop would blind the local
+            # tab too). Falls through to the local fan-out below.
+            log.warning("notify queue full, delivering nudge locally only: %s", event)
     _local_publish(event)
 
 
@@ -129,22 +139,33 @@ async def run_notify_sender() -> None:
     import asyncpg
 
     conn = None
+    delay = 1.0
     while not _shutdown_requested:
+        payload: str | None = None
         try:
             if conn is None:
                 conn = await asyncpg.connect(_dsn())
+                delay = 1.0  # reconnected — reset backoff
             payload = await asyncio.wait_for(_notify_q.get(), timeout=1.0)
             await conn.execute("SELECT pg_notify($1, $2)", _CHANNEL, payload)
+            payload = None  # sent — don't requeue on a later error
         except TimeoutError:
             continue  # idle tick — re-check shutdown flag
         except asyncio.CancelledError:
             break
         except Exception:
-            log.exception("notify sender error; reconnecting")
+            log.exception("notify sender error; reconnecting in %.0fs", delay)
             if conn is not None:
                 await conn.close()
             conn = None
-            await asyncio.sleep(1)
+            # Don't lose a nudge already pulled off the queue — best-effort requeue.
+            if payload is not None:
+                try:
+                    _notify_q.put_nowait(payload)
+                except asyncio.QueueFull:
+                    pass
+            await asyncio.sleep(delay)
+            delay = min(30.0, delay * 2)  # capped backoff so an outage isn't a connect storm
     if conn is not None:
         await conn.close()
 
@@ -162,20 +183,23 @@ async def run_listener() -> None:
             log.exception("dropping malformed pubsub notification")
 
     conn = None
+    delay = 1.0
     while not _shutdown_requested:
         try:
             if conn is None:
                 conn = await asyncpg.connect(_dsn())
                 await conn.add_listener(_CHANNEL, _on_notify)
+                delay = 1.0  # reconnected — reset backoff
             await asyncio.sleep(1.0)  # asyncpg dispatches notifications in the background
         except asyncio.CancelledError:
             break
         except Exception:
-            log.exception("pubsub listener error; reconnecting")
+            log.exception("pubsub listener error; reconnecting in %.0fs", delay)
             if conn is not None:
                 await conn.close()
             conn = None
-            await asyncio.sleep(1)
+            await asyncio.sleep(delay)
+            delay = min(30.0, delay * 2)  # capped backoff so an outage isn't a connect storm
     if conn is not None:
         await conn.close()
 
@@ -238,16 +262,22 @@ def reset_coalesce() -> None:
     _loop = None
 
 
-_PENDING_EVENTS = "sathop_pending_events"
+_PENDING_EVENTS = "sathop_pending_events"  # SQLite: buffer flushed post-commit
+_HAD_EVENTS = "sathop_had_events"  # Postgres: gate for the EVENTS scope nudge
 
 
 def publish_scopes(s: AsyncSession, *scopes: Scope | None) -> None:
+    # SQLite: flush the buffered events into the in-memory store now (after the
+    # commit), so a rolled-back txn — which never reaches here — discards them.
     pending = s.info.pop(_PENDING_EVENTS, ())
     if pending:
         now = utcnow()
         for e in pending:
             event_store.append(ts=now, **e)
-    extra: tuple[Scope, ...] = (Scope.EVENTS,) if pending else ()
+    # Postgres: rows were already staged on the session by log_event and committed
+    # with the txn; this flag (decoupled from persistence) just gates the nudge.
+    had_pg = s.info.pop(_HAD_EVENTS, False)
+    extra: tuple[Scope, ...] = (Scope.EVENTS,) if (pending or had_pg) else ()
     for scope in dict.fromkeys(filter(None, (*scopes, *extra))):
         publish({"scope": scope.value})
 
@@ -265,11 +295,28 @@ async def log_event(
     granule_id: str | None = None,
     batch_id: str | None = None,
 ) -> None:
-    """Stage an event for in-memory persistence after commit.
+    """Record an event, atomic with the current transaction.
 
-    Events are buffered on ``s.info`` and flushed by ``publish_scopes`` (called
-    from ``commit_and_publish``) so a rolled-back transaction discards its
-    events — no phantom entries in the event feed."""
+    Postgres: stage an ``Event`` row on the session (committed with the txn,
+    discarded on rollback) and flag the session so ``publish_scopes`` fires the
+    EVENTS nudge. SQLite: buffer on ``s.info`` for ``publish_scopes`` to flush
+    into the in-memory store after commit. Either way a rolled-back transaction
+    leaves no phantom event. Stays ``async`` (s.add is sync) only to spare its
+    ~40 call sites a signature change. Any path that calls this MUST reach
+    ``publish_scopes``/``commit_and_publish`` for the row to persist (PG) or the
+    nudge to fire."""
+    if db.is_postgres():
+        event_store.append_event_row(
+            s,
+            ts=utcnow(),
+            source=source,
+            message=message,
+            level=level,
+            granule_id=granule_id,
+            batch_id=batch_id,
+        )
+        s.info[_HAD_EVENTS] = True
+        return
     s.info.setdefault(_PENDING_EVENTS, []).append(
         dict(source=source, message=message, level=level, granule_id=granule_id, batch_id=batch_id)
     )

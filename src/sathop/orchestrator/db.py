@@ -206,12 +206,22 @@ Index(
 
 
 class Event(Base):
+    """Display-only audit feed. In Postgres (multi-process) mode events are
+    written here transactionally with the transition that emits them (so a
+    rolled-back txn discards its events) and read back via async SELECTs; in
+    SQLite mode this table is unused and the feed lives in an in-memory deque
+    (see event_store.py). granule_id/batch_id are plain nullable columns (NOT
+    ForeignKeys) on purpose: an event outlives the granule/batch it references,
+    and eviction is an explicit sweep, not a cascade — this also keeps the row
+    free of flush-ordering constraints when staged alongside other ORM inserts."""
+
     __tablename__ = "events"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     ts: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow, index=True)
     level: Mapped[str] = mapped_column(String, default="info")
     source: Mapped[str] = mapped_column(String)
     granule_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    batch_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     message: Mapped[str] = mapped_column(Text)
 
 

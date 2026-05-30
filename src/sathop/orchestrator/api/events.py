@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import event_store, telemetry
+from .. import db, event_store, telemetry
 from ..config import require_token
 from ..db import Receiver, Worker, session
 
@@ -26,8 +26,9 @@ async def recent_events(
         "or 'orchestrator'/'scheduler'/'admin'. Powers the per-node event drill-down.",
     ),
     level: str | None = Query(default=None, description="'warn' or 'error' to narrow"),
+    s: AsyncSession = Depends(session),
 ) -> list[dict]:
-    return event_store.query(
+    kw = dict(
         limit=limit,
         since_id=since_id,
         before_id=before_id,
@@ -36,6 +37,9 @@ async def recent_events(
         source=source,
         level=level,
     )
+    if db.is_postgres():
+        return await event_store.query_db(s, **kw)
+    return event_store.query(**kw)
 
 
 @router.get("/workers")

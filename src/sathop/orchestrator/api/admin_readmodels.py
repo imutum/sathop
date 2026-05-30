@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.state_machine import ACTIVE_STATES, NON_TERMINAL_STATES, GranuleState
 
-from .. import event_store
+from .. import db, event_store
 from ..config import settings
 from ..db import Batch, Granule
 from .batch_readmodels import system_delivery_rate
@@ -77,11 +77,12 @@ async def admin_overview(s: AsyncSession, *, now: datetime) -> dict[str, Any]:
         ).all()
     }
     throughput_per_min, eta_realtime = await system_delivery_rate(s, state_counts)
+    last_events = await event_store.last_n_db(s, 10) if db.is_postgres() else event_store.last_n(10)
     return {
         "state_counts": state_counts,
         "stuck_over_hours": STUCK_AGE_HOURS,
         "stuck_by_state": stuck,
-        "last_events": event_store.last_n(10),
+        "last_events": last_events,
         "throughput_per_min": throughput_per_min,
         "eta_realtime": eta_realtime,
     }

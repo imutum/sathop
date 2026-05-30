@@ -99,12 +99,16 @@ async def sweep_orphaned_acked() -> int:
                 # Liveness from the Worker row (heartbeats persist last_seen there
                 # in PG mode), so it's correct across processes and orch restarts.
                 live_ids = (
-                    await s.execute(
-                        select(Worker.worker_id)
-                        .where(Worker.removed_at.is_(None))
-                        .where(Worker.last_seen >= cutoff)
+                    (
+                        await s.execute(
+                            select(Worker.worker_id)
+                            .where(Worker.removed_at.is_(None))
+                            .where(Worker.last_seen >= cutoff)
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
             else:
                 registered = (
                     (await s.execute(select(Worker.worker_id).where(Worker.removed_at.is_(None))))
@@ -176,11 +180,15 @@ async def sweep_retention(
     now = utcnow()
     out = {"events": 0, "granule_objects": 0, "stage_timings": 0, "granules": 0, "workers": 0}
 
-    if ev_days > 0:
-        cutoff = now - timedelta(days=ev_days)
-        out["events"] = event_store.prune_before(cutoff)
-
     async with get_session_maker()() as s:
+        if ev_days > 0:
+            # PG: DELETE old rows from the events table in this txn. SQLite: prune
+            # the in-memory deque (needs no session, harmless inside the block).
+            cutoff = now - timedelta(days=ev_days)
+            if db.is_postgres():
+                out["events"] = await event_store.prune_before_db(s, cutoff)
+            else:
+                out["events"] = event_store.prune_before(cutoff)
         if del_days > 0:
             cutoff = now - timedelta(days=del_days)
             r = await s.execute(

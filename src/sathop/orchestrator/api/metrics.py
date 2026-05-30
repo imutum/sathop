@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.state_machine import NON_TERMINAL_STATES, GranuleState
 
-from .. import event_store, telemetry
+from .. import db, event_store, telemetry
 from ..config import require_token_or_query, settings
 from ..db import Batch, Granule, Receiver, Worker, session
 
@@ -171,7 +171,10 @@ async def _collect(s: AsyncSession) -> bytes:
         g_recv_bps.labels(receiver_id=r.receiver_id).set(rt.recent_pull_bps or 0)
 
     day_ago = now - timedelta(hours=24)
-    ev_counts = event_store.count_by_level_since(day_ago)
+    if db.is_postgres():
+        ev_counts = await event_store.count_by_level_since_db(s, day_ago)
+    else:
+        ev_counts = event_store.count_by_level_since(day_ago)
     for level in ("info", "warn", "error"):
         g_events24.labels(level=level).set(ev_counts.get(level, 0))
 

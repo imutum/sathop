@@ -1,37 +1,31 @@
 """Ephemeral event log — display-only audit data, no business logic reads it.
 
-Two interchangeable backends behind one sync API (callers are unchanged):
-  - **in-memory** capped deque (single-process default).
-  - **Redis LIST** (multi-process): ``LPUSH`` + ``LTRIM`` keeps the newest
-    ``_MAX_EVENTS`` newest-first; ids come from an ``INCR`` counter so the int
-    ``since_id`` pagination contract is preserved. Append is O(1); the
-    infrequent query/prune/evict paths read the whole (≤20k) list and filter in
-    Python. Both backends lose history on a full restart; workers/receivers
+Two backends, selected by ``db.is_postgres()``:
+  - **SQLite (single-process default)**: an in-memory capped deque behind the
+    sync API below (``append``/``query``/…). Lost on restart; workers/receivers
     re-populate context within one heartbeat cycle.
+  - **Postgres (multi-process)**: the ``Event`` table (see ``db.py``). Rows are
+    written transactionally with the transition that emits them (via
+    ``pubsub.log_event`` → ``append_event_row``) and read back through the
+    async ``*_db`` helpers on the request/sweeper session, so nothing here
+    blocks the event loop and the feed is shared across uvicorn processes.
+
+The two paths never mix: the sync deque is used iff ``is_postgres()`` is False,
+the async table iff it's True. Callers branch at the call site (the established
+dual-backend pattern), so this module needs no runtime toggle of its own.
 """
 
 from __future__ import annotations
 
-import json
-import logging
 import threading
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 
-from . import redis_bus
-
-_log = logging.getLogger("sathop.orch.event_store")
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 _MAX_EVENTS = 20_000
-_K = "sathop:events"
-_SEQ = "sathop:events:seq"
-# Cap how deep a single read scans the Redis list. The list holds up to
-# _MAX_EVENTS; pulling all of them over the wire + json.loads on the event loop
-# (the read paths run sync) is what saturated Redis and stalled the loop. The
-# feed is newest-first, so this window covers the live view and recent
-# pagination; older/filtered matches beyond it are dropped (display-only data).
-_SCAN_CAP = 2_000
 
 
 @dataclass(slots=True)
@@ -50,10 +44,6 @@ _next_id: int = 1
 _lock = threading.Lock()
 
 
-def _r():
-    return redis_bus.sync() if redis_bus.enabled() else None
-
-
 def _event_dict(e: MemEvent) -> dict:
     return {
         "id": e.id,
@@ -66,6 +56,9 @@ def _event_dict(e: MemEvent) -> dict:
     }
 
 
+# ── SQLite in-memory backend (single-process) ────────────────────────────────
+
+
 def append(
     *,
     ts: datetime,
@@ -75,29 +68,6 @@ def append(
     granule_id: str | None = None,
     batch_id: str | None = None,
 ) -> int:
-    r = _r()
-    if r is not None:
-        # Best-effort: events are display-only, so a Redis hiccup must never 500
-        # the hot transition/heartbeat path that logs them.
-        try:
-            eid = int(r.incr(_SEQ))
-            e = {
-                "id": eid,
-                "ts": ts.isoformat(),
-                "level": level,
-                "source": source,
-                "granule_id": granule_id,
-                "batch_id": batch_id,
-                "message": message,
-            }
-            p = r.pipeline()
-            p.lpush(_K, json.dumps(e))
-            p.ltrim(_K, 0, _MAX_EVENTS - 1)
-            p.execute()
-            return eid
-        except Exception:
-            _log.warning("event_store.append: redis unavailable, dropping event", exc_info=False)
-            return -1
     global _next_id
     with _lock:
         eid = _next_id
@@ -116,19 +86,6 @@ def append(
     return eid
 
 
-def _redis_newest_first(r) -> list[dict]:
-    """All events as dicts, newest-first (head = highest id)."""
-    return [json.loads(x) for x in r.lrange(_K, 0, -1)]
-
-
-def _redis_rewrite(r, kept_newest_first: list[dict]) -> None:
-    p = r.pipeline()
-    p.delete(_K)
-    if kept_newest_first:
-        p.rpush(_K, *[json.dumps(e) for e in kept_newest_first])
-    p.execute()
-
-
 def query(
     *,
     limit: int = 100,
@@ -139,39 +96,28 @@ def query(
     source: str | None = None,
     level: str | None = None,
 ) -> list[dict]:
-    def emit(it):
-        results: list[dict] = []
-        for e in it:
-            if e["id"] <= since_id:
+    results: list[dict] = []
+    with _lock:
+        for e in reversed(_store):  # newest-first
+            if e.id <= since_id:
                 break
-            if before_id is not None and e["id"] >= before_id:
+            if before_id is not None and e.id >= before_id:
                 continue
-            if batch_id is not None and e["batch_id"] != batch_id:
+            if batch_id is not None and e.batch_id != batch_id:
                 continue
-            if granule_id is not None and e["granule_id"] != granule_id:
+            if granule_id is not None and e.granule_id != granule_id:
                 continue
-            if source is not None and e["source"] != source:
+            if source is not None and e.source != source:
                 continue
-            if level is not None and e["level"] != level:
+            if level is not None and e.level != level:
                 continue
-            results.append(e)
+            results.append(_event_dict(e))
             if len(results) >= limit:
                 break
-        return results
-
-    r = _r()
-    if r is not None:
-        return emit(json.loads(x) for x in r.lrange(_K, 0, _SCAN_CAP - 1))
-    with _lock:
-        return emit(_event_dict(e) for e in reversed(_store))
+    return results
 
 
 def last_n(n: int) -> list[dict]:
-    r = _r()
-    if r is not None:
-        # Bounded LRANGE — this is the overview's per-second call; pulling the
-        # whole list here was the primary Redis-saturation / loop-stall source.
-        return [json.loads(x) for x in r.lrange(_K, 0, n - 1)]
     with _lock:
         out: list[dict] = []
         for e in reversed(_store):
@@ -183,33 +129,15 @@ def last_n(n: int) -> list[dict]:
 
 def count_by_level_since(since: datetime) -> dict[str, int]:
     counts: dict[str, int] = {}
-    r = _r()
-    if r is not None:
-        # Bounded scan: counts the most recent _SCAN_CAP events within the
-        # window. Undercounts only if more than that many landed in the window
-        # — acceptable for a coarse dashboard gauge, and never a full-list pull.
-        for x in r.lrange(_K, 0, _SCAN_CAP - 1):
-            e = json.loads(x)
-            if datetime.fromisoformat(e["ts"]) < since:
-                break
-            counts[e["level"]] = counts.get(e["level"], 0) + 1
-        return counts
     with _lock:
         for e in reversed(_store):
             if e.ts < since:
-                break
+                break  # deque is chronological → all older entries are too
             counts[e.level] = counts.get(e.level, 0) + 1
     return counts
 
 
 def evict_by_granule_ids(gids: set[str]) -> int:
-    r = _r()
-    if r is not None:
-        allev = _redis_newest_first(r)
-        kept = [e for e in allev if e["granule_id"] not in gids]
-        if len(kept) != len(allev):
-            _redis_rewrite(r, kept)
-        return len(allev) - len(kept)
     with _lock:
         before = len(_store)
         keep = [e for e in _store if e.granule_id not in gids]
@@ -219,13 +147,6 @@ def evict_by_granule_ids(gids: set[str]) -> int:
 
 
 def prune_before(cutoff: datetime) -> int:
-    r = _r()
-    if r is not None:
-        allev = _redis_newest_first(r)
-        kept = [e for e in allev if datetime.fromisoformat(e["ts"]) >= cutoff]
-        if len(kept) != len(allev):
-            _redis_rewrite(r, kept)
-        return len(allev) - len(kept)
     with _lock:
         n = 0
         while _store and _store[0].ts < cutoff:
@@ -235,11 +156,109 @@ def prune_before(cutoff: datetime) -> int:
 
 
 def _clear() -> None:
-    r = _r()
-    if r is not None:
-        r.delete(_K, _SEQ)
-        return
     global _next_id
     with _lock:
         _store.clear()
         _next_id = 1
+
+
+# ── Postgres backend (multi-process): the Event table ────────────────────────
+
+
+def _row_dict(e) -> dict:
+    return {
+        "id": e.id,
+        "ts": e.ts.isoformat(),
+        "level": e.level,
+        "source": e.source,
+        "granule_id": e.granule_id,
+        "batch_id": e.batch_id,
+        "message": e.message,
+    }
+
+
+def append_event_row(
+    s: AsyncSession,
+    *,
+    ts: datetime,
+    level: str,
+    source: str,
+    message: str,
+    granule_id: str | None = None,
+    batch_id: str | None = None,
+) -> None:
+    """Stage one Event row on the live session. Sync (s.add does not flush): it
+    commits atomically with the transition's transaction and rolls back with it.
+    Called from pubsub.log_event in Postgres mode."""
+    from .db import Event
+
+    s.add(
+        Event(
+            ts=ts,
+            level=level,
+            source=source,
+            message=message,
+            granule_id=granule_id,
+            batch_id=batch_id,
+        )
+    )
+
+
+async def query_db(
+    s: AsyncSession,
+    *,
+    limit: int = 100,
+    since_id: int = 0,
+    before_id: int | None = None,
+    batch_id: str | None = None,
+    granule_id: str | None = None,
+    source: str | None = None,
+    level: str | None = None,
+) -> list[dict]:
+    from .db import Event
+
+    stmt = select(Event)
+    if since_id:
+        stmt = stmt.where(Event.id > since_id)
+    if before_id is not None:
+        stmt = stmt.where(Event.id < before_id)
+    if batch_id is not None:
+        stmt = stmt.where(Event.batch_id == batch_id)
+    if granule_id is not None:
+        stmt = stmt.where(Event.granule_id == granule_id)
+    if source is not None:
+        stmt = stmt.where(Event.source == source)
+    if level is not None:
+        stmt = stmt.where(Event.level == level)
+    stmt = stmt.order_by(Event.id.desc()).limit(limit)
+    rows = (await s.execute(stmt)).scalars().all()
+    return [_row_dict(e) for e in rows]
+
+
+async def last_n_db(s: AsyncSession, n: int) -> list[dict]:
+    return await query_db(s, limit=n)
+
+
+async def count_by_level_since_db(s: AsyncSession, since: datetime) -> dict[str, int]:
+    from .db import Event
+
+    rows = (
+        await s.execute(select(Event.level, func.count()).where(Event.ts >= since).group_by(Event.level))
+    ).all()
+    return {level: n for level, n in rows}
+
+
+async def evict_by_granule_ids_db(s: AsyncSession, gids: set[str]) -> int:
+    if not gids:
+        return 0
+    from .db import Event
+
+    r = await s.execute(delete(Event).where(Event.granule_id.in_(gids)))
+    return getattr(r, "rowcount", 0) or 0
+
+
+async def prune_before_db(s: AsyncSession, cutoff: datetime) -> int:
+    from .db import Event
+
+    r = await s.execute(delete(Event).where(Event.ts < cutoff))
+    return getattr(r, "rowcount", 0) or 0

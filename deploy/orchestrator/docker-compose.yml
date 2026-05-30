@@ -6,19 +6,24 @@ services:
     user: "${SATHOP_UID:-10001}:${SATHOP_GID:-10001}"
     environment:
       SATHOP_ROLE: orchestrator
-      # Multi-process by default: N uvicorn workers sharing the redis bus below.
-      # Override in .env — set SATHOP_ORCH_WORKERS=1 (and optionally blank
-      # SATHOP_REDIS_URL) to fall back to single-process in-memory mode.
-      SATHOP_REDIS_URL: ${SATHOP_REDIS_URL:-redis://redis:6379/0}
-      SATHOP_ORCH_WORKERS: ${SATHOP_ORCH_WORKERS:-4}
+      # Single-process SQLite by default (state in ./data). To scale onto N cores:
+      # set SATHOP_DATABASE_URL (a postgresql+asyncpg:// URL) + SATHOP_ORCH_WORKERS=N
+      # in .env and bring the stack up with `--profile scale` so the postgres
+      # service below starts too. Postgres then holds ALL authoritative state and
+      # the cross-process pub/sub (LISTEN/NOTIFY) — no Redis. See .env.example.
+      SATHOP_DATABASE_URL: ${SATHOP_DATABASE_URL:-}
+      SATHOP_ORCH_WORKERS: ${SATHOP_ORCH_WORKERS:-1}
     ports:
       - "${SATHOP_PORT:-8000}:${SATHOP_PORT:-8000}"
     volumes:
       - ./data:/app/data
       - ./repo:/app/repo
     depends_on:
-      redis:
+      postgres:
         condition: service_healthy
+        # Only required when the `scale` profile is active; a plain
+        # single-process `docker compose up` skips postgres entirely.
+        required: false
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${SATHOP_PORT:-8000}/api/health"]
       interval: 30s
@@ -26,16 +31,24 @@ services:
       start_period: 20s
       retries: 3
 
-  # Cross-process bus for the multi-worker orchestrator. Ephemeral (no
-  # persistence): events/telemetry/progress are display-only and re-populate
-  # within one heartbeat after a restart. To run single-process instead, set
-  # SATHOP_ORCH_WORKERS=1 in .env (this container then idles, harmless).
-  redis:
-    image: redis:7-alpine
+  # Authoritative state store + cross-process pub/sub for the multi-process
+  # orchestrator (route A). Unlike the old ephemeral redis, this holds the WHOLE
+  # DB, so its volume is PRECIOUS — back ./pgdata up like you would ./data.
+  # Started only under `--profile scale`; idle/absent for the single-process
+  # default. Migrate existing SQLite state into it before first multi-process
+  # boot (see scripts/migrate_sqlite_to_pg.py).
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["scale"]
     restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    environment:
+      POSTGRES_USER: ${SATHOP_PG_USER:-sathop}
+      POSTGRES_PASSWORD: ${SATHOP_PG_PASSWORD:?set SATHOP_PG_PASSWORD in .env to enable multi-process}
+      POSTGRES_DB: ${SATHOP_PG_DB:-sathop}
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U ${SATHOP_PG_USER:-sathop} -d ${SATHOP_PG_DB:-sathop}"]
       interval: 10s
       timeout: 3s
       retries: 5
