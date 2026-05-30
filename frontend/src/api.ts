@@ -61,8 +61,11 @@ const adminApi = {
   inFlight: (limit = 50) => getJson<InFlightRow[]>(`/api/admin/in-flight?limit=${limit}`),
   stuck: (limit = 50) => getJson<StuckGranule[]>(`/api/admin/stuck?limit=${limit}`),
   orchestratorInfo: () => getJson<OrchestratorInfo>("/api/admin/settings/info"),
-  updateFrontend: () =>
-    postJson<{ ok: boolean; version: string; action: string }>("/api/admin/update-frontend"),
+  // Upgrade to a specific release: the orchestrator writes .pending-version and
+  // self-restarts; the entrypoint installs that version's self-contained bundle
+  // (backend + matching frontend) on the next boot. Restart = same-version.
+  upgradeOrchestrator: (version: string) =>
+    postJson<{ ok: boolean; version: string }>("/api/admin/upgrade", { version }),
   restartOrchestrator: () => postJson<{ ok: boolean }>("/api/admin/restart"),
 };
 

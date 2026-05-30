@@ -16,7 +16,7 @@ const LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPO}/releases
 const TAGS_API = `https://api.github.com/repos/${GITHUB_REPO}/tags?per_page=1`;
 const GH_HEADERS = { Accept: "application/vnd.github+json" } as const;
 
-export type VersionStatus = "loading" | "current" | "outdated" | "unknown";
+export type VersionStatus = "unchecked" | "loading" | "current" | "outdated" | "unknown";
 
 async function fetchLatestRelease(): Promise<{ tag: string; htmlUrl: string }> {
   const releaseR = await fetch(LATEST_RELEASE_API, { headers: GH_HEADERS });
@@ -37,15 +37,17 @@ async function fetchLatestRelease(): Promise<{ tag: string; htmlUrl: string }> {
   };
 }
 
-// The shared GitHub query. Checked once on first load, then never auto-refetched
-// (staleTime: Infinity gates both refetch-on-mount and refetch-on-focus) — the
-// only re-check is the manual refresh button in the sidebar VersionStatus. Its
-// sole consumer is that sidebar banner; per-node cards compare against the
-// orchestrator version, not GitHub, so they never touch this query.
+// The shared GitHub query. NEVER auto-fetches (`enabled: false`) — checking for
+// a newer release is an explicit operator action (the refresh button in the
+// sidebar VersionStatus / settings), not a background poll. `refetch()` is the
+// only thing that hits GitHub. Keyed by K.githubRelease so the sidebar banner
+// and settings page share one result once checked; per-node cards compare
+// against the orchestrator version, not GitHub, so they never touch this query.
 export function useLatestRelease() {
   return useQuery({
     queryKey: [...K.githubRelease],
     queryFn: fetchLatestRelease,
+    enabled: false,
     staleTime: Infinity,
     retry: 1,
   });
@@ -61,7 +63,8 @@ export function useVersionCheck(current: MaybeRefOrGetter<string | undefined>) {
   const htmlUrl = computed(() => latest.data.value?.htmlUrl ?? RELEASES_URL);
 
   const status = computed<VersionStatus>(() => {
-    if (latest.isPending.value) return "loading";
+    if (latest.isFetching.value) return "loading";
+    if (!latest.isFetched.value) return "unchecked"; // never checked (no auto-poll)
     if (latest.isError.value || !latestTag.value || !currentVersion.value) return "unknown";
     return compareSemver(currentVersion.value, latestTag.value) >= 0 ? "current" : "outdated";
   });

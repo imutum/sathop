@@ -35,6 +35,8 @@ const statusLabel = computed(() => {
       return `有新版本 ${latestTag.value} 可用`;
     case "loading":
       return "正在检查更新…";
+    case "unchecked":
+      return "点击下方按钮检查更新";
     default:
       return "无法访问 GitHub（网络或限流）";
   }
@@ -123,8 +125,8 @@ function refresh() {
         最新发布版本：<span class="font-mono">{{ latestTag }}</span>
       </div>
 
-      <!-- Check + update live together: when behind, the path to the update
-           action is one click away (Settings hosts the orchestrator restart). -->
+      <!-- When behind, the upgrade action is one click away — Settings hosts the
+           "升级到 vX 并重启" button (downloads that version's bundle, restarts). -->
       <Button
         v-if="status === 'outdated'"
         as-child
@@ -134,7 +136,7 @@ function refresh() {
       >
         <RouterLink to="/settings">
           <Icon name="download" :size="13" />
-          前往更新并重启
+          前往升级
         </RouterLink>
       </Button>
 

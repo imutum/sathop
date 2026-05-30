@@ -1,7 +1,6 @@
 """Orchestrator entrypoint."""
 
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -43,34 +42,12 @@ def _print_banner() -> None:
         print(ln, flush=True)
 
 
-async def _sync_frontend() -> None:
-    """Keep a deployed dist in lockstep with the running code: after a code
-    upgrade the UI a version behind is refreshed to match.
-
-    Acts only on a dist that carries a `.version` stamp AND is stale — so it
-    never bootstraps a missing dist (the entrypoint's first-boot job) nor
-    clobbers a developer's stampless `npm run build`. Best-effort: a download
-    failure keeps the existing dist and never blocks startup."""
-    stamp = WEB_DIST / ".version"
-    if not stamp.is_file() or stamp.read_text().strip() == __version__:
-        return
-    try:
-        from .frontend_sync import ensure_frontend
-
-        # Short timeout: a hanging GitHub must not stall startup (and the
-        # healthcheck's 20s start_period) — fall back to the existing dist.
-        result = await ensure_frontend(__version__, timeout=15)
-        if result["action"] == "downloaded":
-            print(f"  Web UI synced → v{__version__}", flush=True)
-    except Exception as e:
-        logging.getLogger("sathop.orchestrator").warning("frontend sync skipped: %s", e)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # frontend/dist ships inside the per-version bundle the entrypoint installs,
+    # so it's always in lockstep with this code — no boot-time sync needed.
     _print_banner()
     await init_db()
-    await _sync_frontend()
     bg = [
         asyncio.create_task(run_lease_sweeper()),
         asyncio.create_task(run_retention()),

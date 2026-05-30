@@ -1,16 +1,14 @@
-"""Orchestrator self-restart flow: graceful-shutdown signalling + version-gated
-frontend sync.
+"""Orchestrator self-restart / upgrade flow: graceful-shutdown signalling.
 
-These cover the fix for "click 更新并重启 → process hangs in graceful shutdown":
-the long-lived /api/stream connection must observe a shutdown signal and close
-promptly, and the dist must re-sync to the running version on boot."""
+Covers the fix for "click 重启 → process hangs in graceful shutdown": the
+long-lived /api/stream connection must observe a shutdown signal and close
+promptly. Also covers the version-upgrade endpoint that writes `.pending-version`
+for the entrypoint to consume (one self-contained bundle per version — backend +
+matching frontend — so they can't drift)."""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import io
-import tarfile
 
 import httpx
 import pytest
@@ -98,62 +96,66 @@ def test_health_includes_web_sha(client):
     assert "web_sha" in body  # str (dist deployed) or None
 
 
-# ─── frontend sync ───────────────────────────────────────────────────────────
+# ─── version upgrade endpoint ────────────────────────────────────────────────
 
 
-def _dist_targz(html: bytes) -> bytes:
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
-        info = tarfile.TarInfo("dist/index.html")
-        info.size = len(html)
-        tf.addfile(info, io.BytesIO(html))
-    return buf.getvalue()
+def test_upgrade_rejects_bad_version(client):
+    """A non-version string is refused (422) before anything is written."""
+    r = client.post("/api/admin/upgrade", json={"version": "not-a-version"})
+    assert r.status_code == 422
 
 
-async def test_ensure_frontend_version_gated_no_network(tmp_path, monkeypatch):
-    """Matching .version short-circuits before any HTTP — restarts at the same
-    version cost nothing."""
-    from sathop.orchestrator import frontend_sync as fs
+def test_upgrade_writes_pending_and_triggers_shutdown(tmp_path, monkeypatch, client):
+    """A valid, downloadable version writes .pending-version and asks for restart.
 
-    dist = tmp_path / "frontend" / "dist"
-    dist.mkdir(parents=True)
-    (dist / "index.html").write_text("ui")
-    (dist / ".version").write_text("0.6.10")
-    monkeypatch.setattr(fs, "_DIST_DIR", dist)
+    HEAD is mocked OK, the repo-root is redirected to a tmp dir, and the SIGTERM
+    scheduling is stubbed so the test process survives."""
+    from sathop.orchestrator import pubsub
+    from sathop.orchestrator.api import admin
 
-    # No httpx patch: if it tried the network the MockTransport-less client would
-    # fail. It must not get that far.
-    res = await fs.ensure_frontend("0.6.10")
-    assert res["action"] == "already_up_to_date"
+    monkeypatch.setattr(admin, "_repo_root", lambda: tmp_path)
+
+    real_client = httpx.AsyncClient  # capture before patching to avoid recursion
+
+    def ok_client(*_a, **_k):
+        return real_client(
+            transport=httpx.MockTransport(lambda _req: httpx.Response(200)),
+            follow_redirects=True,
+        )
+
+    monkeypatch.setattr(admin.httpx, "AsyncClient", ok_client)
+
+    triggered = {"v": False}
+    monkeypatch.setattr(admin, "_trigger_shutdown", lambda: triggered.__setitem__("v", True))
+    pubsub.reset_shutdown()
+
+    r = client.post("/api/admin/upgrade", json={"version": "v9.9.9"})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "version": "9.9.9"}
+    assert (tmp_path / ".pending-version").read_text() == "9.9.9"
+    assert triggered["v"] is True
 
 
-async def test_ensure_frontend_downloads_on_version_mismatch(tmp_path, monkeypatch):
-    from sathop.orchestrator import frontend_sync as fs
+def test_upgrade_502_when_asset_missing(tmp_path, monkeypatch, client):
+    """A version whose release asset 404s fails fast (no pending write, no
+    restart) — better than crash-looping the container post-restart."""
+    from sathop.orchestrator.api import admin
 
-    dist = tmp_path / "frontend" / "dist"
-    dist.mkdir(parents=True)
-    (dist / "index.html").write_text("old")
-    (dist / ".version").write_text("0.6.9")
-    monkeypatch.setattr(fs, "_DIST_DIR", dist)
+    monkeypatch.setattr(admin, "_repo_root", lambda: tmp_path)
 
-    payload = _dist_targz(b"<html>v0.6.10</html>")
+    real_client = httpx.AsyncClient  # capture before patching to avoid recursion
 
-    def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=payload)
+    def missing_client(*_a, **_k):
+        return real_client(
+            transport=httpx.MockTransport(lambda _req: httpx.Response(404)),
+            follow_redirects=True,
+        )
 
-    real_client = httpx.AsyncClient
+    monkeypatch.setattr(admin.httpx, "AsyncClient", missing_client)
+    triggered = {"v": False}
+    monkeypatch.setattr(admin, "_trigger_shutdown", lambda: triggered.__setitem__("v", True))
 
-    def factory(*_a, **_k):
-        return real_client(transport=httpx.MockTransport(handler), follow_redirects=True)
-
-    monkeypatch.setattr(fs.httpx, "AsyncClient", factory)
-
-    res = await fs.ensure_frontend("0.6.10")
-    assert res["action"] == "downloaded"
-    assert (dist / "index.html").read_text() == "<html>v0.6.10</html>"
-    assert (dist / ".version").read_text() == "0.6.10"
-    assert (dist / ".sha256").read_text() == hashlib.sha256(payload).hexdigest()
-
-    # Same bytes again (force bypasses the version gate) → sha matches, no swap.
-    res2 = await fs.ensure_frontend("0.6.10", force=True)
-    assert res2["action"] == "already_up_to_date"
+    r = client.post("/api/admin/upgrade", json={"version": "0.0.1"})
+    assert r.status_code == 502
+    assert not (tmp_path / ".pending-version").exists()
+    assert triggered["v"] is False

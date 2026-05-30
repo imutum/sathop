@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
 # Unified runtime shell: all three components in one image.
-# Source code arrives at startup via git pull, not at build time.
+# Source + frontend arrive at startup as a per-version release bundle the
+# entrypoint downloads + extracts (sathop-bundle.tar.gz), not baked in.
 # Rebuild only when pyproject.toml / uv.lock change (new deps).
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
