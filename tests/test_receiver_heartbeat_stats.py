@@ -18,7 +18,7 @@ from sathop.orchestrator.main import app
 from sathop.receiver.config import Settings as RecvSettings
 from sathop.receiver.puller import PullStats as _PullStats
 from sathop.receiver.runtime import Receiver as ReceiverAgent
-from sathop.shared.protocol import AckReport, PullItem
+from sathop.shared.protocol import PullItem
 
 # ─── _PullStats unit tests ────────────────────────────────────────────────
 

@@ -121,6 +121,42 @@ async def pull(req: PullRequest, s: AsyncSession = Depends(session)) -> PullResp
     return PullResponse(items=items)
 
 
+async def _record_pull_failure(
+    s: AsyncSession, receiver_id: str, obj: GranuleObject, error: str | None, bid: str | None
+) -> bool:
+    """Bump the object's failed-pull counter and log it; return whether it's now
+    exhausted (>= max_pull_failures). Shared by /ack and /ack/batch."""
+    obj.failed_pulls = (obj.failed_pulls or 0) + 1
+    exhausted = obj.failed_pulls >= settings.max_pull_failures
+    await log(
+        s,
+        receiver_id,
+        f"pull failed ({obj.failed_pulls}/{settings.max_pull_failures}): {error}"
+        + (" — giving up, no further offers" if exhausted else ""),
+        level="error" if exhausted else "warn",
+        granule_id=obj.granule_id,
+        batch_id=bid,
+    )
+    return exhausted
+
+
+async def _log_sha_mismatch(s: AsyncSession, receiver_id: str, obj: GranuleObject, bid: str | None) -> None:
+    await log(
+        s,
+        receiver_id,
+        f"sha256 mismatch object_id={obj.id}",
+        level="error",
+        granule_id=obj.granule_id,
+        batch_id=bid,
+    )
+
+
+async def _mark_acked(s: AsyncSession, receiver_id: str, obj: GranuleObject, bid: str | None, now) -> None:
+    obj.acked_at = now
+    obj.acked_by = receiver_id
+    await log(s, receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id, batch_id=bid)
+
+
 @router.post("/ack")
 async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
     obj = await get_or_404(s, GranuleObject, req.object_id, "object not found")
@@ -128,83 +164,38 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
     bid = g.batch_id if g else None
 
     if not req.success:
-        new_failed = (obj.failed_pulls or 0) + 1
-        obj.failed_pulls = new_failed
-        exhausted = new_failed >= settings.max_pull_failures
-        await log(
-            s,
-            req.receiver_id,
-            f"pull failed ({obj.failed_pulls}/{settings.max_pull_failures}): {req.error}"
-            + (" — giving up, no further offers" if exhausted else ""),
-            level="error" if exhausted else "warn",
-            granule_id=obj.granule_id,
-            batch_id=bid,
-        )
+        exhausted = await _record_pull_failure(s, req.receiver_id, obj, req.error, bid)
         await commit_and_publish(s)
         return {"ok": True, "retried": not exhausted, "failed_pulls": obj.failed_pulls}
 
     if req.sha256 != obj.sha256:
-        await log(
-            s,
-            req.receiver_id,
-            f"sha256 mismatch object_id={req.object_id}",
-            level="error",
-            granule_id=obj.granule_id,
-            batch_id=bid,
-        )
+        await _log_sha_mismatch(s, req.receiver_id, obj, bid)
         raise HTTPException(400, "sha256 mismatch")
 
     now = utcnow()
-    obj.acked_at = now
-    obj.acked_by = req.receiver_id
-
+    await _mark_acked(s, req.receiver_id, obj, bid, now)
     # Flush so the just-set acked_at is visible to the aggregate count below.
     await s.flush()
     all_acked = await s.scalar(select(all_objects_acked()).where(GranuleObject.granule_id == obj.granule_id))
     if g is not None and all_acked:
-        await apply_transition(
-            s,
-            g,
-            ObjectAcked(granule_id=g.granule_id),
-            now=now,
-            on_conflict="skip",
-        )
-    await log(s, req.receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id, batch_id=bid)
+        await apply_transition(s, g, ObjectAcked(granule_id=g.granule_id), now=now, on_conflict="skip")
     await commit_and_publish(s, Scope.BATCHES)
     return {"ok": True}
 
 
 async def _apply_ack(s: AsyncSession, a: AckReport, obj: GranuleObject, bid: str | None, now) -> bool:
     """Apply one ack to its (already-loaded) object. Returns True if it became
-    acked (so the caller checks that granule for UPLOADED→ACKED). Mirrors the
-    single /ack body minus the per-call commit; on a non-fatal issue (failed
-    pull, sha mismatch) it logs and returns False — never raises."""
+    acked (so the caller checks that granule for UPLOADED→ACKED). Shares the
+    failure/mismatch/ack-set side effects with the single /ack via the helpers
+    above; differs only in that a non-fatal issue logs and returns False rather
+    than shaping a response / raising 400 / committing."""
     if not a.success:
-        obj.failed_pulls = (obj.failed_pulls or 0) + 1
-        exhausted = obj.failed_pulls >= settings.max_pull_failures
-        await log(
-            s,
-            a.receiver_id,
-            f"pull failed ({obj.failed_pulls}/{settings.max_pull_failures}): {a.error}"
-            + (" — giving up, no further offers" if exhausted else ""),
-            level="error" if exhausted else "warn",
-            granule_id=obj.granule_id,
-            batch_id=bid,
-        )
+        await _record_pull_failure(s, a.receiver_id, obj, a.error, bid)
         return False
     if a.sha256 != obj.sha256:
-        await log(
-            s,
-            a.receiver_id,
-            f"sha256 mismatch object_id={a.object_id}",
-            level="error",
-            granule_id=obj.granule_id,
-            batch_id=bid,
-        )
+        await _log_sha_mismatch(s, a.receiver_id, obj, bid)
         return False
-    obj.acked_at = now
-    obj.acked_by = a.receiver_id
-    await log(s, a.receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id, batch_id=bid)
+    await _mark_acked(s, a.receiver_id, obj, bid, now)
     return True
 
 
@@ -240,13 +231,17 @@ async def ack_batch(req: AckBatch, s: AsyncSession = Depends(session)) -> AckBat
     if acked_granules:
         await s.flush()
         done = (
-            await s.execute(
-                select(GranuleObject.granule_id)
-                .where(GranuleObject.granule_id.in_(acked_granules))
-                .group_by(GranuleObject.granule_id)
-                .having(all_objects_acked())
+            (
+                await s.execute(
+                    select(GranuleObject.granule_id)
+                    .where(GranuleObject.granule_id.in_(acked_granules))
+                    .group_by(GranuleObject.granule_id)
+                    .having(all_objects_acked())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for gid in done:
             g = g_by_id.get(gid)
             if g is not None:

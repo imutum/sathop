@@ -246,16 +246,13 @@ async def emit_events_batch(
     now = utcnow()
     scopes: set[Scope] = set()
     revoked: list[str] = []
-    seen_revoked: set[str] = set()
     for event in req.events:
         g = by_id.get(event.granule_id)
         # DeleteConfirmed is gated by /deletable (ownership + ack state); the rest
         # require this worker to still hold the lease. A miss/steal is skipped, not
-        # fatal to the batch — record it once for the worker to drop.
+        # fatal to the batch — recorded for the worker to drop (deduped on return).
         if g is None or (not isinstance(event, DeleteConfirmed) and g.leased_by != event.worker_id):
-            if event.granule_id not in seen_revoked:
-                seen_revoked.add(event.granule_id)
-                revoked.append(event.granule_id)
+            revoked.append(event.granule_id)
             continue
         result = await apply_transition(s, g, event, now=now, on_conflict="skip")
         if result is None:
@@ -264,7 +261,7 @@ async def emit_events_batch(
         if result.publish_scope is not None:
             scopes.add(result.publish_scope)
     await commit_and_publish(s, *scopes)
-    return WorkerEventBatchResponse(revoked_granule_ids=revoked)
+    return WorkerEventBatchResponse(revoked_granule_ids=list(dict.fromkeys(revoked)))
 
 
 @router.get("/deletable/{worker_id}")

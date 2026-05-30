@@ -48,7 +48,6 @@ class FlushBuffer(Generic[T]):
         self._max_buffer = max_buffer
         self._q: list[T] = []
         self._wake = asyncio.Event()
-        self._stopped = False
 
     def enqueue(self, item: T) -> None:
         """Non-blocking append. A `wake_on` item or a full batch wakes the
@@ -62,7 +61,7 @@ class FlushBuffer(Generic[T]):
         cancellation (drain — producers have stopped, no new items arrive) drain
         the whole backlog so just-finished producers' last items still land."""
         try:
-            while not self._stopped:
+            while True:
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=self._interval)
                 except TimeoutError:
