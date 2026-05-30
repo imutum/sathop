@@ -417,3 +417,82 @@ async def test_pull_does_not_refresh_when_trust_orch_disabled(tmp_path, monkeypa
     assert refreshes == 0
     assert len(acks) == 1
     assert acks[0].success is False
+
+
+def _stub_ca_bundle(monkeypatch, pem: str, hits: dict, *, delay: float = 0.0):
+    """Patch runtime.make_orch_client so _refresh_trust fetches `pem` from a fake
+    /api/receivers/ca-bundle, counting hits in `hits['n']`. `delay` forces the
+    fetch to yield so concurrent callers can pile up on the trust lock."""
+    from sathop.receiver import runtime as rt
+
+    class _Resp:
+        status_code = 200
+        text = pem
+
+        def raise_for_status(self):
+            pass
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, path):
+            assert path == "/api/receivers/ca-bundle"
+            if delay:
+                await asyncio.sleep(delay)
+            hits["n"] += 1
+            return _Resp()
+
+    monkeypatch.setattr(rt, "make_orch_client", lambda *a, **kw: _Client())
+
+
+def _self_signed_pem(tmp_path: Path) -> str:
+    from sathop.worker import tls
+
+    cert, key = tmp_path / "ca.pem", tmp_path / "ca.key"
+    tls.generate_self_signed("127.0.0.1", cert, key)
+    return cert.read_text()
+
+
+async def test_refresh_trust_mutates_context_without_rebuilding_client(tmp_path, monkeypatch):
+    """The core fix: refreshing trust must ADD the CA to the live SSLContext in
+    place and leave the shared pull client untouched — never rebuild/close it
+    out from under concurrent in-flight pulls (the old behaviour, which caused a
+    self-amplifying teardown storm)."""
+    pem = _self_signed_pem(tmp_path)
+    hits = {"n": 0}
+    _stub_ca_bundle(monkeypatch, pem, hits)
+
+    r, _ = _make_receiver(tmp_path)
+    assert r._ssl_ctx is not None
+    before = r._pull_client
+
+    await r._refresh_trust()
+
+    assert r._pull_client is before, "pull client must NOT be rebuilt/closed on refresh"
+    assert hits["n"] == 1
+    assert (r.s.storage_dir / ".orch-ca-bundle.pem").read_text() == pem
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import serialization
+
+    our_der = x509.load_pem_x509_certificate(pem.encode()).public_bytes(serialization.Encoding.DER)
+    assert our_der in set(r._ssl_ctx.get_ca_certs(binary_form=True)), "CA must be live in the context"
+
+
+async def test_concurrent_refresh_trust_coalesces_to_single_fetch(tmp_path, monkeypatch):
+    """A herd of concurrent cert errors must collapse to ONE /ca-bundle fetch,
+    not one per failing pull. A genuinely later refresh still fetches again."""
+    pem = _self_signed_pem(tmp_path)
+    hits = {"n": 0}
+    _stub_ca_bundle(monkeypatch, pem, hits, delay=0.02)
+
+    r, _ = _make_receiver(tmp_path)
+    await asyncio.gather(*(r._refresh_trust() for _ in range(16)))
+    assert hits["n"] == 1, "16 concurrent refreshes must coalesce into one fetch"
+
+    await r._refresh_trust()
+    assert hits["n"] == 2, "a later refresh past the coalescing window fetches again"

@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop import __version__
@@ -24,7 +24,7 @@ from ..config import require_token, settings
 from ..db import Batch, Bundle, Granule, GranuleObject, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ._helpers import object_is_pullable
+from ._helpers import object_is_exhausted, object_is_pullable
 from ._transition import apply_transition
 from .admin_readmodels import (
     NON_TERMINAL,
@@ -243,6 +243,29 @@ async def requeue_undeliverable(
         await log(s, "admin", f"re-queued {len(granules)} undeliverable granule(s)")
     await commit_and_publish(s, Scope.BATCHES if granules else None)
     return {"requeued": len(granules)}
+
+
+@router.post("/reset-pull-failures")
+async def reset_pull_failures(
+    batch_id: str | None = None,
+    s: AsyncSession = Depends(session),
+) -> dict:
+    """Re-offer objects abandoned by pull-failure exhaustion WITHOUT redownloading.
+    Zeroes failed_pulls on every still-pending object that hit the cap, so the
+    receiver picks them up on the next pull. Use this — not requeue-undeliverable —
+    when the worker still holds the bytes (presigned URL works) and the failures
+    were collateral of a transient receiver-side fault, not a dead object. Scope
+    with ?batch_id=, else sweeps every batch."""
+    stmt = update(GranuleObject).where(object_is_exhausted()).values(failed_pulls=0)
+    if batch_id:
+        stmt = stmt.where(
+            GranuleObject.granule_id.in_(select(Granule.granule_id).where(Granule.batch_id == batch_id))
+        )
+    n = (await s.execute(stmt)).rowcount or 0
+    if n:
+        await log(s, "admin", f"reset pull-failure counter on {n} exhausted object(s)")
+    await commit_and_publish(s, Scope.BATCHES if n else None)
+    return {"reset": n}
 
 
 @router.post("/update-frontend")

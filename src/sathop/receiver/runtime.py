@@ -4,6 +4,7 @@ import asyncio
 import logging
 import shutil
 import ssl
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -79,7 +80,9 @@ class Receiver:
         self.client = OrchestratorClient(s.orchestrator_url, s.token)
         self.stats = puller.PullStats()
         s.storage_dir.mkdir(parents=True, exist_ok=True)
-        self._verify: bool | str = s.tls_verify
+        self._trust_lock = asyncio.Lock()
+        self._last_trust_refresh = 0.0
+        self._ssl_ctx = self._init_ssl_context()
         self._pull_client: httpx.AsyncClient = self._build_pull_client()
         self._health = HealthServer(s.health_port)
         self._draining = False
@@ -104,11 +107,22 @@ class Receiver:
             reclaim_message="orchestrator will re-offer un-acked objects",
         )
 
+    def _init_ssl_context(self) -> ssl.SSLContext | None:
+        """One mutable trust store backing the shared pull client. Worker CAs are
+        *added* to it in place on refresh (load_verify_locations), so updating
+        trust never rebuilds or closes the client out from under in-flight pulls.
+        Built only when we both verify and source trust from the orchestrator;
+        plain bool verify (True/False) is left to httpx."""
+        if self.s.tls_verify and self.s.tls_trust_orch:
+            return ssl.create_default_context()
+        return None
+
     def _build_pull_client(self) -> httpx.AsyncClient:
+        verify: bool | ssl.SSLContext = self._ssl_ctx if self._ssl_ctx is not None else self.s.tls_verify
         return httpx.AsyncClient(
             timeout=httpx.Timeout(30.0, read=600.0),
             follow_redirects=True,
-            verify=self._verify,
+            verify=verify,
             limits=httpx.Limits(max_connections=300, max_keepalive_connections=100),
         )
 
@@ -124,22 +138,31 @@ class Receiver:
         await self._refresh_trust()
 
     async def _refresh_trust(self) -> None:
-        bundle_path = self.s.storage_dir / ".orch-ca-bundle.pem"
-        # Use system CAs for this one fetch — we're bootstrapping trust, so
-        # the orchestrator-managed bundle isn't available yet by definition.
-        async with make_orch_client(self.s.orchestrator_url, self.s.token, timeout=15.0) as c:
-            r = await c.get("/api/receivers/ca-bundle")
-        if r.status_code == 204:
-            log.warning("orchestrator has no worker CAs — using system CAs")
+        """Add the orchestrator's worker-CA bundle to the live trust store in
+        place. Concurrent cert errors coalesce: whoever wins the lock fetches
+        once; tasks whose request predates that fetch find their trust already
+        current and return. In-flight pulls on the shared client are never
+        disturbed — new connections pick up the added CAs at handshake."""
+        if self._ssl_ctx is None:
             return
-        r.raise_for_status()
-        bundle_path.parent.mkdir(parents=True, exist_ok=True)
-        bundle_path.write_text(r.text, encoding="utf-8")
-        self._verify = str(bundle_path)
-        old = self._pull_client
-        self._pull_client = self._build_pull_client()
-        await old.aclose()
-        log.info("trusting orchestrator-managed CA bundle at %s (%d bytes)", bundle_path, len(r.text))
+        requested_at = time.monotonic()
+        async with self._trust_lock:
+            if self._last_trust_refresh > requested_at:
+                return
+            bundle_path = self.s.storage_dir / ".orch-ca-bundle.pem"
+            # System CAs for this one fetch — we bootstrap against the
+            # orchestrator's own endpoint, not a worker's self-signed cert.
+            async with make_orch_client(self.s.orchestrator_url, self.s.token, timeout=15.0) as c:
+                r = await c.get("/api/receivers/ca-bundle")
+            self._last_trust_refresh = time.monotonic()
+            if r.status_code == 204:
+                log.warning("orchestrator has no worker CAs — using system CAs")
+                return
+            r.raise_for_status()
+            bundle_path.parent.mkdir(parents=True, exist_ok=True)
+            bundle_path.write_text(r.text, encoding="utf-8")
+            self._ssl_ctx.load_verify_locations(cafile=str(bundle_path))
+            log.info("trusting orchestrator-managed CA bundle at %s (%d bytes)", bundle_path, len(r.text))
 
     async def run(self) -> None:
         self._install_signal_handlers()
