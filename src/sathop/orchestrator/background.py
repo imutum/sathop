@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from datetime import timedelta
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 
 from sathop.shared.periodic import run_periodic
 from sathop.shared.state_machine import LEASED_STATES, GranuleState, ReconcileOrphanDeleted, Scope
 
-from . import event_store, redis_bus, telemetry
+from . import db, event_store, telemetry
 from .api._transition import apply_transition
 from .api.progress import evict_granule, evict_granules
 from .config import settings
@@ -228,38 +227,34 @@ async def run_retention() -> None:
     )
 
 
-_LEADER_KEY = "sathop:leader"
-_LEADER_TTL_MS = 15_000
+# Session-level advisory-lock key: the holder is the background-task leader. The
+# lock lives on that session's connection, so if the leader process dies the
+# connection drops and Postgres auto-releases it for another process to claim.
+_LEADER_KEY = 0x5A7410
 
 
 async def run_leader_tasks() -> None:
     """Run the periodic sweepers in exactly one process.
 
-    Single-process (no redis): run them directly. Multi-process: hold a Redis
-    leader lock while running; renew at TTL/3. If renewal ever fails (we stalled
-    past the TTL and another process took over), cancel our sweepers and contend
-    again — so leadership always lands on exactly one live process, and a crashed
-    leader's lock lapses within the TTL for another to claim."""
-    if not redis_bus.enabled():
+    SQLite (single-process): run them directly. Postgres (multi-process): contend
+    for a session-level advisory lock; only the holder runs the sweepers. A
+    crashed leader's connection drops → Postgres frees the lock → a contender
+    picks it up on the next retry."""
+    if not db.is_postgres():
         await asyncio.gather(run_lease_sweeper(), run_retention())
         return
-    token = uuid.uuid4().hex
-    renew_every = _LEADER_TTL_MS / 1000 / 3
+    from .db import get_session_maker
+
     while True:
-        if await redis_bus.acquire_leader(_LEADER_KEY, token, _LEADER_TTL_MS):
-            _log.info("became background-task leader")
-            tasks = [
-                asyncio.create_task(run_lease_sweeper()),
-                asyncio.create_task(run_retention()),
-            ]
-            try:
-                while await redis_bus.renew_leader(_LEADER_KEY, token, _LEADER_TTL_MS):
-                    await asyncio.sleep(renew_every)
-                _log.warning("lost background-task leadership; standing down")
-            finally:
-                for t in tasks:
-                    t.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-                await redis_bus.release_leader(_LEADER_KEY, token)
-        else:
-            await asyncio.sleep(_LEADER_TTL_MS / 1000 / 2)
+        async with get_session_maker()() as lock_s:
+            got = bool(await lock_s.scalar(text("SELECT pg_try_advisory_lock(:k)"), {"k": _LEADER_KEY}))
+            if got:
+                _log.info("became background-task leader (pg advisory lock)")
+                try:
+                    # Holds the lock for as long as lock_s stays open; gather only
+                    # returns on cancellation (shutdown), which releases it.
+                    await asyncio.gather(run_lease_sweeper(), run_retention())
+                finally:
+                    await lock_s.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _LEADER_KEY})
+                return
+        await asyncio.sleep(7)  # not leader — retry so a dead leader is replaced

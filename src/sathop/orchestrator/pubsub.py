@@ -10,16 +10,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.state_machine import Scope
 
-from . import event_store, redis_bus
+from . import db, event_store
+from .config import settings
 from .db import utcnow
 
 log = logging.getLogger("sathop.pubsub")
 
-# Cross-process pub/sub channel. When redis_bus is enabled, every nudge is
-# PUBLISHed here and each process's run_listener() re-emits it to its own local
-# SSE subscribers — so a state change handled by one uvicorn worker reaches
-# browsers connected to any worker.
-_CHANNEL = "sathop:pubsub"
+# Cross-process pub/sub channel (Postgres mode). Every nudge except __shutdown__
+# is sent via NOTIFY and each process's run_listener() (a dedicated asyncpg
+# LISTEN connection) re-emits it to its own local SSE subscribers — so a state
+# change handled by one uvicorn worker reaches browsers connected to any worker.
+# asyncpg LISTEN/NOTIFY is fully async, so nothing here blocks the event loop.
+_CHANNEL = "sathop_pubsub"
+
+# Outbound NOTIFY queue: publish() (sometimes called from sync code on the loop
+# thread) enqueues without blocking; run_notify_sender() drains it on a dedicated
+# connection. Bounded so a stalled sender sheds load instead of growing unbounded.
+_notify_q: asyncio.Queue[str] = asyncio.Queue(maxsize=4096)
+
+
+def _dsn() -> str:
+    """Plain libpq DSN for a raw asyncpg connection (LISTEN/NOTIFY needs the
+    driver directly, not the SQLAlchemy '+asyncpg' URL)."""
+    return settings.database_url.replace("+asyncpg", "", 1)
 
 _subscribers: set[asyncio.Queue[dict]] = set()
 _QUEUE_MAX = 512
@@ -94,48 +107,77 @@ def _local_publish(event: dict) -> None:
 def publish(event: dict) -> None:
     """Publish a nudge/event to all SSE subscribers across all processes.
 
-    With redis_bus enabled, every event except ``__shutdown__`` is PUBLISHed to
-    the shared channel and re-emitted locally by each process's listener;
-    coalescing happens per-process on receive. ``__shutdown__`` stays local — it
-    only needs to wake *this* process's streams before it exits, and uvicorn's
-    SIGTERM-to-all-workers + ``timeout_graceful_shutdown`` backstop covers the
-    rest. Single-process (no redis) goes straight to the local fan-out."""
-    c = redis_bus.sync() if redis_bus.enabled() else None
-    if c is not None and event.get("scope") != "__shutdown__":
+    In Postgres mode every event except ``__shutdown__`` is enqueued for a NOTIFY
+    and re-emitted in each process by its LISTEN connection (this process included,
+    so local subscribers get it that way); coalescing happens per-process on
+    receive. ``__shutdown__`` stays local — it only needs to wake *this* process's
+    streams before it exits; uvicorn's SIGTERM-to-all-workers +
+    ``timeout_graceful_shutdown`` covers the rest. Single-process (SQLite) goes
+    straight to the local fan-out."""
+    if db.is_postgres() and event.get("scope") != "__shutdown__":
         try:
-            c.publish(_CHANNEL, json.dumps(event))
-            return
-        except Exception:
-            log.exception("redis publish failed; falling back to local fan-out")
+            _notify_q.put_nowait(json.dumps(event))
+        except asyncio.QueueFull:
+            log.warning("notify queue full, dropping nudge: %s", event)
+        return
     _local_publish(event)
 
 
-async def run_listener() -> None:
-    """Per-process loop: re-emit cross-process nudges to local SSE subscribers.
+async def run_notify_sender() -> None:
+    """Drain the outbound queue, emitting one NOTIFY per nudge on a dedicated
+    asyncpg connection. Spawned in lifespan in Postgres mode."""
+    import asyncpg
 
-    Spawned in lifespan only when redis_bus is enabled. Reconnects on error;
-    exits when shutdown is requested."""
-    c = redis_bus.aclient()
-    if c is None:
-        return
+    conn = None
     while not _shutdown_requested:
         try:
-            ps = c.pubsub()
-            await ps.subscribe(_CHANNEL)
-            async for msg in ps.listen():
-                if _shutdown_requested:
-                    break
-                if msg.get("type") != "message":
-                    continue
-                try:
-                    _local_publish(json.loads(msg["data"]))
-                except Exception:
-                    log.exception("dropping malformed pubsub message")
+            if conn is None:
+                conn = await asyncpg.connect(_dsn())
+            payload = await asyncio.wait_for(_notify_q.get(), timeout=1.0)
+            await conn.execute("SELECT pg_notify($1, $2)", _CHANNEL, payload)
+        except TimeoutError:
+            continue  # idle tick — re-check shutdown flag
         except asyncio.CancelledError:
-            raise
+            break
+        except Exception:
+            log.exception("notify sender error; reconnecting")
+            if conn is not None:
+                await conn.close()
+            conn = None
+            await asyncio.sleep(1)
+    if conn is not None:
+        await conn.close()
+
+
+async def run_listener() -> None:
+    """Per-process LISTEN loop: re-emit cross-process nudges to local SSE
+    subscribers. asyncpg delivers notifications via a sync callback, which feeds
+    the same coalescing/fan-out as a local publish. Reconnects on error."""
+    import asyncpg
+
+    def _on_notify(_conn, _pid, _chan, payload: str) -> None:
+        try:
+            _local_publish(json.loads(payload))
+        except Exception:
+            log.exception("dropping malformed pubsub notification")
+
+    conn = None
+    while not _shutdown_requested:
+        try:
+            if conn is None:
+                conn = await asyncpg.connect(_dsn())
+                await conn.add_listener(_CHANNEL, _on_notify)
+            await asyncio.sleep(1.0)  # asyncpg dispatches notifications in the background
+        except asyncio.CancelledError:
+            break
         except Exception:
             log.exception("pubsub listener error; reconnecting")
+            if conn is not None:
+                await conn.close()
+            conn = None
             await asyncio.sleep(1)
+    if conn is not None:
+        await conn.close()
 
 
 @contextmanager

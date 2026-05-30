@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from sathop import __version__
 
-from . import pubsub, redis_bus
+from . import db, pubsub
 from .api import router as api_router
 from .background import run_leader_tasks
 from .config import settings
@@ -49,14 +49,14 @@ async def lifespan(app: FastAPI):
     # so it's always in lockstep with this code — no boot-time sync needed.
     _print_banner()
     await init_db()
-    redis_bus.init()
-    # Sweepers run under a leader lock (one process) when redis is enabled; the
-    # pubsub listener runs in every process to fan cross-process nudges to local
-    # SSE clients. Single-process: run_leader_tasks runs the sweepers directly
-    # and no listener is needed.
+    # Postgres (multi-process) mode: sweepers run under an advisory-lock leader
+    # (one process); each process runs a LISTEN loop + a NOTIFY sender to fan
+    # cross-process nudges to its local SSE clients. SQLite (single-process):
+    # run_leader_tasks runs the sweepers directly; pubsub stays in-process.
     bg = [asyncio.create_task(run_leader_tasks())]
-    if redis_bus.enabled():
+    if db.is_postgres():
         bg.append(asyncio.create_task(pubsub.run_listener()))
+        bg.append(asyncio.create_task(pubsub.run_notify_sender()))
     try:
         yield
     finally:
@@ -66,7 +66,6 @@ async def lifespan(app: FastAPI):
         # exception a task raised during shutdown — same intent as the prior
         # per-task try/except, half the lines, parallel awaits.
         await asyncio.gather(*bg, return_exceptions=True)
-        await redis_bus.aclose()
         await shutdown_db()
 
 
@@ -104,10 +103,10 @@ def run() -> None:
     import uvicorn
 
     workers = settings.orch_workers
-    if workers > 1 and not redis_bus.enabled():
+    if workers > 1 and not db.is_postgres():
         logging.getLogger("sathop.orchestrator.main").warning(
-            "SATHOP_ORCH_WORKERS=%d ignored: multi-process needs SATHOP_REDIS_URL "
-            "(in-memory pubsub/events/telemetry/progress can't be shared across "
+            "SATHOP_ORCH_WORKERS=%d ignored: multi-process needs SATHOP_DATABASE_URL "
+            "(a Postgres URL; SQLite + in-memory state can't be shared across "
             "processes); running a single worker.",
             workers,
         )
