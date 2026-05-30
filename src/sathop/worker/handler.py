@@ -25,14 +25,11 @@ import httpx
 from sathop.shared.protocol import LeaseItem, ProgressEvent
 from sathop.shared.safe_path import safe_join
 from sathop.shared.state_machine import (
-    DownloadFinished,
     DownloadStarted,
     GranuleEvent,
-    ProcessFinished,
     ProcessStarted,
     UploadCompleted,
     UploadedObject,
-    UploadStarted,
 )
 
 from . import bundle, downloader, storage
@@ -148,8 +145,10 @@ class GranuleHandler:
 
         stage = self.stages.tracker()
         try:
-            paths = await self._download_inputs(item, input_dir, stage)
-            handle, result = await self._process_inputs(item, paths, progress_url, stage, work_dir)
+            paths, download_ms = await self._download_inputs(item, input_dir, stage)
+            handle, result, process_ms = await self._process_inputs(
+                item, paths, download_ms, progress_url, stage, work_dir
+            )
 
             if not result.ok:
                 await emit_best_effort(
@@ -158,7 +157,7 @@ class GranuleHandler:
                 log.warning("[%s] processing failed exit=%s", gid, result.exit_code)
                 return
 
-            await self._upload_outputs(item, handle, result.outputs, stage)
+            await self._upload_outputs(item, handle, result.outputs, process_ms, stage)
 
         except LeaseRevoked:
             log.info("[%s] handler aborted (lease revoked)", gid)
@@ -170,12 +169,15 @@ class GranuleHandler:
             self.progress.revoke(nonce)
             shutil.rmtree(work_dir, ignore_errors=True)
 
-    async def _download_inputs(self, item: LeaseItem, input_dir: Path, stage: StageTracker) -> list[Path]:
+    async def _download_inputs(
+        self, item: LeaseItem, input_dir: Path, stage: StageTracker
+    ) -> tuple[list[Path], int]:
         gid = item.granule_id
         paths: list[Path] = []
         async with staged(stage, PENDING_DOWNLOAD, self._download_sem, DOWNLOADING):
             await emit_lease_event(self.client, DownloadStarted(granule_id=gid, worker_id=self.s.worker_id))
             log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
+            t0 = time.monotonic()
             for spec in item.inputs:
                 dst = safe_join(input_dir, spec.filename)
                 auth = auth_for(item.credentials, spec.credential, gid, log)
@@ -184,17 +186,20 @@ class GranuleHandler:
                 if spec.checksum:
                     await downloader.verify_sha256(dst, spec.checksum)
                 paths.append(dst)
-        await emit_lease_event(self.client, DownloadFinished(granule_id=gid, worker_id=self.s.worker_id))
-        return paths
+            download_ms = int((time.monotonic() - t0) * 1000)
+        # DownloadFinished folded into ProcessStarted(download_ms) — one fewer
+        # orchestrator round-trip on the handler critical path.
+        return paths, download_ms
 
     async def _process_inputs(
         self,
         item: LeaseItem,
         paths: list[Path],
+        download_ms: int,
         progress_url: str,
         stage: StageTracker,
         work_dir: Path,
-    ) -> tuple[bundle.BundleHandle, ProcessResult]:
+    ) -> tuple[bundle.BundleHandle, ProcessResult, int]:
         gid = item.granule_id
         handle = await asyncio.to_thread(
             bundle.ensure,
@@ -206,7 +211,11 @@ class GranuleHandler:
             self.s.token,
         )
         async with staged(stage, PENDING_PROCESSING, self._process_sem, PROCESSING):
-            await emit_lease_event(self.client, ProcessStarted(granule_id=gid, worker_id=self.s.worker_id))
+            await emit_lease_event(
+                self.client,
+                ProcessStarted(granule_id=gid, worker_id=self.s.worker_id, download_ms=download_ms),
+            )
+            t0 = time.monotonic()
             result = await run_bundle(
                 handle,
                 gid,
@@ -217,19 +226,22 @@ class GranuleHandler:
                 item.execution_env,
                 progress_url,
             )
-        return handle, result
+            process_ms = int((time.monotonic() - t0) * 1000)
+        return handle, result, process_ms
 
     async def _upload_outputs(
         self,
         item: LeaseItem,
         handle: bundle.BundleHandle,
         outputs: list[Path],
+        process_ms: int,
         stage: StageTracker,
     ) -> None:
         gid = item.granule_id
-        await emit_lease_event(self.client, ProcessFinished(granule_id=gid, worker_id=self.s.worker_id))
+        # ProcessFinished + UploadStarted folded into UploadCompleted(process_ms):
+        # the granule stays PROCESSING through the (sub-second) upload, then jumps
+        # straight to UPLOADED — two fewer round-trips per granule.
         async with staged(stage, PENDING_UPLOAD, self._upload_sem, UPLOADING):
-            await emit_lease_event(self.client, UploadStarted(granule_id=gid, worker_id=self.s.worker_id))
             uploaded: list[UploadedObject] = []
             key_tpl = handle.manifest.outputs.object_key_template
             for out in outputs:
@@ -241,6 +253,7 @@ class GranuleHandler:
                     granule_id=gid,
                     worker_id=self.s.worker_id,
                     objects=uploaded,
+                    process_ms=process_ms,
                 ),
             )
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Annotated, Literal
 
@@ -157,6 +157,10 @@ class DownloadFinished(_EventBase):
 
 class ProcessStarted(_EventBase):
     kind: Literal["process_started"] = "process_started"
+    # Collapsed 3-event path: worker-measured fetch duration, so the orchestrator
+    # records an accurate `download` stage row without a separate DownloadFinished
+    # round-trip. None ⇒ legacy 6-event worker (download timed from state residence).
+    download_ms: int | None = None
 
 
 class ProcessFinished(_EventBase):
@@ -177,6 +181,10 @@ class UploadedObject(BaseModel):
 class UploadCompleted(_EventBase):
     kind: Literal["upload_completed"] = "upload_completed"
     objects: list[UploadedObject]
+    # Collapsed 3-event path: worker-measured process duration, so the `process`
+    # stage row stays accurate without the ProcessFinished / UploadStarted
+    # round-trips. None ⇒ legacy 6-event worker (process timed from residence).
+    process_ms: int | None = None
 
 
 class ProcessingFailed(_EventBase):
@@ -375,14 +383,91 @@ def _require_predecessor(snap: GranuleSnapshot, target: GranuleState) -> None:
 
 
 def _forward_stage_transition(snap: GranuleSnapshot, target: GranuleState, now: datetime) -> TransitionResult:
-    """Shared shape for the 6 worker stage events: predecessor check + state
-    bump + one closing stage row."""
+    """Shared shape for the legacy single-step stage events: predecessor check +
+    state bump + one closing stage row."""
     _require_predecessor(snap, target)
     stage = _stage_row_closing(snap, target, now)
     return TransitionResult(
         new_state=target,
         fields={"updated_at": now},
         stage_rows=(stage,) if stage is not None else (),
+    )
+
+
+def _measured_stage(stage: str, duration_ms: int, now: datetime) -> StageRow:
+    """Stage row from a worker-reported duration (collapsed 3-event path).
+    started_at is back-dated from `now` so duration_ms is exact and the timeline
+    view stays roughly aligned with wall-clock."""
+    return StageRow(
+        stage=stage,
+        started_at=now - timedelta(milliseconds=max(0, duration_ms)),
+        finished_at=now,
+    )
+
+
+def _enter_processing(snap: GranuleSnapshot, ev: ProcessStarted, now: datetime) -> TransitionResult:
+    """ProcessStarted accepts two predecessors so a rolling upgrade never strands
+    a granule:
+      DOWNLOADING — collapsed 3-event worker skipped the DOWNLOADED hop; the
+        worker-measured ``download_ms`` is the authoritative `download` duration.
+      DOWNLOADED — legacy 6-event worker; close `process_wait` from residence.
+    """
+    if snap.state == GranuleState.DOWNLOADING:
+        stage = (
+            _measured_stage("download", ev.download_ms, now)
+            if ev.download_ms is not None
+            else StageRow(stage="download", started_at=snap.updated_at, finished_at=now)
+        )
+    elif snap.state == GranuleState.DOWNLOADED:
+        stage = StageRow(stage="process_wait", started_at=snap.updated_at, finished_at=now)
+    else:
+        raise StateConflict(f"cannot transition {snap.state.value!r} → 'processing'")
+    return TransitionResult(
+        new_state=GranuleState.PROCESSING,
+        fields={"updated_at": now},
+        stage_rows=(stage,),
+    )
+
+
+def _complete_upload(snap: GranuleSnapshot, ev: UploadCompleted, now: datetime) -> TransitionResult:
+    """UploadCompleted accepts two predecessors (rolling-upgrade safe):
+      PROCESSING — collapsed 3-event worker; worker-measured ``process_ms`` is the
+        `process` stage (the sub-second upload is folded in, not separately timed).
+      UPLOADING — legacy 6-event worker; close `upload` from residence.
+    Clears lease + stale failure tails and inserts the uploaded object rows in
+    either case.
+    """
+    if snap.state == GranuleState.PROCESSING:
+        stage = (
+            _measured_stage("process", ev.process_ms, now)
+            if ev.process_ms is not None
+            else StageRow(stage="process", started_at=snap.updated_at, finished_at=now)
+        )
+    elif snap.state == GranuleState.UPLOADING:
+        stage = StageRow(stage="upload", started_at=snap.updated_at, finished_at=now)
+    else:
+        raise StateConflict(f"cannot transition {snap.state.value!r} → 'uploaded'")
+    return TransitionResult(
+        new_state=GranuleState.UPLOADED,
+        fields={
+            "leased_by": None,
+            "lease_expires_at": None,
+            "error": None,
+            "stdout_tail": None,
+            "stderr_tail": None,
+            "updated_at": now,
+        },
+        stage_rows=(stage,),
+        new_objects=tuple(
+            ObjectRow(
+                worker_id=ev.worker_id,
+                object_key=o.object_key,
+                presigned_url=o.presigned_url,
+                sha256=o.sha256,
+                size=o.size,
+            )
+            for o in ev.objects
+        ),
     )
 
 
@@ -401,37 +486,16 @@ def apply(
             return _forward_stage_transition(snap, GranuleState.DOWNLOADING, now)
         case DownloadFinished():
             return _forward_stage_transition(snap, GranuleState.DOWNLOADED, now)
-        case ProcessStarted():
-            return _forward_stage_transition(snap, GranuleState.PROCESSING, now)
+        case ProcessStarted() as ev:
+            # Collapsed (downloading→processing) or legacy (downloaded→processing).
+            return _enter_processing(snap, ev, now)
         case ProcessFinished():
             return _forward_stage_transition(snap, GranuleState.PROCESSED, now)
         case UploadStarted():
             return _forward_stage_transition(snap, GranuleState.UPLOADING, now)
         case UploadCompleted() as ev:
-            _require_predecessor(snap, GranuleState.UPLOADED)
-            stage = _stage_row_closing(snap, GranuleState.UPLOADED, now)
-            return TransitionResult(
-                new_state=GranuleState.UPLOADED,
-                fields={
-                    "leased_by": None,
-                    "lease_expires_at": None,
-                    "error": None,
-                    "stdout_tail": None,
-                    "stderr_tail": None,
-                    "updated_at": now,
-                },
-                stage_rows=(stage,) if stage is not None else (),
-                new_objects=tuple(
-                    ObjectRow(
-                        worker_id=ev.worker_id,
-                        object_key=o.object_key,
-                        presigned_url=o.presigned_url,
-                        sha256=o.sha256,
-                        size=o.size,
-                    )
-                    for o in ev.objects
-                ),
-            )
+            # Collapsed (processing→uploaded) or legacy (uploading→uploaded).
+            return _complete_upload(snap, ev, now)
         case ProcessingFailed(error=error, stdout_tail=stdout_tail, stderr_tail=stderr_tail):
             if snap.state.value not in LEASED_STATES:
                 raise StateConflict(f"failure not accepted in state {snap.state.value!r} (lease was revoked)")

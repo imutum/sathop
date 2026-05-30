@@ -167,7 +167,7 @@ def test_stage_events_advance_and_close_one_stage(event_cls, from_state, to_stat
     assert result.stage_rows[0].finished_at == _NOW
 
 
-def test_upload_completed_inserts_objects_and_clears_lease_fields():
+def test_upload_completed_legacy_uploading_to_uploaded_closes_upload():
     obj = UploadedObject(object_key="out.tif", presigned_url="http://w/out.tif", sha256="0" * 64, size=42)
     result = apply(
         _snap(GranuleState.UPLOADING),
@@ -184,6 +184,62 @@ def test_upload_completed_inserts_objects_and_clears_lease_fields():
     assert [r.stage for r in result.stage_rows] == ["upload"]
     assert [o.worker_id for o in result.new_objects] == ["w1"]
     assert [o.object_key for o in result.new_objects] == ["out.tif"]
+
+
+# ─── collapsed 3-event paths (current worker) ──────────────────────────────
+
+
+def test_process_started_collapsed_downloading_to_processing_records_download():
+    """ProcessStarted straight from DOWNLOADING carries the worker-measured
+    download_ms and closes the `download` stage, skipping the DOWNLOADED hop."""
+    result = apply(
+        _snap(GranuleState.DOWNLOADING),
+        ProcessStarted(granule_id="g", worker_id="w", download_ms=4000),
+        now=_NOW,
+        max_retries=3,
+    )
+    assert result.new_state == GranuleState.PROCESSING
+    assert [r.stage for r in result.stage_rows] == ["download"]
+    row = result.stage_rows[0]
+    assert row.finished_at == _NOW
+    assert row.started_at == _NOW - timedelta(milliseconds=4000)
+
+
+def test_process_started_collapsed_without_duration_falls_back_to_residence():
+    result = apply(
+        _snap(GranuleState.DOWNLOADING),
+        ProcessStarted(granule_id="g", worker_id="w"),
+        now=_NOW,
+        max_retries=3,
+    )
+    assert result.new_state == GranuleState.PROCESSING
+    assert [r.stage for r in result.stage_rows] == ["download"]
+    assert result.stage_rows[0].started_at == _PREV  # residence: snap.updated_at
+
+
+def test_upload_completed_collapsed_processing_to_uploaded_records_process():
+    obj = UploadedObject(object_key="out.tif", presigned_url="http://w/out.tif", sha256="0" * 64, size=42)
+    result = apply(
+        _snap(GranuleState.PROCESSING),
+        UploadCompleted(granule_id="g", worker_id="w1", objects=[obj], process_ms=9000),
+        now=_NOW,
+        max_retries=3,
+    )
+    assert result.new_state == GranuleState.UPLOADED
+    assert result.fields["leased_by"] is None
+    assert [r.stage for r in result.stage_rows] == ["process"]
+    assert result.stage_rows[0].started_at == _NOW - timedelta(milliseconds=9000)
+    assert [o.object_key for o in result.new_objects] == ["out.tif"]
+
+
+def test_upload_completed_rejects_unexpected_predecessor():
+    with pytest.raises(StateConflict, match="uploaded"):
+        apply(
+            _snap(GranuleState.DOWNLOADED),
+            UploadCompleted(granule_id="g", worker_id="w", objects=[]),
+            now=_NOW,
+            max_retries=3,
+        )
 
 
 def test_stage_event_rejects_wrong_predecessor():

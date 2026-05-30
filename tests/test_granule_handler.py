@@ -89,7 +89,10 @@ def _patch_bundle(monkeypatch, result: ProcessResult) -> None:
     monkeypatch.setattr(H, "run_bundle", fake_run_bundle)
 
 
-async def test_handle_happy_path_emits_full_event_sequence(tmp_path, monkeypatch):
+async def test_handle_happy_path_emits_collapsed_event_sequence(tmp_path, monkeypatch):
+    """Collapsed 3-event path: download_started → process_started (folds in
+    download_finished) → upload_completed (folds in process_finished +
+    upload_started). Three reliable round-trips instead of six."""
     client, storage = _FakeClient(), _FakeStorage()
     _patch_bundle(monkeypatch, ProcessResult(True, [Path("out.tif")], "", "", 0))
 
@@ -97,10 +100,7 @@ async def test_handle_happy_path_emits_full_event_sequence(tmp_path, monkeypatch
 
     assert client.events == [
         "download_started",
-        "download_finished",
         "process_started",
-        "process_finished",
-        "upload_started",
         "upload_completed",
     ]
     assert storage.puts == ["out.tif"]
@@ -108,7 +108,7 @@ async def test_handle_happy_path_emits_full_event_sequence(tmp_path, monkeypatch
 
 async def test_handle_processing_failure_skips_upload(tmp_path, monkeypatch):
     """A non-ok ProcessResult emits processing_failed and never uploads —
-    no process_finished / upload_* events, no storage writes."""
+    no upload_completed, no storage writes."""
     client, storage = _FakeClient(), _FakeStorage()
     _patch_bundle(monkeypatch, ProcessResult(False, [], "", "boom", 1))
 
@@ -116,7 +116,6 @@ async def test_handle_processing_failure_skips_upload(tmp_path, monkeypatch):
 
     assert client.events == [
         "download_started",
-        "download_finished",
         "process_started",
         "processing_failed",
     ]

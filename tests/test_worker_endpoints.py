@@ -97,10 +97,19 @@ async def test_upload_completed_happy_path_uploading_to_uploaded(client):
     assert r.json()["state"] == GranuleState.UPLOADED.value
 
 
-async def test_upload_completed_rejects_when_not_uploading(client):
-    """Worker must emit UploadStarted before UploadCompleted — otherwise
-    upload timing silently absorbs the upload-wait phase."""
+async def test_upload_completed_collapsed_path_processing_to_uploaded(client):
+    """Collapsed 3-event path (current worker): UploadCompleted is valid straight
+    from PROCESSING — ProcessFinished + UploadStarted are folded in."""
     await _seed_granule(state=GranuleState.PROCESSING.value)
+    r = client.post("/api/workers/events", json=_upload_completed_payload())
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == GranuleState.UPLOADED.value
+
+
+async def test_upload_completed_rejects_wrong_predecessor(client):
+    """Neither PROCESSING (collapsed) nor UPLOADING (legacy) — e.g. DOWNLOADED —
+    must 409 so the worker drops the granule instead of corrupting stage timing."""
+    await _seed_granule(state=GranuleState.DOWNLOADED.value)
     r = client.post("/api/workers/events", json=_upload_completed_payload())
     assert r.status_code == 409
 
