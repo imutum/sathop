@@ -183,11 +183,12 @@ class BatchSummary(BaseModel):
     # query, all granules) so a >200-granule batch's stuck-delivery signal
     # surfaces in the listing without relying on the client-side granule page.
     objects_exhausted: int = 0
-    # Wall-clock-extrapolated remaining seconds; None when sample <3 deliveries
-    # or nothing left to deliver. Both ETAs count down to delivery (acked), the
-    # batch's "done" definition — remaining includes the uploaded-but-not-yet-
-    # delivered backlog.
-    eta_seconds: int | None = None
+    # Remaining seconds extrapolated from deliveries in the recent rolling window
+    # (counts down to delivery/acked — remaining includes the uploaded-but-not-
+    # yet-delivered backlog). None when nothing was delivered in the window (rate
+    # unknown — a stall) or nothing is left to deliver. The old history-scanning
+    # `eta_seconds` was dropped: unbounded per-call scan, and this realtime figure
+    # was already what the UI preferred.
     eta_realtime: int | None = None
     # Recent delivery throughput (granules acked per minute, rolling window).
     # 0.0 when nothing delivered recently (a stalled-delivery signal); None on

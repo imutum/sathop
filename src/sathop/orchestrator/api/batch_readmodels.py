@@ -6,17 +6,24 @@ Two layers of public entry:
   for. Each one returns a fully composed DTO; callers never need to know
   about the underlying aggregate queries or their composition order.
 
-- **Primitive** (`state_counts`, `eta_seconds`) — the bulk aggregates the
-  high-level entries compose internally. Kept public because the ETA
-  extrapolation is non-trivial and deserves direct test coverage; reach
-  for these only when a caller genuinely wants raw counts, not a view.
+- **Primitive** (`state_counts`) — the bulk aggregate the high-level entries
+  compose internally. Kept public for direct test coverage; reach for it only
+  when a caller genuinely wants raw counts, not a view.
+
+ETA is realtime-only: extrapolated from deliveries in the recent `_WINDOW_SEC`
+window (`_recent_delivered`, served by the (stage, finished_at) index). The old
+historical ETA — min/max/sum over a batch's *entire* stage-timing history — was
+dropped: it grew unbounded with delivered volume (an O(rows) scan per list call,
+seconds on a multi-million-row batch) while duplicating the realtime figure the
+UI already preferred. No recent delivery now simply means no ETA (a stall), not
+a fallback to a whole-table scan.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import BatchSummary, GranuleRow
@@ -59,23 +66,22 @@ def _throughput_per_min(recent_delivered: int, window_sec: int = _WINDOW_SEC) ->
 async def summaries(s: AsyncSession, batches: list[Batch]) -> list[BatchSummary]:
     """Compose `BatchSummary` for each given Batch in one bulk pass.
 
-    Four aggregates run once each (state counts, exhausted-pull objects,
-    historical ETA, recent-delivery count) and are zipped onto the input order.
-    The recent-delivery count drives both realtime ETA and throughput, so it's
-    fetched once and the two are derived purely. Empty input returns []."""
+    Three aggregates run once each (state counts, exhausted-pull objects,
+    recent-delivery count) and are zipped onto the input order. The recent-
+    delivery count drives both realtime ETA and throughput, so it's fetched once
+    and the two are derived purely — all window-bounded, none scanning a batch's
+    full history. Empty input returns []."""
     if not batches:
         return []
     ids = [b.batch_id for b in batches]
     counts_map = await state_counts(s, ids)
     exh_map = await _exhausted_by_batch(s, ids)
-    eta_map = await eta_seconds(s, counts_map)
     recent_map = await _recent_delivered(s, ids)
     return [
         _build_summary(
             b,
             counts=counts_map.get(b.batch_id, {}),
             objects_exhausted=exh_map.get(b.batch_id, 0),
-            eta_seconds=eta_map.get(b.batch_id),
             eta_realtime=_eta_from_recent(counts_map.get(b.batch_id, {}), recent_map.get(b.batch_id, 0)),
             throughput_per_min=_throughput_per_min(recent_map.get(b.batch_id, 0)),
         )
@@ -92,7 +98,7 @@ def summary_just_created(batch: Batch, *, counts: dict[str, int]) -> BatchSummar
     """Fresh-from-create view: skips the exhausted/ETA queries because a
     just-committed Batch has neither. Caller supplies the counts (typically
     `await state_counts(s, [batch.batch_id])[batch.batch_id]`)."""
-    return _build_summary(batch, counts=counts, objects_exhausted=0, eta_seconds=None, eta_realtime=None)
+    return _build_summary(batch, counts=counts, objects_exhausted=0, eta_realtime=None)
 
 
 async def granule_rows(s: AsyncSession, granules: list[Granule]) -> list[GranuleRow]:
@@ -124,48 +130,6 @@ async def state_counts(s: AsyncSession, batch_ids: list[str]) -> dict[str, dict[
     ).all()
     for bid, n in delivered:
         out[bid]["deleted"] = n or 0
-    return out
-
-
-async def eta_seconds(
-    s: AsyncSession,
-    counts_map: dict[str, dict[str, int]],
-) -> dict[str, int | None]:
-    """Extrapolate remaining-seconds per Batch from closed deliver-stage timings.
-
-    Heuristic: take the wall-time span between the earliest and latest stage
-    rows for the Batch, divide by the count of closed deliver stages (= granules
-    delivered to a receiver), then multiply by the remaining-to-deliver count.
-    Returns None when there's not enough timing data (<3 deliveries) or nothing
-    left to deliver."""
-    if not counts_map:
-        return {}
-    batch_ids = list(counts_map)
-    rows = (
-        await s.execute(
-            select(
-                GranuleStageTiming.batch_id,
-                func.min(GranuleStageTiming.started_at),
-                func.max(GranuleStageTiming.finished_at),
-                func.sum(case((GranuleStageTiming.stage == "deliver", 1), else_=0)),
-            )
-            .where(GranuleStageTiming.batch_id.in_(batch_ids))
-            .group_by(GranuleStageTiming.batch_id)
-        )
-    ).all()
-
-    out: dict[str, int | None] = dict.fromkeys(batch_ids, None)
-    for batch_id, first, last, done in rows:
-        done_n = int(done or 0)
-        if done_n < 3 or first is None or last is None:
-            continue
-        wall_sec = (last - first).total_seconds()
-        if wall_sec <= 0:
-            continue
-        remaining = _remaining_to_deliver(counts_map[batch_id])
-        if remaining <= 0:
-            continue
-        out[batch_id] = int(remaining * wall_sec / done_n)
     return out
 
 
@@ -218,7 +182,6 @@ def _build_summary(
     *,
     counts: dict[str, int],
     objects_exhausted: int,
-    eta_seconds: int | None,
     eta_realtime: int | None,
     throughput_per_min: float | None = None,
 ) -> BatchSummary:
@@ -231,7 +194,6 @@ def _build_summary(
         created_at=batch.created_at,
         counts=counts,
         objects_exhausted=objects_exhausted,
-        eta_seconds=eta_seconds,
         eta_realtime=eta_realtime,
         throughput_per_min=throughput_per_min,
     )

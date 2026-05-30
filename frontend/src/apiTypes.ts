@@ -53,7 +53,9 @@ export type BatchSummary = {
   created_at: string;
   counts: Partial<Record<GranuleState, number>>;
   objects_exhausted: number;
-  eta_seconds: number | null;
+  // Remaining seconds from the recent rolling delivery window; null when nothing
+  // was delivered in the window (stall) or nothing is left. The history-scanning
+  // eta_seconds was dropped server-side as an unbounded per-call scan.
   eta_realtime: number | null;
   // Recent delivery throughput (granules acked per minute, rolling window).
   // 0 when nothing delivered recently (delivery stalled); null on a fresh batch.

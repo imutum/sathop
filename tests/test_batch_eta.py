@@ -1,4 +1,10 @@
-"""Coverage for the per-batch ETA helper that powers BatchSummary.eta_seconds."""
+"""Coverage for the realtime ETA + throughput that power BatchSummary.
+
+The historical `eta_seconds` (whole-history min/max/sum scan) was removed; ETA is
+now realtime-only — extrapolated from deliveries in the recent rolling window via
+`_recent_delivered` + `_eta_from_recent`. These tests exercise that path through
+`summaries()` and the dashboard's `system_delivery_rate()`.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,6 @@ import pytest
 
 from sathop.orchestrator import db as orch_db
 from sathop.orchestrator.api.batch_readmodels import (
-    eta_seconds,
     state_counts,
     summaries,
     system_delivery_rate,
@@ -29,8 +34,9 @@ async def db(tmp_path, patch_settings):
 
 async def _seed_batch(batch_id: str, *, in_flight: int, uploads: int, span_sec: float) -> None:
     """Create a batch with `in_flight` PENDING granules and `uploads` closed
-    deliver-stage timing rows spanning `span_sec` of wall time. Done granules
-    are marked ACKED (delivered) so they don't count toward remaining."""
+    deliver-stage timing rows spanning `span_sec` of wall time, all finishing at
+    ~now so they fall inside the recent window. Done granules are ACKED so they
+    don't count toward remaining."""
     async with orch_db._session_maker() as s:
         s.add(Batch(batch_id=batch_id, name=batch_id, bundle_ref="local:x"))
         for i in range(in_flight):
@@ -55,14 +61,13 @@ async def _seed_batch(batch_id: str, *, in_flight: int, uploads: int, span_sec: 
                     )
                 )
                 started = t0 + timedelta(seconds=span_sec * i / max(uploads - 1, 1))
-                finished = started
                 s.add(
                     GranuleStageTiming(
                         granule_id=gid,
                         batch_id=batch_id,
                         stage="deliver",
                         started_at=started,
-                        finished_at=finished,
+                        finished_at=started,
                         duration_ms=0,
                     )
                 )
@@ -72,64 +77,6 @@ async def _seed_batch(batch_id: str, *, in_flight: int, uploads: int, span_sec: 
 async def _counts(batch_id: str) -> dict[str, int]:
     async with orch_db._session_maker() as s:
         return (await state_counts(s, [batch_id])).get(batch_id, {})
-
-
-async def test_empty_returns_empty(db):
-    async with orch_db._session_maker() as s:
-        assert await eta_seconds(s, {}) == {}
-
-
-async def test_thin_data_returns_none(db):
-    """<3 closed upload stages → None."""
-    await _seed_batch("b-thin", in_flight=10, uploads=2, span_sec=60.0)
-    counts = {"b-thin": await _counts("b-thin")}
-    async with orch_db._session_maker() as s:
-        assert await eta_seconds(s, counts) == {"b-thin": None}
-
-
-async def test_no_in_flight_returns_none(db):
-    """Batch with timing data but nothing left to do → None."""
-    await _seed_batch("b-done", in_flight=0, uploads=5, span_sec=50.0)
-    counts = {"b-done": await _counts("b-done")}
-    async with orch_db._session_maker() as s:
-        assert await eta_seconds(s, counts) == {"b-done": None}
-
-
-async def test_healthy_extrapolation(db):
-    """5 uploads over 40s @ 10 in-flight → 10 * (40/5) = 80 seconds."""
-    await _seed_batch("b-ok", in_flight=10, uploads=5, span_sec=40.0)
-    counts = {"b-ok": await _counts("b-ok")}
-    async with orch_db._session_maker() as s:
-        out = await eta_seconds(s, counts)
-    assert out["b-ok"] == 80
-
-
-async def test_missing_batch_id_returns_none(db):
-    """A batch_id not found in timing rows still appears in the output map."""
-    async with orch_db._session_maker() as s:
-        out = await eta_seconds(s, {"does-not-exist": {}})
-    assert out == {"does-not-exist": None}
-
-
-async def test_uploaded_state_counts_as_remaining(db):
-    """UPLOADED granules finished processing but are NOT yet delivered (acked).
-    Under delivery-completion they're still remaining: 5 deliveries over 40s @
-    1 uploaded → 1 * (40/5) = 8 seconds."""
-    await _seed_batch("b-up", in_flight=0, uploads=5, span_sec=40.0)
-    async with orch_db._session_maker() as s:
-        s.add(
-            Granule(
-                granule_id="b-up:upl",
-                batch_id="b-up",
-                state=GranuleState.UPLOADED.value,
-                inputs=[],
-            )
-        )
-        await s.commit()
-    counts = {"b-up": await _counts("b-up")}
-    async with orch_db._session_maker() as s:
-        out = await eta_seconds(s, counts)
-    assert out["b-up"] == 8
 
 
 async def test_summaries_realtime_throughput_and_eta(db):
@@ -167,6 +114,18 @@ async def test_summaries_throughput_zero_and_eta_none_when_idle(db):
     assert out.eta_realtime is None
 
 
+async def test_summaries_eta_none_when_nothing_remaining(db):
+    """Recent deliveries but nothing left to deliver → eta_realtime is None even
+    though throughput is non-zero (counts down to delivery, and there's nothing
+    to count down)."""
+    await _seed_batch("b-fin", in_flight=0, uploads=5, span_sec=40.0)
+    async with orch_db._session_maker() as s:
+        batch = await s.get(Batch, "b-fin")
+        out = (await summaries(s, [batch]))[0]
+    assert out.throughput_per_min == 5.0
+    assert out.eta_realtime is None
+
+
 async def test_system_delivery_rate(db):
     """System-wide (dashboard): counts deliver-stage closures across ALL batches
     for throughput, and uses the passed system state_counts for remaining.
@@ -191,17 +150,15 @@ async def test_system_delivery_rate(db):
 
 
 async def test_bulk_independence(db):
-    """Mixed batch in one call: each is computed independently."""
-    await _seed_batch("b-ok", in_flight=10, uploads=5, span_sec=40.0)
-    await _seed_batch("b-thin", in_flight=10, uploads=2, span_sec=60.0)
-    await _seed_batch("b-done", in_flight=0, uploads=5, span_sec=50.0)
-    counts = {
-        "b-ok": await _counts("b-ok"),
-        "b-thin": await _counts("b-thin"),
-        "b-done": await _counts("b-done"),
-    }
+    """Mixed batches in one summaries() call: each realtime figure is computed
+    independently and zipped back in input order. b-rt: 5 recent deliveries →
+    5/min, 10 in-flight remaining → 10 * 60 / 5 = 120s. b-idle: no deliveries →
+    None."""
+    await _seed_batch("b-rt", in_flight=10, uploads=5, span_sec=40.0)
+    await _seed_batch("b-idle", in_flight=5, uploads=0, span_sec=0.0)
     async with orch_db._session_maker() as s:
-        out = await eta_seconds(s, counts)
-    assert out["b-ok"] == 80
-    assert out["b-thin"] is None
-    assert out["b-done"] is None
+        batches = [await s.get(Batch, "b-rt"), await s.get(Batch, "b-idle")]
+        out = await summaries(s, batches)
+    by_id = {o.batch_id: o for o in out}
+    assert by_id["b-rt"].eta_realtime == 120
+    assert by_id["b-idle"].eta_realtime is None
