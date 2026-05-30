@@ -29,15 +29,30 @@ log = logging.getLogger("sathop.receiver")
 DRAIN_WATCHDOG_TIMEOUT_SEC = 30
 
 
-def is_cert_error(e: BaseException) -> bool:
+def _exc_chain(e: BaseException) -> list[BaseException]:
+    out: list[BaseException] = []
     cur: BaseException | None = e
     seen: set[int] = set()
     while cur is not None and id(cur) not in seen:
         seen.add(id(cur))
-        if isinstance(cur, ssl.SSLError):
-            return True
+        out.append(cur)
         cur = cur.__cause__ or cur.__context__
-    return False
+    return out
+
+
+def is_cert_verify_error(e: BaseException) -> bool:
+    """True only for certificate *verification* failures (untrusted / wrong-host
+    cert) — the one case a trust refresh can fix. Transport-level SSLErrors
+    (SSLEOFError, connection reset mid-handshake) are NOT cert errors: refreshing
+    trust can't fix them, and misclassifying them drove futile refetch churn."""
+    return any(isinstance(c, ssl.SSLCertVerificationError) for c in _exc_chain(e))
+
+
+def describe_exc(e: BaseException) -> str:
+    """Full cause/context chain as 'Type(msg) <- Type(msg)'. str(e) alone is
+    routinely empty for transport resets (ConnectionResetError, SSLEOFError),
+    which left the real failure invisible in receiver logs and orchestrator acks."""
+    return " <- ".join(f"{type(c).__name__}({c})" for c in _exc_chain(e))
 
 
 @dataclass(frozen=True)
@@ -71,7 +86,7 @@ class PullOutcome:
 
     @classmethod
     def transport_error(cls, e: BaseException) -> PullOutcome:
-        return cls(success=False, sha="", pulled_bytes=0, error=str(e), log_kind="transport")
+        return cls(success=False, sha="", pulled_bytes=0, error=describe_exc(e), log_kind="transport")
 
 
 class Receiver:
@@ -267,9 +282,11 @@ class Receiver:
         try:
             return await self._pull_object(url, dest, expected_size)
         except Exception as e:
-            if not (is_cert_error(e) and self.s.tls_trust_orch and self.s.tls_verify):
+            if not (is_cert_verify_error(e) and self.s.tls_trust_orch and self.s.tls_verify):
                 raise
-            log.warning("pull SSL cert error (%s) — refreshing CA bundle and retrying once", e)
+            log.warning(
+                "pull cert-verify error (%s) — refreshing CA bundle and retrying once", describe_exc(e)
+            )
             await self._refresh_trust()
             return await self._pull_object(url, dest, expected_size)
 

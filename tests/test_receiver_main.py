@@ -16,7 +16,7 @@ import pytest
 
 from sathop.receiver.config import Settings, load
 from sathop.receiver.runtime import Receiver
-from sathop.receiver.runtime import is_cert_error as _is_cert_error
+from sathop.receiver.runtime import is_cert_verify_error as _is_cert_error
 from sathop.shared.protocol import AckReport, PullItem
 
 
@@ -269,7 +269,7 @@ def test_is_cert_error_walks_cause_chain():
     """`raise ... from e` sets __cause__ (explicit chaining)."""
     try:
         try:
-            raise ssl.SSLError("certificate verify failed")
+            raise ssl.SSLCertVerificationError("certificate verify failed")
         except ssl.SSLError as e:
             raise RuntimeError("connect failed") from e
     except RuntimeError as e:
@@ -286,11 +286,29 @@ def test_is_cert_error_walks_context_chain():
     errors despite the lazy-refresh path being wired in)."""
     try:
         try:
-            raise ssl.SSLError("certificate verify failed")
+            raise ssl.SSLCertVerificationError("certificate verify failed")
         except ssl.SSLError:
             raise RuntimeError("wrapped — no `from` clause")
     except RuntimeError as e:
         assert _is_cert_error(e) is True
+
+
+def test_transport_ssl_errors_are_not_cert_errors():
+    """SSLEOFError / connection resets are transport failures, NOT cert-verify
+    failures — a trust refresh can't fix them, so they must not trigger one
+    (regression: misclassifying SSLEOFError drove a futile /ca-bundle refetch
+    loop while real worker ports were simply unreachable)."""
+    for exc in (
+        ssl.SSLEOFError("[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol"),
+        ConnectionResetError(10054, "remote host forcibly closed"),
+    ):
+        try:
+            try:
+                raise exc
+            except OSError:
+                raise RuntimeError("httpx ConnectError wrap")
+        except RuntimeError as e:
+            assert _is_cert_error(e) is False
 
 
 def test_is_cert_error_handles_real_httpx_self_signed_chain():
@@ -351,10 +369,10 @@ async def test_pull_retries_once_after_refreshing_trust_on_cert_error(tmp_path, 
             calls += 1
             if calls == 1:
                 # Emit the same __context__-wrapped shape httpx produces on a
-                # real cert verify failure — bare ssl.SSLError used to pass
-                # because the chain was trivial. v0.3.4 walks __context__ too.
+                # real cert verify failure (SSLCertVerificationError, the only
+                # SSLError flavour that warrants a trust refresh).
                 try:
-                    raise ssl.SSLError("certificate verify failed: self-signed certificate")
+                    raise ssl.SSLCertVerificationError("certificate verify failed: self-signed certificate")
                 except ssl.SSLError:
                     raise RuntimeError("ConnectError wrap")
             return await real_pull(client, url, dest)
@@ -397,7 +415,7 @@ async def test_pull_does_not_refresh_when_trust_orch_disabled(tmp_path, monkeypa
 
     async def always_cert_error(client, url, dest):
         try:
-            raise ssl.SSLError("certificate verify failed")
+            raise ssl.SSLCertVerificationError("certificate verify failed")
         except ssl.SSLError:
             raise RuntimeError("ConnectError wrap")
 
