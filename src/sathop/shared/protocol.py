@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from sathop.shared.safe_path import is_safe_name
-from sathop.shared.state_machine import GranuleState  # noqa: F401  — re-export for callers
+from sathop.shared.state_machine import GranuleEvent, GranuleState  # noqa: F401  — re-export for callers
 
 
 class WorkerRegister(BaseModel):
@@ -56,6 +56,24 @@ class WorkerHeartbeatResponse(BaseModel):
     operator_paused: bool = False
     gc_requested: bool = False
     removed: bool = False
+
+
+class WorkerEventBatch(BaseModel):
+    """A worker's buffered transition events, flushed together so the orchestrator
+    pays its per-request cost (routing, one session, one commit, one SSE nudge)
+    once per batch instead of once per event — the single-core framework/ORM tax
+    is the measured wall. Applied in list order, so a granule's own events stay
+    ordered; events for different granules are independent."""
+
+    events: list[GranuleEvent]
+
+
+class WorkerEventBatchResponse(BaseModel):
+    # Granules whose event was skipped because the worker no longer holds the lease
+    # (or the granule is gone). Advisory only — handler cancellation is driven by
+    # the heartbeat's revoked_granule_ids; this just lets the worker stop buffering
+    # for a dead granule a little sooner.
+    revoked_granule_ids: list[str] = Field(default_factory=list)
 
 
 class WorkerHeartbeat(BaseModel):

@@ -19,14 +19,19 @@ from sathop.worker.stages import WorkerStages
 
 
 class _FakeClient:
-    def __init__(self) -> None:
-        self.events: list[str] = []
-
-    async def emit_event(self, event) -> None:
-        self.events.append(event.kind)
-
     async def report_progress(self, granule_id, event) -> None:
         pass
+
+
+class _FakeEvents:
+    """Stand-in for the worker's EventBuffer — records enqueued event kinds in
+    order so a handler's transition sequence can be asserted without an orch."""
+
+    def __init__(self) -> None:
+        self.kinds: list[str] = []
+
+    def enqueue(self, event) -> None:
+        self.kinds.append(event.kind)
 
 
 class _FakeDownloader:
@@ -69,11 +74,13 @@ def _item() -> LeaseItem:
     )
 
 
-def _handler(tmp_path: Path, storage: _FakeStorage, client: _FakeClient) -> GranuleHandler:
+def _handler(
+    tmp_path: Path, storage: _FakeStorage, client: _FakeClient, events: _FakeEvents
+) -> GranuleHandler:
     s = _settings(tmp_path)
     s.work_root.mkdir(parents=True, exist_ok=True)
     return GranuleHandler(
-        s, client, _FakeDownloader(), storage, ProgressServer(client, port=0), WorkerStages()
+        s, client, _FakeDownloader(), storage, ProgressServer(client, port=0), WorkerStages(), events
     )
 
 
@@ -93,12 +100,12 @@ async def test_handle_happy_path_emits_collapsed_event_sequence(tmp_path, monkey
     """Collapsed 3-event path: download_started → process_started (folds in
     download_finished) → upload_completed (folds in process_finished +
     upload_started). Three reliable round-trips instead of six."""
-    client, storage = _FakeClient(), _FakeStorage()
+    client, storage, events = _FakeClient(), _FakeStorage(), _FakeEvents()
     _patch_bundle(monkeypatch, ProcessResult(True, [Path("out.tif")], "", "", 0))
 
-    await _handler(tmp_path, storage, client).handle(_item())
+    await _handler(tmp_path, storage, client, events).handle(_item())
 
-    assert client.events == [
+    assert events.kinds == [
         "download_started",
         "process_started",
         "upload_completed",
@@ -109,12 +116,12 @@ async def test_handle_happy_path_emits_collapsed_event_sequence(tmp_path, monkey
 async def test_handle_processing_failure_skips_upload(tmp_path, monkeypatch):
     """A non-ok ProcessResult emits processing_failed and never uploads —
     no upload_completed, no storage writes."""
-    client, storage = _FakeClient(), _FakeStorage()
+    client, storage, events = _FakeClient(), _FakeStorage(), _FakeEvents()
     _patch_bundle(monkeypatch, ProcessResult(False, [], "", "boom", 1))
 
-    await _handler(tmp_path, storage, client).handle(_item())
+    await _handler(tmp_path, storage, client, events).handle(_item())
 
-    assert client.events == [
+    assert events.kinds == [
         "download_started",
         "process_started",
         "processing_failed",

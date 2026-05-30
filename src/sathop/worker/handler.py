@@ -7,10 +7,12 @@ with a single `handle(item)` call — no lease loop, heartbeat, backpressure, or
 signal handlers to stand up. The control-plane `Worker` owns those and just
 hands each leased item to `handle`.
 
-The two event-emission policies are module functions (not handler methods) so
-they're testable in isolation and reusable by the control-plane janitor:
-`emit_lease_event` aborts the handler on a lost lease; `emit_best_effort`
-swallows everything (used where a second failure must not cascade)."""
+All transitions are buffered (not POSTed inline): the handler hands each event
+to a shared `EventBuffer`, which coalesces events across all in-flight granules
+into batched POSTs — the orchestrator pays its per-request cost once per flush,
+not once per event, and the handler never awaits the orchestrator mid-pipeline.
+Lease revocation is heartbeat-driven (the control-plane cancels the handler
+task), so a lost lease surfaces as `CancelledError`, not a per-event 4xx."""
 
 from __future__ import annotations
 
@@ -20,13 +22,10 @@ import shutil
 import time
 from pathlib import Path
 
-import httpx
-
 from sathop.shared.protocol import LeaseItem, ProgressEvent
 from sathop.shared.safe_path import safe_join
 from sathop.shared.state_machine import (
     DownloadStarted,
-    GranuleEvent,
     ProcessStarted,
     UploadCompleted,
     UploadedObject,
@@ -36,6 +35,7 @@ from . import bundle, downloader, storage
 from ._paths import work_dir_path
 from .agent import OrchestratorClient
 from .config import Settings
+from .event_buffer import EventBuffer
 from .processor import ProcessResult, run_bundle
 from .progress import ProgressServer
 from .runtime_helpers import (
@@ -62,42 +62,6 @@ DOWNLOAD_PROGRESS_MIN_INTERVAL_SECONDS = 2.0
 DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT = 5.0
 
 
-class LeaseRevoked(Exception):
-    """Raised mid-handle when the orchestrator no longer recognises our lease
-    (a state-event came back 404/409); the handler aborts cleanly."""
-
-
-async def emit_lease_event(client: OrchestratorClient, event: GranuleEvent) -> None:
-    """Emit an event whose 4xx means the lease no longer exists; the caller
-    aborts the handler via `LeaseRevoked` so we don't keep doing work for a
-    granule the orchestrator has reassigned. 5xx is logged and swallowed —
-    treat it as transient."""
-    try:
-        await client.emit_event(event)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code in (404, 409):
-            log.warning(
-                "[%s] lease revoked while emitting %s (HTTP %d) — aborting handler",
-                event.granule_id,
-                event.kind,
-                e.response.status_code,
-            )
-            raise LeaseRevoked from e
-        log.warning("[%s] emit %s failed: %s", event.granule_id, event.kind, e)
-    except Exception as e:
-        log.warning("[%s] emit %s failed: %s", event.granule_id, event.kind, e)
-
-
-async def emit_best_effort(client: OrchestratorClient, event: GranuleEvent) -> None:
-    """Emit an event whose failure must not loop us back into another failure
-    path (the failure-report itself, the janitor's delete-confirm). Log and
-    swallow."""
-    try:
-        await client.emit_event(event)
-    except Exception as e:
-        log.warning("[%s] emit %s failed: %s", event.granule_id, event.kind, e)
-
-
 class GranuleHandler:
     """Processes one leased Granule per `handle` call. A single instance is
     shared across concurrent handlers — the three semaphores cap how many
@@ -111,6 +75,7 @@ class GranuleHandler:
         storage: storage.Storage,
         progress: ProgressServer,
         stages: WorkerStages,
+        events: EventBuffer,
         *,
         download_concurrency: int | None = None,
         process_concurrency: int | None = None,
@@ -121,6 +86,7 @@ class GranuleHandler:
         self.storage = storage
         self.progress = progress
         self.stages = stages
+        self._events = events
         dl = download_concurrency if download_concurrency is not None else settings.download_concurrency
         pr = process_concurrency if process_concurrency is not None else settings.process_concurrency
         self._download_sem = asyncio.Semaphore(dl)
@@ -151,19 +117,20 @@ class GranuleHandler:
             )
 
             if not result.ok:
-                await emit_best_effort(
-                    self.client, processing_failed_from_result(gid, self.s.worker_id, result)
-                )
+                self._events.enqueue(processing_failed_from_result(gid, self.s.worker_id, result))
                 log.warning("[%s] processing failed exit=%s", gid, result.exit_code)
                 return
 
             await self._upload_outputs(item, handle, result.outputs, process_ms, stage)
 
-        except LeaseRevoked:
+        except asyncio.CancelledError:
+            # Lease revoked: the heartbeat loop cancels this task. Don't emit —
+            # the orchestrator already reassigned the granule.
             log.info("[%s] handler aborted (lease revoked)", gid)
+            raise
         except Exception as e:
             log.exception("[%s] unhandled error", gid)
-            await emit_best_effort(self.client, processing_failed_from_exception(gid, self.s.worker_id, e))
+            self._events.enqueue(processing_failed_from_exception(gid, self.s.worker_id, e))
         finally:
             stage.exit()
             self.progress.revoke(nonce)
@@ -175,7 +142,7 @@ class GranuleHandler:
         gid = item.granule_id
         paths: list[Path] = []
         async with staged(stage, PENDING_DOWNLOAD, self._download_sem, DOWNLOADING):
-            await emit_lease_event(self.client, DownloadStarted(granule_id=gid, worker_id=self.s.worker_id))
+            self._events.enqueue(DownloadStarted(granule_id=gid, worker_id=self.s.worker_id))
             log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
             t0 = time.monotonic()
             for spec in item.inputs:
@@ -211,9 +178,8 @@ class GranuleHandler:
             self.s.token,
         )
         async with staged(stage, PENDING_PROCESSING, self._process_sem, PROCESSING):
-            await emit_lease_event(
-                self.client,
-                ProcessStarted(granule_id=gid, worker_id=self.s.worker_id, download_ms=download_ms),
+            self._events.enqueue(
+                ProcessStarted(granule_id=gid, worker_id=self.s.worker_id, download_ms=download_ms)
             )
             t0 = time.monotonic()
             result = await run_bundle(
@@ -247,14 +213,13 @@ class GranuleHandler:
             for out in outputs:
                 key = render_key(key_tpl, out, item.meta)
                 uploaded.append(await self.storage.put(out, key))
-            await emit_lease_event(
-                self.client,
+            self._events.enqueue(
                 UploadCompleted(
                     granule_id=gid,
                     worker_id=self.s.worker_id,
                     objects=uploaded,
                     process_ms=process_ms,
-                ),
+                )
             )
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))
 

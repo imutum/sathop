@@ -226,3 +226,78 @@ async def test_upload_clears_previous_failure_tails(client):
         g = await s.get(Granule, "g1")
         assert g.stdout_tail is None
         assert g.stderr_tail is None
+
+
+# ─── batched ingress (/events/batch) ───────────────────────────────────────
+# The batch twin applies a worker's buffered transitions in ONE transaction:
+# list order is apply order (per-granule order preserved), a stale/unleased
+# event is skipped (never 409s the whole batch), and unleased/unknown granules
+# come back in revoked_granule_ids so the worker stops buffering for them.
+
+
+def _download_started(granule_id: str = "g1", worker_id: str = "w1") -> dict:
+    return {"kind": "download_started", "granule_id": granule_id, "worker_id": worker_id}
+
+
+def _process_started(granule_id: str = "g1", worker_id: str = "w1") -> dict:
+    return {"kind": "process_started", "granule_id": granule_id, "worker_id": worker_id, "download_ms": 5}
+
+
+async def test_batch_applies_one_granule_full_sequence_in_order(client):
+    """A single granule's 3 collapsed events in one POST march it QUEUED →
+    UPLOADED — list order is the apply order."""
+    await _seed_granule(state=GranuleState.QUEUED.value)
+    body = {"events": [_download_started(), _process_started(), _upload_completed_payload()]}
+    r = client.post("/api/workers/events/batch", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["revoked_granule_ids"] == []
+    async with orch_db._session_maker() as s:
+        assert (await s.get(Granule, "g1")).state == GranuleState.UPLOADED.value
+
+
+async def test_batch_applies_events_across_multiple_granules(client):
+    await _seed_granule(granule_id="g1", state=GranuleState.QUEUED.value)
+    await _seed_granule(granule_id="g2", state=GranuleState.QUEUED.value)
+    body = {"events": [_download_started("g1"), _download_started("g2")]}
+    r = client.post("/api/workers/events/batch", json=body)
+    assert r.status_code == 200, r.text
+    async with orch_db._session_maker() as s:
+        assert (await s.get(Granule, "g1")).state == GranuleState.DOWNLOADING.value
+        assert (await s.get(Granule, "g2")).state == GranuleState.DOWNLOADING.value
+
+
+async def test_batch_skips_unleased_event_and_reports_revoked(client):
+    """An event for a granule this worker no longer holds is skipped — the rest
+    of the batch still applies — and its id is returned for the worker to drop."""
+    await _seed_granule(granule_id="g1", state=GranuleState.QUEUED.value, leased_by="w1")
+    await _seed_granule(granule_id="g2", state=GranuleState.QUEUED.value, leased_by="w2")
+    body = {"events": [_download_started("g1", "w1"), _download_started("g2", "w1")]}
+    r = client.post("/api/workers/events/batch", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["revoked_granule_ids"] == ["g2"]
+    async with orch_db._session_maker() as s:
+        assert (await s.get(Granule, "g1")).state == GranuleState.DOWNLOADING.value
+        assert (await s.get(Granule, "g2")).state == GranuleState.QUEUED.value  # untouched
+
+
+async def test_batch_reports_unknown_granule_as_revoked(client):
+    r = client.post("/api/workers/events/batch", json={"events": [_download_started("ghost", "w1")]})
+    assert r.status_code == 200
+    assert r.json()["revoked_granule_ids"] == ["ghost"]
+
+
+async def test_batch_skips_stale_event_without_failing_batch(client):
+    """A predecessor mismatch (already-advanced granule) is a no-op skip, not a
+    409 — the batch as a whole still succeeds and the granule is untouched."""
+    await _seed_granule(granule_id="g1", state=GranuleState.UPLOADED.value, leased_by="w1")
+    r = client.post("/api/workers/events/batch", json={"events": [_download_started("g1", "w1")]})
+    assert r.status_code == 200, r.text
+    assert r.json()["revoked_granule_ids"] == []
+    async with orch_db._session_maker() as s:
+        assert (await s.get(Granule, "g1")).state == GranuleState.UPLOADED.value
+
+
+async def test_batch_empty_is_noop(client):
+    r = client.post("/api/workers/events/batch", json={"events": []})
+    assert r.status_code == 200
+    assert r.json()["revoked_granule_ids"] == []

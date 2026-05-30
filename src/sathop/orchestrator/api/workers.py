@@ -11,6 +11,8 @@ from sathop.shared.protocol import (
     DeletableGranule,
     LeaseRequest,
     LeaseResponse,
+    WorkerEventBatch,
+    WorkerEventBatchResponse,
     WorkerHeartbeat,
     WorkerHeartbeatResponse,
     WorkerRegister,
@@ -195,6 +197,15 @@ async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) ->
     if not isinstance(event, DeleteConfirmed) and g.leased_by != event.worker_id:
         raise HTTPException(409, "granule not leased by this worker")
     result = await apply_transition(s, g, event, now=utcnow())
+    await _terminal_side_effects(s, g, event)
+    await commit_and_publish(s, result.publish_scope)
+    return {"ok": True, "state": g.state}
+
+
+async def _terminal_side_effects(s: AsyncSession, g: Granule, event: GranuleEvent) -> None:
+    """Evict progress + write the audit line for the two terminal worker events.
+    Shared by the single (/events) and batch (/events/batch) handlers; never
+    commits."""
     if isinstance(event, UploadCompleted):
         evict_granule(g.granule_id)
         await log(
@@ -214,8 +225,46 @@ async def emit_event(event: GranuleEvent, s: AsyncSession = Depends(session)) ->
             granule_id=g.granule_id,
             batch_id=g.batch_id,
         )
-    await commit_and_publish(s, result.publish_scope)
-    return {"ok": True, "state": g.state}
+
+
+@router.post("/events/batch", response_model=WorkerEventBatchResponse)
+async def emit_events_batch(
+    req: WorkerEventBatch, s: AsyncSession = Depends(session)
+) -> WorkerEventBatchResponse:
+    """Batched twin of /events: apply a worker's buffered transitions in ONE
+    transaction. The per-request cost (routing, session, commit, SSE nudge) is
+    paid once for the whole batch; only the per-event load+transition remains.
+    All referenced granules are bulk-loaded in a single query, then events apply
+    in list order (a granule's own order is preserved). A stale or
+    no-longer-leased event is skipped — never 409s the batch — and its granule is
+    returned so the worker stops buffering for it."""
+    if not req.events:
+        return WorkerEventBatchResponse()
+    gids = list({e.granule_id for e in req.events})
+    granules = (await s.execute(select(Granule).where(Granule.granule_id.in_(gids)))).scalars().all()
+    by_id = {g.granule_id: g for g in granules}
+    now = utcnow()
+    scopes: set[Scope] = set()
+    revoked: list[str] = []
+    seen_revoked: set[str] = set()
+    for event in req.events:
+        g = by_id.get(event.granule_id)
+        # DeleteConfirmed is gated by /deletable (ownership + ack state); the rest
+        # require this worker to still hold the lease. A miss/steal is skipped, not
+        # fatal to the batch — record it once for the worker to drop.
+        if g is None or (not isinstance(event, DeleteConfirmed) and g.leased_by != event.worker_id):
+            if event.granule_id not in seen_revoked:
+                seen_revoked.add(event.granule_id)
+                revoked.append(event.granule_id)
+            continue
+        result = await apply_transition(s, g, event, now=now, on_conflict="skip")
+        if result is None:
+            continue  # stale / already-advanced event — no-op, don't publish
+        await _terminal_side_effects(s, g, event)
+        if result.publish_scope is not None:
+            scopes.add(result.publish_scope)
+    await commit_and_publish(s, *scopes)
+    return WorkerEventBatchResponse(revoked_granule_ids=revoked)
 
 
 @router.get("/deletable/{worker_id}")

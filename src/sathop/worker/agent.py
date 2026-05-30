@@ -14,12 +14,13 @@ from sathop.shared.protocol import (
     LeaseRequest,
     LeaseResponse,
     ProgressEvent,
+    WorkerEventBatch,
+    WorkerEventBatchResponse,
     WorkerHeartbeat,
     WorkerHeartbeatResponse,
     WorkerRegister,
     WorkerRegisterResponse,
 )
-from sathop.shared.state_machine import GranuleEvent
 
 
 class OrchestratorClient(OrchClient):
@@ -32,11 +33,11 @@ class OrchestratorClient(OrchClient):
     async def lease(self, req: LeaseRequest) -> LeaseResponse:
         return await self.post_typed("/api/workers/lease", req, LeaseResponse)
 
-    async def emit_event(self, event: GranuleEvent) -> None:
-        # `event` is a Pydantic model — the GranuleEvent alias only matters at
-        # type-check time; at runtime every member has `model_dump`.
-        # mode="json" because event payloads contain datetimes; can't use post_typed.
-        await self.post("/api/workers/events", json=event.model_dump(mode="json"))
+    async def emit_events_batch(self, batch: WorkerEventBatch) -> WorkerEventBatchResponse:
+        # The worker's only emit path: buffered transitions in one request.
+        # mode="json" because event payloads carry datetimes (can't use post_typed).
+        r = await self.post("/api/workers/events/batch", json=batch.model_dump(mode="json"))
+        return WorkerEventBatchResponse.model_validate(r.json())
 
     async def get_deletable(self, worker_id: str) -> list[DeletableGranule]:
         r = await self.get(f"/api/workers/deletable/{worker_id}")

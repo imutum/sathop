@@ -39,11 +39,24 @@ def main() -> None:
     procs = []
     for i in range(a.procs):
         cmd = [
-            sys.executable, str(here / "loadtest_orch.py"),
-            "--pg", a.pg, "--orch", a.orch, "--token", a.token,
-            "--granules", str(a.granules_per), "--workers", str(a.workers_per),
-            "--receivers", str(a.receivers_per), "--duration", str(a.duration),
-            "--tag", f"f{i}",
+            sys.executable,
+            str(here / "loadtest_orch.py"),
+            "--pg",
+            a.pg,
+            "--orch",
+            a.orch,
+            "--token",
+            a.token,
+            "--granules",
+            str(a.granules_per),
+            "--workers",
+            str(a.workers_per),
+            "--receivers",
+            str(a.receivers_per),
+            "--duration",
+            str(a.duration),
+            "--tag",
+            f"f{i}",
         ]
         procs.append(subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 

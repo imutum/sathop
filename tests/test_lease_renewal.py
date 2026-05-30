@@ -1,4 +1,4 @@
-"""Lease auto-renewal on heartbeat + worker-side LeaseRevoked handling.
+"""Lease auto-renewal on heartbeat + bidirectional revoked-granule sync.
 
 Heartbeat doubles as a keep-alive: every check-in pushes the
 `lease_expires_at` of every granule the worker holds forward by
@@ -7,16 +7,13 @@ LEASE_DURATION. Without this, a slow processor (e.g. a granule that takes
 PENDING, and subsequent events 409 — the worker's in-memory pipeline turns
 into wasted ghost work.
 
-The worker side of the contract: when /api/workers/events returns 404/409,
-the worker raises LeaseRevoked so the granule handler aborts immediately
-instead of continuing to download/process bytes whose upload will be
-rejected anyway."""
+Revocation is heartbeat-driven: the orchestrator returns `revoked_granule_ids`
+and the worker cancels the matching handler task (no per-event 4xx path)."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -160,74 +157,6 @@ async def test_heartbeat_skips_pending_granules_for_renewal(client):
 
     g_pending_expiry = await _granule_lease_expiry("g-pending")
     assert g_pending_expiry is None
-
-
-# ─── Worker-side: LeaseRevoked translation of 404/409 ─────────────────────
-
-
-def _http_error(status: int) -> httpx.HTTPStatusError:
-    request = httpx.Request("POST", "http://orch/api/workers/events")
-    response = httpx.Response(status, request=request)
-    return httpx.HTTPStatusError(f"HTTP {status}", request=request, response=response)
-
-
-class _StubAgent:
-    """Minimal stand-in for OrchestratorClient — only `emit_event` matters
-    for the LeaseRevoked path. Each call dequeues from `responses`: a status
-    code int ⇒ raise that 4xx/5xx, None ⇒ succeed silently."""
-
-    def __init__(self, responses: list[int | None]) -> None:
-        self.responses = list(responses)
-        self.calls: list[str] = []
-
-    async def emit_event(self, event) -> None:
-        self.calls.append(event.kind)
-        next_status = self.responses.pop(0) if self.responses else None
-        if next_status is not None:
-            raise _http_error(next_status)
-
-
-def _download_started(gid: str = "g1"):
-    from sathop.shared.state_machine import DownloadStarted
-
-    return DownloadStarted(granule_id=gid, worker_id="w1")
-
-
-def _process_started(gid: str = "g1"):
-    from sathop.shared.state_machine import ProcessStarted
-
-    return ProcessStarted(granule_id=gid, worker_id="w1")
-
-
-async def test_emit_lease_event_409_raises_lease_revoked():
-    from sathop.worker.handler import LeaseRevoked, emit_lease_event
-
-    with pytest.raises(LeaseRevoked):
-        await emit_lease_event(_StubAgent([409]), _download_started())
-
-
-async def test_emit_lease_event_404_raises_lease_revoked():
-    from sathop.worker.handler import LeaseRevoked, emit_lease_event
-
-    with pytest.raises(LeaseRevoked):
-        await emit_lease_event(_StubAgent([404]), _process_started())
-
-
-async def test_emit_lease_event_500_swallowed_as_best_effort():
-    """5xx and network errors stay best-effort — the next phase boundary
-    will retry. Raising would abort the whole granule on a transient
-    orchestrator hiccup."""
-    from sathop.worker.handler import emit_lease_event
-
-    await emit_lease_event(_StubAgent([500]), _download_started())
-
-
-async def test_emit_lease_event_success_returns_silently():
-    from sathop.worker.handler import emit_lease_event
-
-    agent = _StubAgent([None])
-    await emit_lease_event(agent, _download_started())
-    assert agent.calls == ["download_started"]
 
 
 # ─── Bidirectional sync: heartbeat returns revoked granule IDs ────────────

@@ -71,23 +71,47 @@ class Stats:
         self.health: list[float] = []
 
 
-async def worker_loop(c: httpx.AsyncClient, wid: str, capacity: int, st: Stats, stop: asyncio.Event) -> None:
+def _granule_events(gid: str, wid: str) -> list[dict]:
+    """The collapsed 3-event sequence a worker emits per granule."""
+    return [
+        {"kind": "download_started", "granule_id": gid, "worker_id": wid},
+        {"kind": "process_started", "granule_id": gid, "worker_id": wid, "download_ms": 5},
+        {
+            "kind": "upload_completed",
+            "granule_id": gid,
+            "worker_id": wid,
+            "process_ms": 5,
+            "objects": [
+                {"object_key": f"{gid}.out", "presigned_url": f"http://w/{gid}.out", "sha256": _SHA, "size": 100}
+            ],
+        },
+    ]
+
+
+async def worker_loop(
+    c: httpx.AsyncClient, wid: str, capacity: int, st: Stats, stop: asyncio.Event, *, batch: bool
+) -> None:
     await c.post("/api/workers/register", json={"worker_id": wid, "capacity": capacity})
     while not stop.is_set():
         # Confirm anything delivered (acked) so it reaches DELETED.
         try:
-            d = await c.get(f"/api/workers/deletable/{wid}")
-            for g in d.json():
-                await c.post(
-                    "/api/workers/events",
-                    json={
-                        "kind": "delete_confirmed",
-                        "granule_id": g["granule_id"],
-                        "worker_id": wid,
-                        "object_keys": g["object_keys"],
-                    },
-                )
-                st.deletes += 1
+            d = (await c.get(f"/api/workers/deletable/{wid}")).json()
+            confirms = [
+                {
+                    "kind": "delete_confirmed",
+                    "granule_id": g["granule_id"],
+                    "worker_id": wid,
+                    "object_keys": g["object_keys"],
+                }
+                for g in d
+            ]
+            if batch and confirms:
+                await c.post("/api/workers/events/batch", json={"events": confirms})
+                st.deletes += len(confirms)
+            else:
+                for ev in confirms:
+                    await c.post("/api/workers/events", json=ev)
+                    st.deletes += 1
         except Exception:
             st.errors += 1
 
@@ -101,41 +125,33 @@ async def worker_loop(c: httpx.AsyncClient, wid: str, capacity: int, st: Stats, 
         if not items:
             await asyncio.sleep(0.02)
             continue
+
+        # Progress stays per-granule in both modes (the real worker reports it
+        # separately, mid-processing) — the A/B isolates the events batching.
         for it in items:
-            gid = it["granule_id"]
             try:
                 await c.post(
-                    "/api/workers/events",
-                    json={"kind": "download_started", "granule_id": gid, "worker_id": wid},
-                )
-                await c.post(
-                    "/api/workers/events",
-                    json={"kind": "process_started", "granule_id": gid, "worker_id": wid, "download_ms": 5},
-                )
-                await c.post(
-                    f"/api/granules/{gid}/progress",
+                    f"/api/granules/{it['granule_id']}/progress",
                     json={"step": "process", "pct": 50.0, "batch_id": it["batch_id"]},
                 )
-                await c.post(
-                    "/api/workers/events",
-                    json={
-                        "kind": "upload_completed",
-                        "granule_id": gid,
-                        "worker_id": wid,
-                        "process_ms": 5,
-                        "objects": [
-                            {
-                                "object_key": f"{gid}.out",
-                                "presigned_url": f"http://w/{gid}.out",
-                                "sha256": _SHA,
-                                "size": 100,
-                            }
-                        ],
-                    },
-                )
-                st.events += 3
             except Exception:
                 st.errors += 1
+
+        if batch:
+            events = [ev for it in items for ev in _granule_events(it["granule_id"], wid)]
+            try:
+                await c.post("/api/workers/events/batch", json={"events": events})
+                st.events += len(items) * 3
+            except Exception:
+                st.errors += 1
+        else:
+            for it in items:
+                try:
+                    for ev in _granule_events(it["granule_id"], wid):
+                        await c.post("/api/workers/events", json=ev)
+                    st.events += 3
+                except Exception:
+                    st.errors += 1
 
 
 async def receiver_loop(c: httpx.AsyncClient, rid: str, st: Stats, stop: asyncio.Event) -> None:
@@ -204,6 +220,7 @@ async def main() -> None:
     ap.add_argument("--capacity", type=int, default=20)
     ap.add_argument("--duration", type=int, default=60)
     ap.add_argument("--tag", default="", help="disambiguates the batch id + node ids for parallel drivers")
+    ap.add_argument("--batch", action="store_true", help="emit events via /events/batch (new buffered worker)")
     ap.add_argument("--seed-only", action="store_true")
     a = ap.parse_args()
 
@@ -223,7 +240,7 @@ async def main() -> None:
         d0 = await delivered(c)
         t0 = time.monotonic()
         tasks = [
-            asyncio.create_task(worker_loop(c, f"lt-{tag}-w{i}", a.capacity, st, stop))
+            asyncio.create_task(worker_loop(c, f"lt-{tag}-w{i}", a.capacity, st, stop, batch=a.batch))
             for i in range(a.workers)
         ]
         tasks += [
@@ -255,7 +272,11 @@ async def main() -> None:
 
     done = final - d0
     print("\n=== load test result ===", flush=True)
-    print(f"workers={a.workers} receivers={a.receivers} granules={a.granules}", flush=True)
+    print(
+        f"mode={'batch' if a.batch else 'per-event'} "
+        f"workers={a.workers} receivers={a.receivers} granules={a.granules}",
+        flush=True,
+    )
     print(f"delivered={done} in {elapsed:.1f}s  →  {done / elapsed * 60:.1f}/min", flush=True)
     print(f"events={st.events} acks={st.acks} deletes={st.deletes} errors={st.errors}", flush=True)
     h = st.health

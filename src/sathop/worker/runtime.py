@@ -25,7 +25,8 @@ from . import downloader, storage, tls
 from .agent import OrchestratorClient
 from .cleanup import CacheCleaner
 from .config import Settings
-from .handler import GranuleHandler, emit_best_effort
+from .event_buffer import EventBuffer
+from .handler import GranuleHandler
 from .progress import ProgressServer
 from .stages import WorkerStages
 
@@ -67,8 +68,9 @@ class Worker:
         self._ca_pem: str | None = None
         self._lease_backoff_factor = 1
         self.progress = ProgressServer(self.client, port=s.progress_port)
+        self._events = EventBuffer(self.client)
         self._handler = GranuleHandler(
-            s, self.client, self.downloader, self.storage, self.progress, self.stages
+            s, self.client, self.downloader, self.storage, self.progress, self.stages, self._events
         )
         for path in (s.work_root, s.bundle_cache, s.venv_cache, s.shared_cache, s.storage_root):
             path.mkdir(parents=True, exist_ok=True)
@@ -163,6 +165,7 @@ class Worker:
 
         def create_tasks(tg: asyncio.TaskGroup) -> None:
             tg.create_task(self._heartbeat_loop())
+            tg.create_task(self._events.loop())
             tg.create_task(self._pipeline_loop())
             tg.create_task(self._janitor_loop())
             tg.create_task(self._backpressure_loop())
@@ -296,6 +299,7 @@ class Worker:
                 self.storage,
                 self.progress,
                 self.stages,
+                self._events,
                 download_concurrency=target_dl,
                 process_concurrency=target_pr,
             )
@@ -355,13 +359,12 @@ class Worker:
         for dg in to_delete:
             for key in dg.object_keys:
                 await self.storage.delete(key)
-            await emit_best_effort(
-                self.client,
+            self._events.enqueue(
                 DeleteConfirmed(
                     granule_id=dg.granule_id,
                     worker_id=self.s.worker_id,
                     object_keys=list(dg.object_keys),
-                ),
+                )
             )
             if dg.object_keys:
                 log.info("[%s] deleted %d object(s) after ack", dg.granule_id, len(dg.object_keys))
