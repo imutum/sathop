@@ -20,9 +20,9 @@ orchestrator = [
     "minio>=7.2",
     "python-multipart>=0.0.12",
     "prometheus-client>=0.20",
-    # Cross-process bus for multi-worker mode (route A); unused when
-    # SATHOP_REDIS_URL is empty (single-process in-memory default).
-    "redis>=5",
+    # Postgres async driver for multi-process mode; unused when
+    # SATHOP_DATABASE_URL is empty (single-process SQLite default).
+    "asyncpg>=0.29",
 ]
 worker = [
     "minio>=7.2",

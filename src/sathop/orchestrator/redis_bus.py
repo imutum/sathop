@@ -29,7 +29,10 @@ _async = None  # redis.asyncio.Redis | None — pub/sub
 
 
 def enabled() -> bool:
-    return bool(settings.redis_url)
+    # Redis is being removed in favour of Postgres-native pubsub/ephemeral
+    # (LISTEN/NOTIFY + UNLOGGED tables). Hard-disabled so all stores use their
+    # in-memory backend until the PG backends land; this module is deleted then.
+    return False
 
 
 def init() -> None:

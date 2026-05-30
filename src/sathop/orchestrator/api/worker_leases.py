@@ -126,6 +126,11 @@ async def claim_pending_granules(
         .where(Granule.state == GranuleState.PENDING.value)
         .where((Granule.leased_by.is_(None)) | (Granule.lease_expires_at < now))
         .limit(limit)
+        # Postgres: lock the picked rows and skip any a concurrent claimer already
+        # holds, so N processes claim disjoint sets without blocking. SQLite has no
+        # row locks — SQLAlchemy omits this and correctness rests on its single
+        # writer (the whole statement runs under one write lock).
+        .with_for_update(skip_locked=True)
         .scalar_subquery()
     )
     claimed_ids = (

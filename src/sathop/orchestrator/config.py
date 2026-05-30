@@ -12,10 +12,12 @@ class Settings:
     dev: bool = os.getenv("SATHOP_DEV", "0") == "1"
     db_path: Path = Path(os.getenv("SATHOP_DB", "/app/data/orchestrator.db"))
     token: str = os.getenv("SATHOP_TOKEN", "")
-    # Multi-process scaling (route A). redis_url empty → single-process,
-    # all ephemeral state (pubsub/events/telemetry/progress) stays in-memory.
-    # Set it + orch_workers>1 to run N uvicorn workers sharing one Redis bus.
-    redis_url: str = os.getenv("SATHOP_REDIS_URL", "")
+    # Multi-process scaling. database_url empty → single-process SQLite + all
+    # ephemeral state (pubsub/events/telemetry/progress) in-memory (MVP default).
+    # Set a postgresql+asyncpg URL + orch_workers>1 to run N uvicorn workers on N
+    # cores sharing one Postgres (state + ephemeral UNLOGGED tables + LISTEN/NOTIFY
+    # pubsub) — no Redis, async-native, no event-loop blocking.
+    database_url: str = os.getenv("SATHOP_DATABASE_URL", "")
     orch_workers: int = max(1, int(os.getenv("SATHOP_ORCH_WORKERS", "1")))
     bundle_storage: Path = Path(os.getenv("SATHOP_BUNDLES", "/app/data/bundles"))
     shared_storage: Path = Path(os.getenv("SATHOP_SHARED", "/app/data/shared"))

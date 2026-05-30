@@ -201,6 +201,7 @@ Index(
     "idx_granule_objects_pending",
     GranuleObject.granule_id,
     sqlite_where=GranuleObject.acked_at.is_(None) & GranuleObject.deleted_at.is_(None),
+    postgresql_where=GranuleObject.acked_at.is_(None) & GranuleObject.deleted_at.is_(None),
 )
 
 
@@ -271,7 +272,15 @@ _engine = None
 _session_maker: async_sessionmaker[AsyncSession] | None = None
 
 
+def is_postgres() -> bool:
+    """True when a Postgres URL is configured (multi-process mode); else SQLite
+    (single-process MVP default)."""
+    return settings.database_url.startswith(("postgresql", "postgres"))
+
+
 def _url() -> str:
+    if settings.database_url:
+        return settings.database_url
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     return f"sqlite+aiosqlite:///{settings.db_path.as_posix()}"
 
@@ -283,21 +292,34 @@ def _set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
     dbapi_connection.execute("PRAGMA wal_autocheckpoint=1000")
 
 
+# Arbitrary fixed key for the schema-init advisory lock (Postgres only): serialises
+# the create/ensure_columns/ensure_indexes reconciliation across the N worker
+# processes that all run lifespan on boot, so concurrent ALTER TABLEs can't race.
+_SCHEMA_LOCK_KEY = 0x5A7409
+
+
 async def init_db() -> None:
     global _engine, _session_maker
+    pg = is_postgres()
     _engine = create_async_engine(_url(), echo=False, future=True)
-    event.listen(_engine.sync_engine, "connect", _set_sqlite_pragmas)
+    if not pg:
+        event.listen(_engine.sync_engine, "connect", _set_sqlite_pragmas)
     _session_maker = async_sessionmaker(_engine, expire_on_commit=False)
     async with _engine.begin() as conn:
+        if pg:
+            # Hold a transaction-scoped advisory lock so only one process runs the
+            # schema reconciliation at a time (released at txn end).
+            await conn.exec_driver_sql(f"SELECT pg_advisory_xact_lock({_SCHEMA_LOCK_KEY})")
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_columns)
         await conn.run_sync(_ensure_indexes)
         await conn.run_sync(_drop_obsolete_tables)
-        # Refresh planner stats so a just-created index (notably the partial
-        # idx_granule_objects_pending) is actually chosen — SQLite ignores an
-        # index it has no sqlite_stat1 row for. `optimize` is the cheap,
-        # changed-tables-only form (~tens of ms), safe to run every boot.
-        await conn.exec_driver_sql("PRAGMA optimize")
+        if not pg:
+            # Refresh planner stats so the partial idx_granule_objects_pending is
+            # actually chosen — SQLite ignores an index with no sqlite_stat1 row.
+            # `optimize` is the cheap changed-tables-only form. Postgres autovacuum
+            # handles its own stats.
+            await conn.exec_driver_sql("PRAGMA optimize")
 
 
 def _ensure_columns(sync_conn) -> None:
