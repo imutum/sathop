@@ -10,8 +10,9 @@ from fastapi.staticfiles import StaticFiles
 
 from sathop import __version__
 
+from . import pubsub, redis_bus
 from .api import router as api_router
-from .background import run_lease_sweeper, run_retention
+from .background import run_leader_tasks
 from .config import settings
 from .db import init_db, shutdown_db
 
@@ -48,10 +49,14 @@ async def lifespan(app: FastAPI):
     # so it's always in lockstep with this code — no boot-time sync needed.
     _print_banner()
     await init_db()
-    bg = [
-        asyncio.create_task(run_lease_sweeper()),
-        asyncio.create_task(run_retention()),
-    ]
+    redis_bus.init()
+    # Sweepers run under a leader lock (one process) when redis is enabled; the
+    # pubsub listener runs in every process to fan cross-process nudges to local
+    # SSE clients. Single-process: run_leader_tasks runs the sweepers directly
+    # and no listener is needed.
+    bg = [asyncio.create_task(run_leader_tasks())]
+    if redis_bus.enabled():
+        bg.append(asyncio.create_task(pubsub.run_listener()))
     try:
         yield
     finally:
@@ -61,6 +66,7 @@ async def lifespan(app: FastAPI):
         # exception a task raised during shutdown — same intent as the prior
         # per-task try/except, half the lines, parallel awaits.
         await asyncio.gather(*bg, return_exceptions=True)
+        await redis_bus.aclose()
         await shutdown_db()
 
 
@@ -93,18 +99,34 @@ if WEB_DIST.is_dir():
 
 
 def run() -> None:
+    import logging
+
     import uvicorn
 
-    uvicorn.run(
-        "sathop.orchestrator.main:app",
+    workers = settings.orch_workers
+    if workers > 1 and not redis_bus.enabled():
+        logging.getLogger("sathop.orchestrator.main").warning(
+            "SATHOP_ORCH_WORKERS=%d ignored: multi-process needs SATHOP_REDIS_URL "
+            "(in-memory pubsub/events/telemetry/progress can't be shared across "
+            "processes); running a single worker.",
+            workers,
+        )
+        workers = 1
+
+    kwargs: dict = dict(
         host=settings.host,
         port=settings.port,
-        reload=settings.dev,
         # Backstop: force-close any connection still open 3s into shutdown so a
         # lingering /api/stream can never hang the supervisor's restart. The
-        # restart endpoint signals streams to close first, so this rarely fires.
+        # restart endpoint signals local streams to close first, so this rarely
+        # fires; across processes it's the primary close path on restart.
         timeout_graceful_shutdown=3,
     )
+    if workers > 1:
+        kwargs["workers"] = workers  # multi-process supervisor; reload is mutually exclusive
+    else:
+        kwargs["reload"] = settings.dev
+    uvicorn.run("sathop.orchestrator.main:app", **kwargs)
 
 
 if __name__ == "__main__":

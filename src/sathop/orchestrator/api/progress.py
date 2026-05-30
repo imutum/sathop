@@ -1,22 +1,24 @@
-"""Granule progress: in-memory store with SSE push.
+"""Granule progress: ephemeral telemetry with SSE push.
 
-Progress checkpoints are ephemeral telemetry — useful for ~5 seconds while a
-download or processing step is active, then superseded by stage-timing rows.
-Storing them in SQLite was the original design; this revision keeps them purely
-in RAM to eliminate ~50% of all orchestrator DB writes under load.
-
-Trade-off: progress history does not survive orchestrator restart. Workers
-re-report on their next callback, so the UI recovers within seconds.
+Progress checkpoints are useful for ~5 seconds while a download/process step is
+active, then superseded by stage-timing rows. Two backends behind one API:
+  - **in-memory** dicts (single-process default), zero DB writes.
+  - **Redis** (multi-process): per-granule LIST timeline + per-batch HASH of
+    latest entries, both TTL'd, so progress reported to any uvicorn process is
+    queryable from any other. Never persisted to SQLite either way; workers
+    re-report within seconds after a restart.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 
 from fastapi import APIRouter, Depends
 
 from sathop.shared.protocol import ProgressEvent
 
+from .. import redis_bus
 from ..config import require_token
 from ..db import utcnow
 from ..pubsub import publish
@@ -24,8 +26,21 @@ from ..pubsub import publish
 router = APIRouter(tags=["progress"], dependencies=[Depends(require_token)])
 
 _MAX_ENTRIES_PER_GRANULE = 200
+_TTL = 300  # display-only; entries are stale after a few seconds anyway
 _by_granule: dict[str, list[dict]] = {}
 _latest_by_batch: dict[str, dict[str, dict]] = {}
+
+
+def _r():
+    return redis_bus.sync() if redis_bus.enabled() else None
+
+
+def _tkey(granule_id: str) -> str:
+    return f"sathop:pg:t:{granule_id}"
+
+
+def _bkey(batch_id: str) -> str:
+    return f"sathop:pg:b:{batch_id}"
 
 
 def _make_entry(granule_id: str, batch_id: str, event: ProgressEvent) -> dict:
@@ -42,10 +57,18 @@ def _make_entry(granule_id: str, batch_id: str, event: ProgressEvent) -> dict:
 def evict_granule(granule_id: str) -> None:
     """Drop a granule's progress timeline and its batch-index entry.
 
-    The batch index (`_latest_by_batch`) is private to this module: callers
-    pass only the granule id and the batch_id is self-resolved from the stored
-    entry, so no caller has to know progress keeps a secondary index. A granule
-    with no timeline is a clean no-op."""
+    The batch_id is self-resolved from the stored timeline so callers need only
+    the granule id. A granule with no timeline is a clean no-op."""
+    r = _r()
+    if r is not None:
+        first = r.lindex(_tkey(granule_id), 0)
+        batch_id = json.loads(first).get("batch_id") if first else None
+        p = r.pipeline()
+        p.delete(_tkey(granule_id))
+        if batch_id:
+            p.hdel(_bkey(batch_id), granule_id)
+        p.execute()
+        return
     entries = _by_granule.pop(granule_id, None)
     if not entries:
         return
@@ -71,23 +94,41 @@ def _clear() -> None:
 async def ingress(granule_id: str, event: ProgressEvent) -> dict:
     batch_id = event.batch_id or ""
     entry = _make_entry(granule_id, batch_id, event)
-    timeline = _by_granule.setdefault(granule_id, [])
-    if len(timeline) < _MAX_ENTRIES_PER_GRANULE:
-        timeline.append(entry)
+    r = _r()
+    if r is not None:
+        raw = json.dumps(entry)
+        p = r.pipeline()
+        p.rpush(_tkey(granule_id), raw)
+        p.ltrim(_tkey(granule_id), -_MAX_ENTRIES_PER_GRANULE, -1)
+        p.expire(_tkey(granule_id), _TTL)
+        if batch_id:
+            p.hset(_bkey(batch_id), granule_id, raw)
+            p.expire(_bkey(batch_id), _TTL)
+        p.execute()
     else:
-        timeline[-1] = entry
-    if batch_id:
-        _latest_by_batch.setdefault(batch_id, {})[granule_id] = entry
+        timeline = _by_granule.setdefault(granule_id, [])
+        if len(timeline) < _MAX_ENTRIES_PER_GRANULE:
+            timeline.append(entry)
+        else:
+            timeline[-1] = entry
+        if batch_id:
+            _latest_by_batch.setdefault(batch_id, {})[granule_id] = entry
     publish({"scope": "progress", "granule_id": granule_id, "batch_id": batch_id})
     return {"ok": True}
 
 
 @router.get("/granules/{granule_id}/progress")
 async def granule_timeline(granule_id: str) -> list[dict]:
+    r = _r()
+    if r is not None:
+        return [json.loads(x) for x in r.lrange(_tkey(granule_id), 0, -1)]
     return list(_by_granule.get(granule_id, []))
 
 
 @router.get("/batches/{batch_id}/progress/latest")
 async def batch_latest(batch_id: str) -> dict[str, dict]:
+    r = _r()
+    if r is not None:
+        return {gid: json.loads(v) for gid, v in r.hgetall(_bkey(batch_id)).items()}
     batch_map = _latest_by_batch.get(batch_id)
     return dict(batch_map) if batch_map else {}

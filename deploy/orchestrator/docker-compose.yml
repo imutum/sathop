@@ -6,14 +6,36 @@ services:
     user: "${SATHOP_UID:-10001}:${SATHOP_GID:-10001}"
     environment:
       SATHOP_ROLE: orchestrator
+      # Multi-process by default: N uvicorn workers sharing the redis bus below.
+      # Override in .env — set SATHOP_ORCH_WORKERS=1 (and optionally blank
+      # SATHOP_REDIS_URL) to fall back to single-process in-memory mode.
+      SATHOP_REDIS_URL: ${SATHOP_REDIS_URL:-redis://redis:6379/0}
+      SATHOP_ORCH_WORKERS: ${SATHOP_ORCH_WORKERS:-4}
     ports:
       - "${SATHOP_PORT:-8000}:${SATHOP_PORT:-8000}"
     volumes:
       - ./data:/app/data
       - ./repo:/app/repo
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${SATHOP_PORT:-8000}/api/health"]
       interval: 30s
       timeout: 5s
       start_period: 20s
       retries: 3
+
+  # Cross-process bus for the multi-worker orchestrator. Ephemeral (no
+  # persistence): events/telemetry/progress are display-only and re-populate
+  # within one heartbeat after a restart. To run single-process instead, set
+  # SATHOP_ORCH_WORKERS=1 in .env (this container then idles, harmless).
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

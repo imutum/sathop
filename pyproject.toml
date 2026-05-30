@@ -20,6 +20,9 @@ orchestrator = [
     "minio>=7.2",
     "python-multipart>=0.0.12",
     "prometheus-client>=0.20",
+    # Cross-process bus for multi-worker mode (route A); unused when
+    # SATHOP_REDIS_URL is empty (single-process in-memory default).
+    "redis>=5",
 ]
 worker = [
     "minio>=7.2",
@@ -52,6 +55,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.8",
+    "fakeredis>=2.21",
 ]
 
 [build-system]

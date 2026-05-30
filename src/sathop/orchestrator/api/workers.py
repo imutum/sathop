@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, update
@@ -75,16 +73,6 @@ async def _active_worker_or_403(s: AsyncSession, worker_id: str) -> Worker:
     if worker.operator_paused:
         raise HTTPException(403, "worker is paused")
     return worker
-
-
-# Serialize lease claims process-wide so two concurrent /lease calls can't
-# both observe the same PENDING rows and overwrite each other's UPDATE. The
-# SELECT-then-UPDATE pattern in lease() is racy without this — SQLAlchemy's
-# attribute-based UPDATE issues a primary-key-only WHERE clause, so the
-# second writer wins blindly and the first worker ends up with a phantom
-# lease (its later /events emit 409s, downloaded bytes wasted). SQLite
-# already serializes writers at commit time, so the perf cost is negligible.
-_LEASE_LOCK = asyncio.Lock()
 
 
 @router.post("/register", response_model=WorkerRegisterResponse)
@@ -175,11 +163,8 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
 
 @router.post("/lease", response_model=LeaseResponse)
 async def lease(req: LeaseRequest, s: AsyncSession = Depends(session)) -> LeaseResponse:
-    async with _LEASE_LOCK:
-        return await _lease_locked(req, s)
-
-
-async def _lease_locked(req: LeaseRequest, s: AsyncSession) -> LeaseResponse:
+    # No in-process lock: claim_pending_granules is a single atomic
+    # UPDATE…RETURNING, correct across concurrent callers and across processes.
     await _active_worker_or_403(s, req.worker_id)  # 403 if removed/paused
     now = utcnow()
     expires = now + LEASE_DURATION

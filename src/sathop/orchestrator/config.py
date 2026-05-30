@@ -12,6 +12,11 @@ class Settings:
     dev: bool = os.getenv("SATHOP_DEV", "0") == "1"
     db_path: Path = Path(os.getenv("SATHOP_DB", "/app/data/orchestrator.db"))
     token: str = os.getenv("SATHOP_TOKEN", "")
+    # Multi-process scaling (route A). redis_url empty → single-process,
+    # all ephemeral state (pubsub/events/telemetry/progress) stays in-memory.
+    # Set it + orch_workers>1 to run N uvicorn workers sharing one Redis bus.
+    redis_url: str = os.getenv("SATHOP_REDIS_URL", "")
+    orch_workers: int = max(1, int(os.getenv("SATHOP_ORCH_WORKERS", "1")))
     bundle_storage: Path = Path(os.getenv("SATHOP_BUNDLES", "/app/data/bundles"))
     shared_storage: Path = Path(os.getenv("SATHOP_SHARED", "/app/data/shared"))
     retain_events_days: int = int(os.getenv("SATHOP_RETAIN_EVENTS_DAYS", "30"))

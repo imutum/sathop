@@ -26,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sathop.shared.protocol import Credential, LeaseItem, LeaseRequest
 from sathop.shared.state_machine import (
     LEASED_STATES,
-    ClaimByLease,
     GranuleState,
     RevokedByOperator,
 )
@@ -109,28 +108,48 @@ async def claim_pending_granules(
     now,
     expires,
 ) -> list[LeaseItem]:
-    stmt = (
-        select(Granule)
+    """Atomically claim up to `limit` PENDING granules for `worker_id`.
+
+    A single `UPDATE … WHERE granule_id IN (SELECT … LIMIT n) RETURNING` is the
+    sweeper-style carve-out from the apply() Runner (ADR-0002), promoted here so
+    leasing is correct WITHOUT an in-process lock: under SQLite's single-writer
+    model the statement runs atomically, so two orchestrator processes racing
+    /lease claim disjoint sets (the loser's subquery sees the rows already
+    flipped to QUEUED). The set of fields written is exactly ClaimByLease's
+    (state→QUEUED, leased_by, lease_expires_at, updated_at) — and ClaimByLease
+    has no other side effects (no event, publish_scope=None), so nothing is lost
+    by bypassing the per-row transition."""
+    if limit <= 0:
+        return []
+    claimable = (
+        select(Granule.granule_id)
         .where(Granule.state == GranuleState.PENDING.value)
         .where((Granule.leased_by.is_(None)) | (Granule.lease_expires_at < now))
         .limit(limit)
+        .scalar_subquery()
     )
-    rows = (await s.execute(stmt)).scalars().all()
-
+    claimed_ids = (
+        (
+            await s.execute(
+                update(Granule)
+                .where(Granule.granule_id.in_(claimable))
+                .values(
+                    state=GranuleState.QUEUED.value,
+                    leased_by=worker_id,
+                    lease_expires_at=expires,
+                    updated_at=now,
+                )
+                .returning(Granule.granule_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not claimed_ids:
+        return []
+    rows = (await s.execute(select(Granule).where(Granule.granule_id.in_(claimed_ids)))).scalars().all()
     items: list[LeaseItem] = []
     for granule in rows:
-        # SQL above pre-filters state==PENDING so apply_transition's default
-        # raise_409 policy is unreachable in practice.
-        await apply_transition(
-            s,
-            granule,
-            ClaimByLease(
-                granule_id=granule.granule_id,
-                worker_id=worker_id,
-                lease_expires_at=expires,
-            ),
-            now=now,
-        )
         batch = await s.get(Batch, granule.batch_id)
         items.append(lease_item(granule, batch))
     return items

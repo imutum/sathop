@@ -1,20 +1,28 @@
-"""In-memory event log — replaces the ``events`` DB table.
+"""Ephemeral event log — display-only audit data, no business logic reads it.
 
-Events are display-only audit data; no business logic reads them. Keeping them
-in SQLite added ~2 WAL pages per state-transition commit for no functional
-benefit. This module stores events in a capped deque; they survive the process
-lifetime but not an orchestrator restart (workers/receivers re-populate context
-within one heartbeat cycle).
+Two interchangeable backends behind one sync API (callers are unchanged):
+  - **in-memory** capped deque (single-process default).
+  - **Redis LIST** (multi-process): ``LPUSH`` + ``LTRIM`` keeps the newest
+    ``_MAX_EVENTS`` newest-first; ids come from an ``INCR`` counter so the int
+    ``since_id`` pagination contract is preserved. Append is O(1); the
+    infrequent query/prune/evict paths read the whole (≤20k) list and filter in
+    Python. Both backends lose history on a full restart; workers/receivers
+    re-populate context within one heartbeat cycle.
 """
 
 from __future__ import annotations
 
+import json
 import threading
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 
+from . import redis_bus
+
 _MAX_EVENTS = 20_000
+_K = "sathop:events"
+_SEQ = "sathop:events:seq"
 
 
 @dataclass(slots=True)
@@ -33,6 +41,22 @@ _next_id: int = 1
 _lock = threading.Lock()
 
 
+def _r():
+    return redis_bus.sync() if redis_bus.enabled() else None
+
+
+def _event_dict(e: MemEvent) -> dict:
+    return {
+        "id": e.id,
+        "ts": e.ts.isoformat(),
+        "level": e.level,
+        "source": e.source,
+        "granule_id": e.granule_id,
+        "batch_id": e.batch_id,
+        "message": e.message,
+    }
+
+
 def append(
     *,
     ts: datetime,
@@ -42,6 +66,23 @@ def append(
     granule_id: str | None = None,
     batch_id: str | None = None,
 ) -> int:
+    r = _r()
+    if r is not None:
+        eid = int(r.incr(_SEQ))
+        e = {
+            "id": eid,
+            "ts": ts.isoformat(),
+            "level": level,
+            "source": source,
+            "granule_id": granule_id,
+            "batch_id": batch_id,
+            "message": message,
+        }
+        p = r.pipeline()
+        p.lpush(_K, json.dumps(e))
+        p.ltrim(_K, 0, _MAX_EVENTS - 1)
+        p.execute()
+        return eid
     global _next_id
     with _lock:
         eid = _next_id
@@ -60,16 +101,17 @@ def append(
     return eid
 
 
-def _event_dict(e: MemEvent) -> dict:
-    return {
-        "id": e.id,
-        "ts": e.ts.isoformat(),
-        "level": e.level,
-        "source": e.source,
-        "granule_id": e.granule_id,
-        "batch_id": e.batch_id,
-        "message": e.message,
-    }
+def _redis_newest_first(r) -> list[dict]:
+    """All events as dicts, newest-first (head = highest id)."""
+    return [json.loads(x) for x in r.lrange(_K, 0, -1)]
+
+
+def _redis_rewrite(r, kept_newest_first: list[dict]) -> None:
+    p = r.pipeline()
+    p.delete(_K)
+    if kept_newest_first:
+        p.rpush(_K, *[json.dumps(e) for e in kept_newest_first])
+    p.execute()
 
 
 def query(
@@ -82,28 +124,37 @@ def query(
     source: str | None = None,
     level: str | None = None,
 ) -> list[dict]:
-    with _lock:
+    def emit(it):
         results: list[dict] = []
-        for e in reversed(_store):
-            if e.id <= since_id:
+        for e in it:
+            if e["id"] <= since_id:
                 break
-            if before_id is not None and e.id >= before_id:
+            if before_id is not None and e["id"] >= before_id:
                 continue
-            if batch_id is not None and e.batch_id != batch_id:
+            if batch_id is not None and e["batch_id"] != batch_id:
                 continue
-            if granule_id is not None and e.granule_id != granule_id:
+            if granule_id is not None and e["granule_id"] != granule_id:
                 continue
-            if source is not None and e.source != source:
+            if source is not None and e["source"] != source:
                 continue
-            if level is not None and e.level != level:
+            if level is not None and e["level"] != level:
                 continue
-            results.append(_event_dict(e))
+            results.append(e)
             if len(results) >= limit:
                 break
         return results
 
+    r = _r()
+    if r is not None:
+        return emit(_redis_newest_first(r))
+    with _lock:
+        return emit(_event_dict(e) for e in reversed(_store))
+
 
 def last_n(n: int) -> list[dict]:
+    r = _r()
+    if r is not None:
+        return _redis_newest_first(r)[:n]
     with _lock:
         out: list[dict] = []
         for e in reversed(_store):
@@ -115,6 +166,13 @@ def last_n(n: int) -> list[dict]:
 
 def count_by_level_since(since: datetime) -> dict[str, int]:
     counts: dict[str, int] = {}
+    r = _r()
+    if r is not None:
+        for e in _redis_newest_first(r):
+            if datetime.fromisoformat(e["ts"]) < since:
+                break
+            counts[e["level"]] = counts.get(e["level"], 0) + 1
+        return counts
     with _lock:
         for e in reversed(_store):
             if e.ts < since:
@@ -124,6 +182,13 @@ def count_by_level_since(since: datetime) -> dict[str, int]:
 
 
 def evict_by_granule_ids(gids: set[str]) -> int:
+    r = _r()
+    if r is not None:
+        allev = _redis_newest_first(r)
+        kept = [e for e in allev if e["granule_id"] not in gids]
+        if len(kept) != len(allev):
+            _redis_rewrite(r, kept)
+        return len(allev) - len(kept)
     with _lock:
         before = len(_store)
         keep = [e for e in _store if e.granule_id not in gids]
@@ -133,6 +198,13 @@ def evict_by_granule_ids(gids: set[str]) -> int:
 
 
 def prune_before(cutoff: datetime) -> int:
+    r = _r()
+    if r is not None:
+        allev = _redis_newest_first(r)
+        kept = [e for e in allev if datetime.fromisoformat(e["ts"]) >= cutoff]
+        if len(kept) != len(allev):
+            _redis_rewrite(r, kept)
+        return len(allev) - len(kept)
     with _lock:
         n = 0
         while _store and _store[0].ts < cutoff:
@@ -142,6 +214,10 @@ def prune_before(cutoff: datetime) -> int:
 
 
 def _clear() -> None:
+    r = _r()
+    if r is not None:
+        r.delete(_K, _SEQ)
+        return
     global _next_id
     with _lock:
         _store.clear()
