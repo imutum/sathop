@@ -113,7 +113,7 @@ def test_upgrade_writes_pending_and_triggers_shutdown(tmp_path, monkeypatch, cli
     from sathop.orchestrator import pubsub
     from sathop.orchestrator.api import admin
 
-    monkeypatch.setattr(admin, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr("sathop.shared.release.repo_root", lambda: tmp_path)
 
     real_client = httpx.AsyncClient  # capture before patching to avoid recursion
 
@@ -141,7 +141,7 @@ def test_upgrade_502_when_asset_missing(tmp_path, monkeypatch, client):
     restart) — better than crash-looping the container post-restart."""
     from sathop.orchestrator.api import admin
 
-    monkeypatch.setattr(admin, "_repo_root", lambda: tmp_path)
+    monkeypatch.setattr("sathop.shared.release.repo_root", lambda: tmp_path)
 
     real_client = httpx.AsyncClient  # capture before patching to avoid recursion
 

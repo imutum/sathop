@@ -49,6 +49,10 @@ class WorkerHeartbeatResponse(BaseModel):
     process_concurrency: int | None = None
     revoked_granule_ids: list[str] = Field(default_factory=list)
     update_requested: bool = False
+    # Target release for a coordinated upgrade (None = restart on the same
+    # version). When set, the worker stamps its own .pending-version before
+    # draining so the entrypoint installs this release on restart.
+    update_to_version: str | None = None
     operator_paused: bool = False
     gc_requested: bool = False
     removed: bool = False

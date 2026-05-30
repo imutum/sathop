@@ -67,6 +67,12 @@ const adminApi = {
   upgradeOrchestrator: (version: string) =>
     postJson<{ ok: boolean; version: string }>("/api/admin/upgrade", { version }),
   restartOrchestrator: () => postJson<{ ok: boolean }>("/api/admin/restart"),
+  // Newest release, resolved server-side (one IP, optional token, 5-min cache)
+  // so the browser never hits the rate-limited api.github.com directly.
+  latestVersion: () =>
+    getJson<{ tag: string; html_url: string; current: string; error?: string }>(
+      "/api/admin/latest-version",
+    ),
 };
 
 const nodeApi = {
@@ -97,8 +103,13 @@ const nodeApi = {
     deleteJson<{ ok: boolean; purged: boolean }>(
       `/api/workers/${encodeURIComponent(workerId)}?purge=true`,
     ),
-  updateWorker: (workerId: string) =>
-    postJson<{ ok: boolean }>(`/api/workers/${encodeURIComponent(workerId)}/update`),
+  // version set ⇒ coordinated upgrade (worker stamps its own .pending-version,
+  // drains, entrypoint installs that release); null/omitted ⇒ same-version restart.
+  updateWorker: (workerId: string, version?: string | null) =>
+    postJson<{ ok: boolean; version: string | null }>(
+      `/api/workers/${encodeURIComponent(workerId)}/update`,
+      { version: version ?? null },
+    ),
   setWorkerPaused: (workerId: string, operator_paused: boolean) =>
     putJson<{ ok: boolean; operator_paused: boolean }>(
       `/api/workers/${encodeURIComponent(workerId)}/pause`,

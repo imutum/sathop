@@ -18,6 +18,7 @@ from sathop.shared.protocol import (
     WorkerRegister,
     WorkerRegisterResponse,
 )
+from sathop.shared.release import normalize_version
 from sathop.shared.state_machine import (
     DeleteConfirmed,
     GranuleEvent,
@@ -149,6 +150,11 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
     update_requested = await consume_one_shot_signal(
         s, w, "update_requested_at", source=w.worker_id, message="update signal delivered to worker"
     )
+    # Deliver + consume the coordinated-upgrade target alongside the one-shot.
+    # None = plain restart on the same version.
+    update_to_version = w.update_to_version if update_requested else None
+    if update_requested:
+        w.update_to_version = None
     gc_requested = await consume_one_shot_signal(
         s, w, "gc_requested_at", source=w.worker_id, message="cache GC signal delivered to worker"
     )
@@ -161,6 +167,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         process_concurrency=w.process_concurrency,
         revoked_granule_ids=revoked,
         update_requested=update_requested,
+        update_to_version=update_to_version,
         operator_paused=bool(w.operator_paused),
         gc_requested=gc_requested,
     )
@@ -331,20 +338,45 @@ async def set_concurrency(
     }
 
 
+class WorkerUpdateRequest(BaseModel):
+    """Optional target version for a coordinated upgrade. None / absent body =
+    plain same-version restart (worker drains; entrypoint reinstalls the version
+    it already has). A version stamps the worker's .pending-version on its next
+    heartbeat so the entrypoint installs that release instead."""
+
+    version: str | None = None
+
+
+def _norm_update_version(version: str | None) -> str | None:
+    if version is None:
+        return None
+    try:
+        return normalize_version(version)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+
+
 @router.post("/{worker_id}/update")
-async def request_update(worker_id: str, s: AsyncSession = Depends(session)) -> dict:
-    return await signal_one_shot(
-        s,
-        Worker,
-        worker_id,
-        "update_requested_at",
-        scope=Scope.WORKERS,
-        message="update requested via UI",
-    )
+async def request_update(
+    worker_id: str,
+    body: WorkerUpdateRequest | None = None,
+    s: AsyncSession = Depends(session),
+) -> dict:
+    target = _norm_update_version(body.version if body else None)
+    w = await get_or_404(s, Worker, worker_id, "worker not found")
+    w.update_requested_at = utcnow()
+    w.update_to_version = target
+    await log(s, worker_id, f"{f'upgrade→v{target}' if target else 'restart'} (update) requested via UI")
+    await commit_and_publish(s, Scope.WORKERS)
+    return {"ok": True, "version": target}
 
 
 @router.post("/update-all")
-async def request_update_all(s: AsyncSession = Depends(session)) -> dict:
+async def request_update_all(
+    body: WorkerUpdateRequest | None = None,
+    s: AsyncSession = Depends(session),
+) -> dict:
+    target = _norm_update_version(body.version if body else None)
     rows = (await s.execute(select(Worker).where(Worker.removed_at.is_(None)))).scalars().all()
     count = 0
     now = utcnow()
@@ -352,11 +384,14 @@ async def request_update_all(s: AsyncSession = Depends(session)) -> dict:
         if w.operator_paused:
             continue
         w.update_requested_at = now
+        w.update_to_version = target
         count += 1
     if count:
-        await log(s, "operator", f"update-all: {count} worker(s)")
+        await log(
+            s, "operator", f"update-all ({f'upgrade→v{target}' if target else 'restart'}): {count} worker(s)"
+        )
         await commit_and_publish(s, Scope.WORKERS)
-    return {"ok": True, "count": count}
+    return {"ok": True, "count": count, "version": target}
 
 
 @router.post("/remove-all")

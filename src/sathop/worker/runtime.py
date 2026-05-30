@@ -18,6 +18,7 @@ from sathop.shared.protocol import (
     WorkerHeartbeat,
     WorkerRegister,
 )
+from sathop.shared.release import write_pending_version
 from sathop.shared.state_machine import DeleteConfirmed
 
 from . import downloader, storage, tls
@@ -77,6 +78,17 @@ class Worker:
             return
         self._draining = True
         log.warning("entering graceful drain (%s) — will exit after in-flight handlers complete", reason)
+
+    def _stamp_pending_version(self, version: str) -> None:
+        """Write the entrypoint's one-shot upgrade stamp so the post-drain restart
+        installs `version`. Best-effort: a write failure (read-only repo dir, or
+        running outside the container) degrades to a same-version restart rather
+        than aborting the drain."""
+        try:
+            path = write_pending_version(version)
+            log.info("stamped pending upgrade → v%s at %s", version, path)
+        except Exception as e:
+            log.warning("could not stamp pending upgrade v%s (will restart same version): %s", version, e)
 
     def _bump_backoff(self) -> int:
         self._lease_backoff_factor = min(LEASE_MAX_BACKOFF_FACTOR, self._lease_backoff_factor * 2)
@@ -216,7 +228,13 @@ class Worker:
         if resp.removed:
             raise WorkerRemoved
         if resp.update_requested:
-            self._start_drain("update_requested via orchestrator")
+            if resp.update_to_version:
+                self._stamp_pending_version(resp.update_to_version)
+            self._start_drain(
+                f"upgrade→v{resp.update_to_version} via orchestrator"
+                if resp.update_to_version
+                else "restart via orchestrator"
+            )
         if self._remote_pause != resp.operator_paused:
             log.info("remote pause %s", "engaged" if resp.operator_paused else "released")
             self._remote_pause = resp.operator_paused

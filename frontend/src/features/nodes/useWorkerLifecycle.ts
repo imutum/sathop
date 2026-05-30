@@ -5,6 +5,7 @@ import { API } from "@/api";
 import { K } from "@/queryKeys";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
+import { useLatestRelease } from "@/composables/useVersionCheck";
 
 // All worker operations in one place: the six mutations plus their confirm
 // dialogs and the toast+invalidate boilerplate that used to be copy-pasted six
@@ -16,9 +17,20 @@ export function useWorkerLifecycle(worker: MaybeRefOrGetter<{ worker_id: string 
   const id = () => toValue(worker).worker_id;
   const refreshWorkers = () => qc.invalidateQueries({ queryKey: [...K.workers] });
 
+  // Target release for "更新" — newest version (shared, server-resolved query);
+  // null while unknown ⇒ degrades to a same-version restart.
+  const latest = useLatestRelease();
+  const updateTarget = computed(() => (latest.data.value?.tag ?? "").replace(/^v/, "") || null);
+
+  // version is captured at confirm time and passed through mutate(), so the
+  // request + toast use exactly what the user confirmed — not whatever the
+  // shared latest query happens to hold when the callback later fires.
   const update = useMutation({
-    mutationFn: () => API.updateWorker(id()),
-    onSuccess: () => toast.success("已发送更新信号，下次心跳生效"),
+    mutationFn: (version: string | null) => API.updateWorker(id(), version),
+    onSuccess: (_r, version) =>
+      toast.success(
+        version ? `已发送升级到 v${version} 信号，下次心跳生效` : "已发送重启信号，下次心跳生效",
+      ),
     onError: (e: Error) => toast.error(`更新失败：${e.message}`),
   });
 
@@ -79,13 +91,15 @@ export function useWorkerLifecycle(worker: MaybeRefOrGetter<{ worker_id: string 
   const pending = computed(() => update.isPending.value || remove.isPending.value);
 
   async function confirmUpdate(): Promise<void> {
+    const target = updateTarget.value;
     const ok = await requestConfirm({
-      title: `更新节点 ${id()}？`,
-      description:
-        "向该 worker 发送更新信号 — 它会在下一次心跳收到后排空在手任务并退出，自动拉取最新代码后重新启动。",
-      confirmText: "更新",
+      title: target ? `升级节点 ${id()} 到 v${target}？` : `重启节点 ${id()}？`,
+      description: target
+        ? `该 worker 在下次心跳后排空在手任务、写入待装版本 v${target} 并退出，由 entrypoint 拉取该版本安装后重启。`
+        : "未能确定最新版本，将发送同版本重启信号（排空在手任务后重启，版本不变）。",
+      confirmText: target ? "升级" : "重启",
     });
-    if (ok) update.mutate();
+    if (ok) update.mutate(target);
   }
 
   async function confirmRemove(): Promise<void> {

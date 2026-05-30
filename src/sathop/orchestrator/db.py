@@ -87,6 +87,12 @@ class Worker(Base):
     update_requested_at: Mapped[datetime | None] = mapped_column(
         "restart_requested_at", UtcDateTime(), nullable=True
     )
+    # Target version for a coordinated upgrade. Set alongside update_requested_at
+    # when the operator picks a version (None = plain same-version restart). The
+    # next heartbeat hands it to the worker, which stamps its own .pending-version
+    # before draining so the entrypoint installs that release. Nullable so
+    # _ensure_columns can ALTER existing DBs.
+    update_to_version: Mapped[str | None] = mapped_column(String, nullable=True)
     # Operator-set persistent pause flag. SQL column keeps old name for back-compat.
     operator_paused: Mapped[bool | None] = mapped_column(
         "pause_requested", Boolean, default=False, nullable=True

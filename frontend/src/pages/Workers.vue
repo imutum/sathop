@@ -30,11 +30,17 @@ import Modal from "@/ui/Modal.vue";
 import { Icon } from "@/components/Icon";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
+import { useLatestRelease } from "@/composables/useVersionCheck";
 
 const qc = useQueryClient();
 const toast = useToast();
 const workers = useQuery({ queryKey: [...K.workers], queryFn: API.workers });
 const list = computed(() => workers.data.value ?? []);
+
+// Target release for "更新" — the newest version (resolved server-side, shared
+// query). null while unknown ⇒ the update degrades to a same-version restart.
+const latest = useLatestRelease();
+const updateTarget = computed(() => (latest.data.value?.tag ?? "").replace(/^v/, "") || null);
 
 // Active vs history (removed) split. Removed nodes get their own tab so the
 // common case — a screenful of live nodes — never has to scroll past tombstones.
@@ -116,8 +122,20 @@ async function fanOut(verb: string, fn: (id: string) => Promise<unknown>) {
   clearSelection();
 }
 
-function onBatchUpdate() {
-  void fanOut("发送更新信号", (id) => API.updateWorker(id));
+async function onBatchUpdate() {
+  const n = selectedCount.value;
+  if (n === 0) return;
+  const target = updateTarget.value;
+  const ok = await requestConfirm({
+    title: target ? `升级 ${n} 个节点到 v${target}？` : `重启 ${n} 个节点？`,
+    description: target
+      ? `所选 worker 在下次心跳后各自排空在手任务、写入待装版本 v${target} 并重启，由 entrypoint 拉取该版本发布包安装。混版期间管道仍正常流转，建议分批操作以免吞吐断崖。`
+      : "未能确定最新版本，将发送同版本重启信号（排空在手任务后重启，版本不变）。",
+    confirmText: target ? "升级并重启" : "重启",
+    tone: "danger",
+  });
+  if (!ok) return;
+  void fanOut(target ? `升级到 v${target}` : "重启", (id) => API.updateWorker(id, target));
 }
 function onBatchPause() {
   void fanOut("暂停领新任务", (id) => API.setWorkerPaused(id, true));

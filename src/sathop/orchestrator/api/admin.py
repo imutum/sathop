@@ -5,12 +5,10 @@ from __future__ import annotations
 import asyncio
 import os
 import platform
-import re
 import signal
 import sys
 import time
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -21,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop import __version__
 from sathop.shared.bundle_ref import format_bundle_ref
+from sathop.shared.release import normalize_version, write_pending_version
 from sathop.shared.state_machine import GranuleState, RequeueGranule, Scope
 
 from ..config import require_token, settings
@@ -271,15 +270,94 @@ async def reset_pull_failures(
     return {"reset": n}
 
 
-def _repo_root() -> Path:
-    """Repo root the entrypoint installs into (/app/repo). admin.py lives at
-    <root>/src/sathop/orchestrator/api/admin.py — five parents up."""
-    return Path(__file__).resolve().parents[4]
+def _git_repo_base() -> str:
+    """The repo's web base, e.g. https://github.com/imutum/sathop (no .git)."""
+    return os.environ.get("SATHOP_GIT_REPO", "https://github.com/imutum/sathop.git").removesuffix(".git")
 
 
 def _bundle_asset_url(version: str) -> str:
-    base = os.environ.get("SATHOP_GIT_REPO", "https://github.com/imutum/sathop.git").removesuffix(".git")
-    return f"{base}/releases/download/v{version}/sathop-bundle.tar.gz"
+    return f"{_git_repo_base()}/releases/download/v{version}/sathop-bundle.tar.gz"
+
+
+def _github_headers() -> dict[str, str]:
+    h = {"Accept": "application/vnd.github+json"}
+    token = os.environ.get("SATHOP_GIT_TOKEN", "")
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    return h
+
+
+async def _fetch_latest_release() -> dict[str, str]:
+    """Resolve the newest release tag from the GitHub API, falling back to the
+    newest tag when no release is published. Server-side so the browser never
+    hits api.github.com (anonymous 60/h-per-IP limit); an optional
+    SATHOP_GIT_TOKEN lifts the rate limit to 5000/h."""
+    base = _git_repo_base()
+    repo_path = base.split("github.com/", 1)[-1]  # owner/repo
+    releases_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10) as c:
+        r = await c.get(releases_url, headers=_github_headers())
+        if r.status_code == 200:
+            j = r.json()
+            return {"tag": j.get("tag_name") or "", "html_url": j.get("html_url") or f"{base}/releases"}
+        if r.status_code != 404:
+            r.raise_for_status()
+        # No published release — fall back to the newest tag.
+        rt = await c.get(
+            f"https://api.github.com/repos/{repo_path}/tags?per_page=1", headers=_github_headers()
+        )
+        rt.raise_for_status()
+        tags = rt.json()
+        name = tags[0].get("name", "") if isinstance(tags, list) and tags else ""
+        return {"tag": name, "html_url": f"{base}/releases/tag/{name}" if name else f"{base}/releases"}
+
+
+_LATEST_TTL = 300.0
+_latest_cache: dict[str, Any] = {"at": 0.0, "data": None}
+_latest_lock = asyncio.Lock()
+
+
+def reset_latest_cache() -> None:
+    """Drop the cached latest-release — used by tests to avoid cross-test staleness."""
+    _latest_cache["data"] = None
+
+
+def _cached_latest() -> dict | None:
+    data = _latest_cache["data"]
+    if data is not None and time.time() - _latest_cache["at"] < _LATEST_TTL:
+        return data
+    return None
+
+
+@router.get("/latest-version")
+async def latest_version() -> dict:
+    """What's the newest SatHop release? Proxied server-side (one IP, optional
+    token, 5-min single-flight cache) so the browser never hits the rate-limited
+    api.github.com directly. Returns {tag, html_url, current}; tag="" + error on
+    failure (not cached, so a later success still populates).
+
+    Double-checked locking (like _cached_overview): the cache-hit fast path never
+    touches the lock, so a burst of UI tabs sharing one query key never queues
+    behind it — and a slow/hanging GitHub stalls only true cache-miss callers."""
+    cached = _cached_latest()
+    if cached is not None:
+        return {**cached, "current": __version__}
+    async with _latest_lock:
+        cached = _cached_latest()
+        if cached is not None:
+            return {**cached, "current": __version__}
+        try:
+            data = await _fetch_latest_release()
+        except Exception as e:
+            return {
+                "tag": "",
+                "html_url": f"{_git_repo_base()}/releases",
+                "current": __version__,
+                "error": str(e),
+            }
+        _latest_cache["data"] = data
+        _latest_cache["at"] = time.time()
+        return {**data, "current": __version__}
 
 
 class UpgradeRequest(BaseModel):
@@ -304,9 +382,10 @@ async def upgrade_orchestrator(req: UpgradeRequest, s: AsyncSession = Depends(se
     prebuilt frontend, one package so they can't drift), extracting it, and
     relaunching. We HEAD the release asset first so a bad version fails here with
     a clear error instead of crash-looping the container after the restart."""
-    version = req.version.strip().lstrip("v")
-    if not re.match(r"^\d+\.\d+", version):
-        raise HTTPException(422, f"invalid version: {req.version!r}")
+    try:
+        version = normalize_version(req.version)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
 
     url = _bundle_asset_url(version)
     try:
@@ -315,7 +394,7 @@ async def upgrade_orchestrator(req: UpgradeRequest, s: AsyncSession = Depends(se
     except Exception as e:
         raise HTTPException(502, f"release v{version} not downloadable: {e}")
 
-    (_repo_root() / ".pending-version").write_text(version)
+    write_pending_version(version)
     await log(s, "orchestrator", f"upgrade to v{version} requested via UI")
     await commit_and_publish(s, Scope.EVENTS)
     _trigger_shutdown()
