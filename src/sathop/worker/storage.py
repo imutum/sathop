@@ -66,14 +66,22 @@ class LocalStorage:
 
     async def put(self, src: Path, object_key: str) -> UploadedObject:
         dst = safe_join(self.root, object_key)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), dst)
+        # Off the event loop: hashing a multi-MB output (and a cross-FS move) on the
+        # loop stalls every concurrent granule's coroutines and the heartbeat. A
+        # same-FS move is a cheap rename; the sha256 read is the real cost.
+        sha, size = await asyncio.to_thread(self._store, src, dst)
         return UploadedObject(
             object_key=object_key,
             presigned_url=f"{self.public_base_url}/{object_key}",
-            sha256=sha256_file(dst),
-            size=dst.stat().st_size,
+            sha256=sha,
+            size=size,
         )
+
+    @staticmethod
+    def _store(src: Path, dst: Path) -> tuple[str, int]:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), dst)
+        return sha256_file(dst), dst.stat().st_size
 
     async def delete(self, object_key: str) -> None:
         p = safe_join(self.root, object_key)
@@ -118,7 +126,9 @@ class MinioStorage:
                     raise
 
     async def put(self, src: Path, object_key: str) -> UploadedObject:
-        sha = sha256_file(src)
+        # Hash off the loop too — sha256 of a multi-MB output on the event loop
+        # stalls heartbeats and other handlers just like the upload itself would.
+        sha = await asyncio.to_thread(sha256_file, src)
         size = src.stat().st_size
         # minio-py is sync; off-load to a thread so the asyncio loop keeps
         # serving heartbeats and other granule handlers during multi-second

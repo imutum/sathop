@@ -214,7 +214,16 @@ async def run_bundle(
 
     try:
         for src in inputs:
-            shutil.copy2(src, input_dir / src.name)
+            dst = input_dir / src.name
+            # Inputs were just downloaded to the caller's work_dir, and run_dir is a
+            # mkdtemp *inside* work_dir — same filesystem — so a hardlink stages them
+            # into the bundle's isolated input dir with zero byte-copy. copy2 here
+            # re-read+re-wrote every input on the event loop. Fall back to a real copy
+            # only when the link can't be made (cross-FS / unsupported).
+            try:
+                os.link(src, dst)
+            except OSError:
+                shutil.copy2(src, dst)
 
         env = _build_env(
             bundle,
