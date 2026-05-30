@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from sathop.orchestrator import db as orch_db
 from sathop.orchestrator.config import settings
-from sathop.orchestrator.db import Batch, Granule, GranuleObject
+from sathop.orchestrator.db import Batch, Granule, GranuleObject, utcnow
 from sathop.orchestrator.main import app
 from sathop.shared.protocol import GranuleState
 
@@ -72,6 +72,21 @@ async def test_requeue_skips_pullable(client):
     assert client.post("/api/admin/requeue-undeliverable").json()["requeued"] == 0
     async with orch_db._session_maker() as s:
         assert (await s.get(Granule, "g1")).state == GranuleState.UPLOADED.value
+
+
+async def test_requeue_resets_acked_but_stuck(client):
+    """Object was acked (not pullable, not exhausted) but the granule never advanced
+    past UPLOADED — the receiver won't re-pull and requeue's old exhausted-only check
+    missed it. 'No pullable object left' catches this stuck-forever case too."""
+    await _seed("g1", failed_pulls=0)
+    async with orch_db._session_maker() as s:
+        obj = (await s.execute(select(GranuleObject).where(GranuleObject.granule_id == "g1"))).scalar_one()
+        obj.acked_at = utcnow()
+        obj.acked_by = "r1"
+        await s.commit()
+    assert client.post("/api/admin/requeue-undeliverable").json()["requeued"] == 1
+    async with orch_db._session_maker() as s:
+        assert (await s.get(Granule, "g1")).state == GranuleState.PENDING.value
 
 
 async def test_requeue_skips_non_uploaded(client):

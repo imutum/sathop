@@ -24,7 +24,7 @@ from ..config import require_token, settings
 from ..db import Batch, Bundle, Granule, GranuleObject, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ._helpers import object_is_exhausted
+from ._helpers import object_is_pullable
 from ._transition import apply_transition
 from .admin_readmodels import (
     NON_TERMINAL,
@@ -212,19 +212,22 @@ async def requeue_undeliverable(
     batch_id: str | None = None,
     s: AsyncSession = Depends(session),
 ) -> dict:
-    """Re-queue UPLOADED granules whose objects are exhausted — the receiver gave
-    up after max_pull_failures (typically the hosting worker lost the output files
-    on restart, so the presigned URLs 404). Each resets to PENDING for a full
-    re-download/process/upload and its dead object rows are dropped. Scope with
-    ?batch_id=, else sweeps every batch."""
+    """Re-queue UPLOADED granules the receiver can no longer make progress on — i.e.
+    with NO pullable object left: every object is exhausted (failed_pulls hit the cap)
+    OR already acked/deleted while the granule never advanced past UPLOADED. Typically
+    the hosting worker lost the output files on restart (presigned URLs 404). Each
+    resets to PENDING for a full re-download/process/upload and its dead object rows
+    are dropped. Scope with ?batch_id=, else sweeps every batch.
+
+    A normally-delivering granule still has a pullable object, so it is never touched."""
     now = utcnow()
     stmt = (
         select(Granule)
         .where(Granule.state == GranuleState.UPLOADED.value)
         .where(
-            select(GranuleObject.id)
+            ~select(GranuleObject.id)
             .where(GranuleObject.granule_id == Granule.granule_id)
-            .where(object_is_exhausted())
+            .where(object_is_pullable())
             .exists()
         )
     )
