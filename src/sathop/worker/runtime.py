@@ -290,13 +290,7 @@ class Worker:
         while True:
             ceiling = self._live_download + self._live_process
             free = ceiling - len(self._handlers)
-            if (
-                free <= 0
-                or self._pause_lease
-                or self._remote_pause
-                or self._draining
-                or self._reconfiguring
-            ):
+            if free <= 0 or self._pause_lease or self._remote_pause or self._draining or self._reconfiguring:
                 await asyncio.sleep(self.s.lease_poll_interval)
                 continue
             try:

@@ -51,7 +51,9 @@ async def test_set_concurrency_endpoint(client):
     assert r.json() == {"ok": True, "download_concurrency": 4, "process_concurrency": 2}
     assert await _overrides("w1") == (4, 2)
     # Clear via null
-    r = client.put("/api/workers/w1/concurrency", json={"download_concurrency": None, "process_concurrency": None})
+    r = client.put(
+        "/api/workers/w1/concurrency", json={"download_concurrency": None, "process_concurrency": None}
+    )
     assert r.status_code == 200
     assert await _overrides("w1") == (None, None)
     # Reject 0 / negative on either field
