@@ -264,7 +264,7 @@ async def reset_pull_failures(
         stmt = stmt.where(
             GranuleObject.granule_id.in_(select(Granule.granule_id).where(Granule.batch_id == batch_id))
         )
-    n = (await s.execute(stmt)).rowcount or 0
+    n = getattr(await s.execute(stmt), "rowcount", 0) or 0
     if n:
         await log(s, "admin", f"reset pull-failure counter on {n} exhausted object(s)")
     await commit_and_publish(s, Scope.BATCHES if n else None)
