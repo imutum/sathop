@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/table";
 import Field from "@/components/Field.vue";
 
-const props = defineProps<{ batchId: string; remaining: number; etaSeconds: number | null; etaRealtime: number | null }>();
+const props = defineProps<{ batchId: string; remaining: number; etaRealtime: number | null }>();
 
 // 显示顺序：每对 (等待, 工作) 紧挨着，让用户一眼看出 sem 排队 vs 实际跑。
 // deliver 无 wait 配对，排在末尾——它是上传完成→receiver 确认的交付延迟。
@@ -75,13 +75,6 @@ const doneCount = computed(() => data.value?.stages.deliver.count ?? 0);
           hint="按最近 1 分钟吞吐"
         >
           <span class="tabular-nums">≈ {{ fmtDuration(etaRealtime * 1000) }}</span>
-        </Field>
-        <Field
-          v-else-if="etaSeconds != null"
-          :label="`预计剩余 (${remaining} 条)`"
-          hint="按历史平均吞吐"
-        >
-          <span class="tabular-nums">≈ {{ fmtDuration(etaSeconds * 1000) }}</span>
         </Field>
       </div>
       <Table>

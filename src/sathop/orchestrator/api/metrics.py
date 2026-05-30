@@ -17,6 +17,8 @@ Scrape config example:
 
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
@@ -191,7 +193,40 @@ async def _collect(s: AsyncSession) -> bytes:
     return generate_latest(reg)
 
 
+# Single-flight scrape cache (mirrors api/admin.py's overview cache). A scrape
+# rebuilds the registry and runs two granule GROUP BYs on the one shared aiosqlite
+# connection; without this, concurrent scrapes (Prometheus + a curl probe, or two
+# Prometheus replicas) each re-run that work and serialize on the connection. The
+# 1s window collapses a burst onto one computation while staying real-time enough
+# for any sane scrape interval. Set TTL=0 to disable.
+_METRICS_TTL = 1.0
+_metrics_lock = asyncio.Lock()
+_metrics_cache: tuple[float, bytes] | None = None
+
+
+def reset_metrics_cache() -> None:
+    """Drop the cached scrape — used by tests to avoid cross-test staleness."""
+    global _metrics_cache
+    _metrics_cache = None
+
+
+async def _cached_collect(s: AsyncSession) -> bytes:
+    global _metrics_cache
+    if _METRICS_TTL > 0 and _metrics_cache is not None:
+        ts, body = _metrics_cache
+        if time.monotonic() - ts < _METRICS_TTL:
+            return body
+    async with _metrics_lock:
+        if _METRICS_TTL > 0 and _metrics_cache is not None:
+            ts, body = _metrics_cache
+            if time.monotonic() - ts < _METRICS_TTL:
+                return body
+        body = await _collect(s)
+        _metrics_cache = (time.monotonic(), body)
+        return body
+
+
 @router.get("/metrics", response_class=PlainTextResponse)
 async def metrics(s: AsyncSession = Depends(session)) -> PlainTextResponse:
-    body = await _collect(s)
+    body = await _cached_collect(s)
     return PlainTextResponse(content=body, media_type=CONTENT_TYPE_LATEST)

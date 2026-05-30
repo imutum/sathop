@@ -7,17 +7,14 @@ const props = defineProps<{
   done: number;
   total: number;
   pct: number;
-  etaSeconds: number | null;
   etaRealtime: number | null;
   inFlight: number;
   errors: number;
   exhausted: number;
 }>();
 
-const bestEta = computed(() => props.etaRealtime ?? props.etaSeconds);
-const etaHint = computed(() =>
-  props.etaRealtime != null ? "按最近 1 分钟吞吐外推" : "按历史平均吞吐外推",
-);
+const bestEta = computed(() => props.etaRealtime);
+const etaHint = "按最近 1 分钟吞吐外推";
 </script>
 
 <template>

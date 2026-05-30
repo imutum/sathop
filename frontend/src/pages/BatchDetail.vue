@@ -383,7 +383,6 @@ async function confirmDelete() {
         <BatchTimingCard
           :batch-id="batchId"
           :remaining="remainingToDeliver"
-          :eta-seconds="b?.eta_seconds ?? null"
           :eta-realtime="b?.eta_realtime ?? null"
         />
       </TabsContent>

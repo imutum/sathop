@@ -184,6 +184,20 @@ class GranuleObject(Base):
     failed_pulls: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
 
 
+# Partial index over only *pending* objects (not yet acked, not yet deleted).
+# The exhausted-by-batch / pullable / deletable read paths all filter on this
+# predicate, but acked+deleted rows accumulate unboundedly with delivered volume
+# (600k+ on a long-running batch) — a full-table index would still walk them.
+# Indexing only the handful of live objects turns those scans from O(delivered)
+# into O(in-flight). SQLite picks it only once stats exist, so init runs
+# `PRAGMA optimize` after ensuring indexes.
+Index(
+    "idx_granule_objects_pending",
+    GranuleObject.granule_id,
+    sqlite_where=GranuleObject.acked_at.is_(None) & GranuleObject.deleted_at.is_(None),
+)
+
+
 class Event(Base):
     __tablename__ = "events"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -273,6 +287,11 @@ async def init_db() -> None:
         await conn.run_sync(_ensure_columns)
         await conn.run_sync(_ensure_indexes)
         await conn.run_sync(_drop_obsolete_tables)
+        # Refresh planner stats so a just-created index (notably the partial
+        # idx_granule_objects_pending) is actually chosen — SQLite ignores an
+        # index it has no sqlite_stat1 row for. `optimize` is the cheap,
+        # changed-tables-only form (~tens of ms), safe to run every boot.
+        await conn.exec_driver_sql("PRAGMA optimize")
 
 
 def _ensure_columns(sync_conn) -> None:
