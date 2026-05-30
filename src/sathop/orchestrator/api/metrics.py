@@ -112,9 +112,16 @@ async def _collect(s: AsyncSession) -> bytes:
     state_counts: dict[str, int] = {
         state: count
         for state, count in (
-            await s.execute(select(Granule.state, func.count(Granule.granule_id)).group_by(Granule.state))
+            await s.execute(
+                select(Granule.state, func.count(Granule.granule_id))
+                .where(Granule.state != GranuleState.DELETED.value)
+                .group_by(Granule.state)
+            )
         ).all()
     }
+    # deleted = cumulative delivered, from the persistent counter (avoids scanning
+    # the huge terminal deleted rows). Still emitted as sathop_granules{state="deleted"}.
+    state_counts["deleted"] = int(await s.scalar(select(func.coalesce(func.sum(Batch.delivered_count), 0))))
     for st in GranuleState:
         g_granules.labels(state=st.value).set(state_counts.get(st.value, 0))
 

@@ -128,6 +128,11 @@ class Batch(Base):
     # so workers can authenticate downloads without any orchestrator-side
     # credential registry. Column kept as `credentials_json` for back-compat.
     credentials: Mapped[dict] = mapped_column("credentials_json", JSON, default=dict)
+    # Persistent cumulative-delivered counter (= rows that reached state=deleted).
+    # Replaces COUNTing deleted granules on the read path. Incremented once per
+    # DeleteConfirmed (guarded against re-sends). Nullable so _ensure_columns can
+    # ALTER existing DBs; read sites coalesce NULL->0.
+    delivered_count: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
 
 
 class Granule(Base):
@@ -155,6 +160,8 @@ class Granule(Base):
 
 
 Index("idx_granule_state_batch", Granule.state, Granule.batch_id)
+# Serves the stuck query: WHERE state IN(...) AND updated_at < threshold.
+Index("idx_granule_state_updated", Granule.state, Granule.updated_at)
 
 
 class GranuleObject(Base):
@@ -236,6 +243,8 @@ class GranuleStageTiming(Base):
 
 
 Index("idx_stage_timing_batch_stage", GranuleStageTiming.batch_id, GranuleStageTiming.stage)
+# Kills system_delivery_rate's full scan: WHERE stage='deliver' AND finished_at>=cutoff.
+Index("idx_stage_timing_stage_finished", GranuleStageTiming.stage, GranuleStageTiming.finished_at)
 
 
 _engine = None
@@ -262,6 +271,7 @@ async def init_db() -> None:
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_columns)
+        await conn.run_sync(_ensure_indexes)
         await conn.run_sync(_drop_obsolete_tables)
 
 
@@ -289,6 +299,16 @@ def _ensure_columns(sync_conn) -> None:
             col_type = col.type.compile(sync_conn.dialect)
             try:
                 sync_conn.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type}'))
+                if table_name == "batches" and col.name == "delivered_count":
+                    # One-shot backfill: the cumulative-delivered counter only
+                    # exists from this column on, so seed it from the live deleted
+                    # rows the first (and only) boot the column is created.
+                    sync_conn.execute(
+                        text(
+                            "UPDATE batches SET delivered_count = (SELECT COUNT(*) FROM granules "
+                            "WHERE granules.batch_id = batches.batch_id AND granules.state = 'deleted')"
+                        )
+                    )
             except Exception as e:
                 # Surface table/column/type so the operator can pinpoint which
                 # additive migration failed instead of a bare DB error spinning
@@ -308,6 +328,20 @@ def _ensure_columns(sync_conn) -> None:
                 # drop shouldn't crash-loop the orchestrator — surface it so the
                 # operator can drop it by hand.
                 log.exception("failed to drop obsolete column %s.%s", table_name, name)
+
+
+def _ensure_indexes(sync_conn) -> None:
+    """create_all only builds a table's indexes when it also CREATEs that table,
+    so an index added to an already-existing table never materialises. Reconcile
+    every declared index with checkfirst (idempotent) — the index-grain twin of
+    _ensure_columns — so new indexes land on live DBs too, not just fresh ones."""
+    log = logging.getLogger("sathop.orchestrator.db")
+    for table in Base.metadata.tables.values():
+        for index in table.indexes:
+            try:
+                index.create(sync_conn, checkfirst=True)
+            except Exception:
+                log.exception("failed to ensure index %s", index.name)
 
 
 # Tables the model no longer declares but old DBs still carry. Listed

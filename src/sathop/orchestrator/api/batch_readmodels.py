@@ -112,11 +112,18 @@ async def state_counts(s: AsyncSession, batch_ids: list[str]) -> dict[str, dict[
     stmt = (
         select(Granule.batch_id, Granule.state, func.count(Granule.granule_id))
         .where(Granule.batch_id.in_(batch_ids))
+        .where(Granule.state != GranuleState.DELETED.value)
         .group_by(Granule.batch_id, Granule.state)
     )
     out: dict[str, dict[str, int]] = {bid: {} for bid in batch_ids}
     for batch_id, state, n in (await s.execute(stmt)).all():
         out[batch_id][state] = n
+    # deleted = cumulative delivered, from the persistent per-batch counter.
+    delivered = (
+        await s.execute(select(Batch.batch_id, Batch.delivered_count).where(Batch.batch_id.in_(batch_ids)))
+    ).all()
+    for bid, n in delivered:
+        out[bid]["deleted"] = n or 0
     return out
 
 

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import signal
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -33,10 +35,39 @@ from .admin_readmodels import (
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_token)])
 
+# 1s single-flight TTL cache for the overview aggregate: every open UI tab
+# refetches it on each 'batches' SSE nudge, so bursts of concurrent calls within
+# the window collapse onto one DB computation. Set TTL=0 to disable.
+_OVERVIEW_TTL = 1.0
+_overview_lock = asyncio.Lock()
+_overview_cache: tuple[float, dict] | None = None
+
+
+def reset_overview_cache() -> None:
+    """Drop the cached overview — used by tests to avoid cross-test staleness."""
+    global _overview_cache
+    _overview_cache = None
+
+
+async def _cached_overview(s: AsyncSession) -> dict:
+    global _overview_cache
+    if _OVERVIEW_TTL > 0 and _overview_cache is not None:
+        ts, body = _overview_cache
+        if time.monotonic() - ts < _OVERVIEW_TTL:
+            return body
+    async with _overview_lock:
+        if _OVERVIEW_TTL > 0 and _overview_cache is not None:
+            ts, body = _overview_cache
+            if time.monotonic() - ts < _OVERVIEW_TTL:
+                return body
+        body = await admin_overview(s, now=datetime.now(UTC))
+        _overview_cache = (time.monotonic(), body)
+        return body
+
 
 @router.get("/overview")
 async def overview(s: AsyncSession = Depends(session)) -> dict:
-    return await admin_overview(s, now=datetime.now(UTC))
+    return await _cached_overview(s)
 
 
 @router.get("/in-flight")

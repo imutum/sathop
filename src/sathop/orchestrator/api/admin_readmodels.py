@@ -8,11 +8,11 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sathop.shared.state_machine import ACTIVE_STATES, NON_TERMINAL_STATES
+from sathop.shared.state_machine import ACTIVE_STATES, NON_TERMINAL_STATES, GranuleState
 
 from .. import event_store
 from ..config import settings
-from ..db import Granule
+from ..db import Batch, Granule
 from .batch_readmodels import system_delivery_rate
 
 NON_TERMINAL = set(NON_TERMINAL_STATES)
@@ -53,9 +53,16 @@ async def admin_overview(s: AsyncSession, *, now: datetime) -> dict[str, Any]:
     state_counts = {
         state: count
         for state, count in (
-            await s.execute(select(Granule.state, func.count(Granule.granule_id)).group_by(Granule.state))
+            await s.execute(
+                select(Granule.state, func.count(Granule.granule_id))
+                .where(Granule.state != GranuleState.DELETED.value)
+                .group_by(Granule.state)
+            )
         ).all()
     }
+    # deleted = cumulative delivered, read from the persistent counter instead of
+    # COUNTing the (huge, terminal) deleted rows.
+    state_counts["deleted"] = int(await s.scalar(select(func.coalesce(func.sum(Batch.delivered_count), 0))))
     stuck = {
         state: count
         for state, count in (

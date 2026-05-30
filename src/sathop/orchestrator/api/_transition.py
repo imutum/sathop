@@ -16,8 +16,9 @@ from datetime import datetime
 from typing import Literal, overload
 
 from fastapi import HTTPException
-from sqlalchemy import update
+from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from sathop.shared.state_machine import (
     AnyGranuleEvent,
@@ -31,7 +32,7 @@ from sathop.shared.state_machine import (
 )
 
 from ..config import settings
-from ..db import Granule, GranuleObject, GranuleStageTiming
+from ..db import Batch, Granule, GranuleObject, GranuleStageTiming
 
 
 def _snapshot_of(granule: Granule) -> GranuleSnapshot:
@@ -43,6 +44,37 @@ def _snapshot_of(granule: Granule) -> GranuleSnapshot:
 
 
 async def _apply_to_session(s: AsyncSession, granule: Granule, result: TransitionResult) -> None:
+    if result.objects_deleted_at is not None:
+        # DeleteConfirmed → terminal DELETED: the only counted transition, and the only one
+        # apply() accepts with no predecessor check — so a concurrent or retried delete for
+        # the same granule could double-count. Make the flip authoritative via a conditional
+        # UPDATE that re-asserts state != 'deleted' at write time (the lease-sweeper carve-out,
+        # ADR-0002): only the request whose UPDATE actually flips the row (rowcount == 1) marks
+        # its objects deleted and bumps the per-batch delivered counter; a duplicate no-ops.
+        # The explicit UPDATE bypasses the ORM, so a stale-snapshot guard can't decide wrongly.
+        res = await s.execute(
+            update(Granule)
+            .where(Granule.granule_id == granule.granule_id)
+            .where(Granule.state != GranuleState.DELETED.value)
+            .values(state=GranuleState.DELETED.value, updated_at=result.fields.get("updated_at"))
+        )
+        # Reflect the now-committed terminal state into the ORM identity map without
+        # marking the row dirty (no redundant flush, no async lazy-load): the row is
+        # DELETED whether this request flipped it or a concurrent one already did.
+        set_committed_value(granule, "state", GranuleState.DELETED.value)
+        if (getattr(res, "rowcount", 0) or 0) != 1:
+            return
+        await s.execute(
+            update(GranuleObject)
+            .where(GranuleObject.granule_id == granule.granule_id)
+            .values(deleted_at=result.objects_deleted_at)
+        )
+        await s.execute(
+            update(Batch)
+            .where(Batch.batch_id == granule.batch_id)
+            .values(delivered_count=func.coalesce(Batch.delivered_count, 0) + 1)
+        )
+        return
     granule.state = result.new_state.value
     for obj in result.new_objects:
         s.add(
@@ -68,12 +100,6 @@ async def _apply_to_session(s: AsyncSession, granule: Granule, result: Transitio
                 finished_at=row.finished_at,
                 duration_ms=duration_ms,
             )
-        )
-    if result.objects_deleted_at is not None:
-        await s.execute(
-            update(GranuleObject)
-            .where(GranuleObject.granule_id == granule.granule_id)
-            .values(deleted_at=result.objects_deleted_at)
         )
 
 

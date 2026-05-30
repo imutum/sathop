@@ -15,7 +15,9 @@ class Settings:
     bundle_storage: Path = Path(os.getenv("SATHOP_BUNDLES", "/app/data/bundles"))
     shared_storage: Path = Path(os.getenv("SATHOP_SHARED", "/app/data/shared"))
     retain_events_days: int = int(os.getenv("SATHOP_RETAIN_EVENTS_DAYS", "30"))
-    retain_deleted_days: int = int(os.getenv("SATHOP_RETAIN_DELETED_DAYS", "7"))
+    # Cumulative delivered is now a persistent counter, so deleted rows are pure
+    # storage and safe to prune sooner (operators can still override / set 0).
+    retain_deleted_days: int = int(os.getenv("SATHOP_RETAIN_DELETED_DAYS", "1"))
     retention_sweep_sec: int = int(os.getenv("SATHOP_RETENTION_SWEEP_SEC", "3600"))
     max_inflight_per_worker: int = int(os.getenv("SATHOP_MAX_INFLIGHT_PER_WORKER", "0"))
     # Auto-blacklist threshold: a granule that has failed this many times stops
