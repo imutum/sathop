@@ -253,8 +253,13 @@ async def evict_by_granule_ids_db(s: AsyncSession, gids: set[str]) -> int:
         return 0
     from .db import Event
 
-    r = await s.execute(delete(Event).where(Event.granule_id.in_(gids)))
-    return getattr(r, "rowcount", 0) or 0
+    # Chunked to stay under Postgres' 32767 bind-parameter cap (see reaping._ID_CHUNK).
+    ids = list(gids)
+    total = 0
+    for start in range(0, len(ids), 20_000):
+        r = await s.execute(delete(Event).where(Event.granule_id.in_(ids[start : start + 20_000])))
+        total += getattr(r, "rowcount", 0) or 0
+    return total
 
 
 async def prune_before_db(s: AsyncSession, cutoff: datetime) -> int:

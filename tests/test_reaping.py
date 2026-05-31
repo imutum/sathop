@@ -86,6 +86,31 @@ async def test_reaps_many_granules(session_maker):
         assert (await s.execute(select(func.count(Granule.granule_id)))).scalar_one() == 0
 
 
+async def test_chunked_delete_sums_counts_across_chunks(session_maker, monkeypatch):
+    # Force the chunk boundary low so 5 granules span multiple IN-clauses; the
+    # per-table counts must accumulate across chunks, not be overwritten. Guards
+    # the Postgres 32767 bind-parameter overflow fix.
+    monkeypatch.setattr("sathop.orchestrator.reaping._ID_CHUNK", 2)
+    gids = [f"g{i}" for i in range(5)]
+    async with session_maker() as s:
+        s.add(Batch(batch_id="b", name="t", bundle_ref="orch:x@1"))
+        for gid in gids:
+            s.add(_granule(gid))
+            s.add(_object(gid))
+            s.add(_timing(gid))
+        await s.commit()
+
+    async with session_maker() as s:
+        counts = await reap_granules(s, gids)
+        await s.commit()
+
+    assert counts == {"objects": 5, "stage_timings": 5, "granules": 5}
+    async with session_maker() as s:
+        assert (await s.execute(select(func.count(Granule.granule_id)))).scalar_one() == 0
+        assert (await s.execute(select(func.count(GranuleObject.id)))).scalar_one() == 0
+        assert (await s.execute(select(func.count(GranuleStageTiming.id)))).scalar_one() == 0
+
+
 async def test_empty_input_is_noop(session_maker):
     async with session_maker() as s:
         counts = await reap_granules(s, [])

@@ -25,6 +25,11 @@ from .db import Granule, GranuleObject, GranuleStageTiming
 # the granule-child topology is spelled out.
 _CHILD_TABLES = ((GranuleObject, "objects"), (GranuleStageTiming, "stage_timings"))
 
+# Postgres' wire protocol caps bind parameters at 32767 (int16); one batch can
+# hold hundreds of thousands of granules, so an unchunked `IN (ids)` overflows
+# it and asyncpg errors out. Delete in chunks that stay safely under the cap.
+_ID_CHUNK = 20_000
+
 
 async def reap_granules(s: AsyncSession, granule_ids: Collection[str]) -> dict[str, int]:
     """Delete the given granules and all rows referencing them, children first.
@@ -36,9 +41,11 @@ async def reap_granules(s: AsyncSession, granule_ids: Collection[str]) -> dict[s
     ids = list(granule_ids)
     if not ids:
         return counts
-    for table, key in _CHILD_TABLES:
-        r = await s.execute(delete(table).where(table.granule_id.in_(ids)))
-        counts[key] = getattr(r, "rowcount", 0) or 0
-    r = await s.execute(delete(Granule).where(Granule.granule_id.in_(ids)))
-    counts["granules"] = getattr(r, "rowcount", 0) or 0
+    for start in range(0, len(ids), _ID_CHUNK):
+        chunk = ids[start : start + _ID_CHUNK]
+        for table, key in _CHILD_TABLES:
+            r = await s.execute(delete(table).where(table.granule_id.in_(chunk)))
+            counts[key] += getattr(r, "rowcount", 0) or 0
+        r = await s.execute(delete(Granule).where(Granule.granule_id.in_(chunk)))
+        counts["granules"] += getattr(r, "rowcount", 0) or 0
     return counts
