@@ -7,7 +7,24 @@ export type Scope =
   | "events"
   | "progress"
   | "bundles"
-  | "shared";
+  | "shared"
+  | "rollout";
+
+export type RolloutStatus = {
+  active: boolean;
+  id?: number | null;
+  target_version?: string | null;
+  channel?: string | null;
+  phase?: string | null; // pending | running | halted | done | aborted
+  wave?: string | null; // canary | batch | fleet
+  wave_index?: number | null;
+  members?: { confirmed: number; pending: number; excused: number } | null;
+  pending_ids?: string[];
+  wave_deadline_at?: string | null;
+  halt_reason?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+};
 
 export type GranuleState =
   | "pending"

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import CardSection from "@/components/CardSection.vue";
 import Field from "@/components/Field.vue";
 import PageHeader from "@/components/PageHeader.vue";
+import RolloutPanel from "@/components/RolloutPanel.vue";
 import { Icon } from "@/components/Icon";
 
 const toast = useToast();
@@ -185,6 +186,13 @@ async function confirmRestart() {
         </Field>
       </div>
       <div v-else class="py-6 text-sm text-muted-foreground">加载中…</div>
+    </CardSection>
+
+    <CardSection
+      title="机群分阶段升级"
+      description="将 workers 分波（金丝雀 → 批量 → 全量）升级到 Orchestrator 当前版本，按版本确认的存活性逐波放量；任一波超时即暂停"
+    >
+      <RolloutPanel />
     </CardSection>
 
     <CardSection title="凭证说明">

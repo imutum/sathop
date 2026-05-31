@@ -22,6 +22,7 @@ import type {
   Overview,
   ProgressRow,
   ReceiverInfo,
+  RolloutStatus,
   SharedFileInfo,
   StuckGranule,
   TimingRow,
@@ -48,6 +49,7 @@ export type {
   Overview,
   ProgressRow,
   ReceiverInfo,
+  RolloutStatus,
   SharedFileInfo,
   StageStats,
   StuckGranule,
@@ -67,6 +69,18 @@ const adminApi = {
   upgradeOrchestrator: (version: string) =>
     postJson<{ ok: boolean; version: string }>("/api/admin/upgrade", { version }),
   restartOrchestrator: () => postJson<{ ok: boolean }>("/api/admin/restart"),
+  // Staged fleet rollout (L2): start (to a concrete version or a channel),
+  // observe, abort, and resume-after-halt. The leader paces the waves server-side.
+  rolloutStatus: () => getJson<RolloutStatus>("/api/admin/rollout"),
+  startRollout: (body: {
+    target_version?: string;
+    channel?: string;
+    canary_count?: number;
+    batch_pct?: number;
+    wave_timeout_sec?: number;
+  }) => postJson<RolloutStatus>("/api/admin/rollout", body),
+  abortRollout: () => postJson<RolloutStatus>("/api/admin/rollout/abort"),
+  resumeRollout: () => postJson<RolloutStatus>("/api/admin/rollout/resume"),
   // Newest release, resolved server-side (one IP, optional token, 5-min cache)
   // so the browser never hits the rate-limited api.github.com directly.
   latestVersion: () =>

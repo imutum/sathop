@@ -23,6 +23,7 @@ export const K = {
   sharedFiles: ["shared-files"],
   orchInfo: ["orch-info"],
   githubRelease: ["github-latest-release"],
+  rollout: ["rollout"],
 } as const;
 
 // SSE-driven invalidation: each backend `scope` nudge invalidates the keys
@@ -39,6 +40,7 @@ export const SCOPE_KEYS: Record<Scope, readonly (readonly string[])[]> = {
   progress: [K.granuleProgress, K.batchProgressLatest],
   bundles: [K.bundles, K.bundleDetail],
   shared: [K.sharedFiles],
+  rollout: [K.rollout],
 };
 
 // Compile-time guard: adding a new Scope without wiring its keys here is a type
