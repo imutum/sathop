@@ -137,24 +137,35 @@ async def test_latest_version_returns_tag_and_current(client, monkeypatch):
     assert "error" not in body
 
 
-async def test_latest_version_error_is_surfaced_not_cached(client, monkeypatch):
+async def test_latest_version_error_is_surfaced_then_bucketed(client, monkeypatch):
+    """A GitHub failure with no prior good surfaces tag=''+error, and is bucketed for
+    the clock-hour so a page-reload storm can't re-hit GitHub (the 403 cause)."""
     from sathop.orchestrator.api import admin
 
+    monkeypatch.setattr(admin, "_hour_bucket", lambda: 1000)
+    calls = {"n": 0}
+
     async def boom(channel="stable"):
+        calls["n"] += 1
         raise RuntimeError("API rate limit exceeded")
 
     monkeypatch.setattr(admin, "_fetch_latest_release", boom)
     body = client.get("/api/admin/latest-version").json()
     assert body["tag"] == ""
     assert "rate limit" in body["error"]
-    assert admin._latest_cache == {}  # failures aren't cached (no channel entry)
+    # Bucketed: a second call this hour serves the cached error, no extra GitHub hit.
+    again = client.get("/api/admin/latest-version").json()
+    assert again["tag"] == "" and "rate limit" in again["error"]
+    assert calls["n"] == 1
 
 
-async def test_latest_version_serves_stale_on_error(client, monkeypatch):
-    """A GitHub rate-limit (403) after a prior success must serve the last-known-good
-    result (stale) instead of surfacing a failure, and must not re-hit GitHub during
-    the cooldown — otherwise every page load retries and keeps us rate-limited."""
+async def test_latest_version_serves_stale_on_error_next_hour(client, monkeypatch):
+    """After a prior success, a fetch failure in a LATER clock-hour serves last-known-
+    good (stale) instead of a failure, and bucketing stops a retry storm that hour."""
     from sathop.orchestrator.api import admin
+
+    hour = {"b": 2000}
+    monkeypatch.setattr(admin, "_hour_bucket", lambda: hour["b"])
 
     async def good(channel="stable"):
         return {"tag": "v1.2.3", "html_url": "https://example/v1.2.3"}
@@ -163,7 +174,7 @@ async def test_latest_version_serves_stale_on_error(client, monkeypatch):
     first = client.get("/api/admin/latest-version").json()
     assert first["tag"] == "v1.2.3" and "stale" not in first
 
-    monkeypatch.setattr(admin, "_LATEST_TTL", 0.0)  # force cache-miss on every call
+    hour["b"] = 2001  # next clock-hour → cache miss
     calls = {"n": 0}
 
     async def boom(channel="stable"):
@@ -177,9 +188,34 @@ async def test_latest_version_serves_stale_on_error(client, monkeypatch):
     assert "rate limit" in stale["error"]
     assert calls["n"] == 1
 
-    again = client.get("/api/admin/latest-version").json()  # within cooldown
+    again = client.get("/api/admin/latest-version").json()  # same hour → bucketed
     assert again["tag"] == "v1.2.3" and again.get("stale") is True
-    assert calls["n"] == 1  # no extra GitHub hit during cooldown
+    assert calls["n"] == 1  # no extra GitHub hit within the hour
+
+
+async def test_latest_version_force_bypasses_and_resets_cache(client, monkeypatch):
+    """The manual button (?force=true) re-hits GitHub even within the same clock-hour
+    and resets the cache; a normal call afterwards serves the freshly fetched value."""
+    from sathop.orchestrator.api import admin
+
+    monkeypatch.setattr(admin, "_hour_bucket", lambda: 5000)  # pin one hour bucket
+    calls = {"n": 0}
+    tag = {"v": "v1.0.0"}
+
+    async def fetch(channel="stable"):
+        calls["n"] += 1
+        return {"tag": tag["v"], "html_url": "https://example"}
+
+    monkeypatch.setattr(admin, "_fetch_latest_release", fetch)
+    first = client.get("/api/admin/latest-version").json()
+    assert first["tag"] == "v1.0.0" and calls["n"] == 1
+    client.get("/api/admin/latest-version")  # same hour, no force → cached
+    assert calls["n"] == 1
+    tag["v"] = "v1.0.1"
+    forced = client.get("/api/admin/latest-version?force=true").json()  # bypass the bucket
+    assert forced["tag"] == "v1.0.1" and calls["n"] == 2
+    after = client.get("/api/admin/latest-version").json()  # force reset cache → fresh, no fetch
+    assert after["tag"] == "v1.0.1" and calls["n"] == 2
 
 
 async def test_latest_version_edge_channel_is_resolved_and_cached_separately(client, monkeypatch):

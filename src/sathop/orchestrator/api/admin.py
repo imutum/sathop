@@ -343,74 +343,85 @@ async def _fetch_latest_release(channel: str = "stable") -> dict[str, str]:
         return {"tag": name, "html_url": f"{base}/releases/tag/{name}" if name else f"{base}/releases"}
 
 
-_LATEST_TTL = 900.0  # success freshness; releases change rarely, so a long TTL
-# also cuts GitHub volume under N worker processes (each has its own cache).
-_LATEST_FAIL_COOLDOWN = 120.0  # after a GitHub error, don't re-hit it for this long
-_latest_cache: dict[str, dict] = {}  # channel -> {"at": float, "data": dict}  (TTL-gated)
-_latest_good: dict[str, dict] = {}  # channel -> last successful data, kept indefinitely
-_latest_fail_at: dict[str, float] = {}  # channel -> last fetch-failure time (negative cache)
+# Latest-release cache: at most ONE GitHub fetch per channel per clock-hour.
+# Releases change rarely, so an hour-aligned bucket (not a rolling TTL) caps GitHub
+# volume hard — ≤1 attempt/channel/hour even under constant UI traffic — which is
+# what keeps us under api.github.com's anonymous 60/h-per-IP limit (the 403 storms).
+_latest_cache: dict[str, dict] = {}  # channel -> {"bucket": int, "result": dict}
+_latest_good: dict[str, dict] = {}  # channel -> last successful {tag, html_url}, kept indefinitely
 _latest_lock = asyncio.Lock()
+
+
+def _hour_bucket() -> int:
+    """Index of the current clock-hour (UTC). Flips at HH:00:00, so the first request
+    after the top of the hour refreshes and the rest of the hour is served cached."""
+    return int(time.time() // 3600)
 
 
 def reset_latest_cache() -> None:
     """Drop cached latest-release data — used by tests to avoid cross-test staleness."""
     _latest_cache.clear()
     _latest_good.clear()
-    _latest_fail_at.clear()
 
 
-def _cached_latest(channel: str) -> dict | None:
+def _cached_latest(channel: str, bucket: int) -> dict | None:
     entry = _latest_cache.get(channel)
-    if entry is not None and time.time() - entry["at"] < _LATEST_TTL:
-        return entry["data"]
-    return None
+    return entry["result"] if entry is not None and entry["bucket"] == bucket else None
 
 
 @router.get("/latest-version")
-async def latest_version(channel: str = Query(default="")) -> dict:
+async def latest_version(
+    channel: str = Query(default=""),
+    force: bool = Query(default=False),
+) -> dict:
     """Newest SatHop release on a channel. Proxied server-side (one IP, optional
-    SATHOP_GIT_TOKEN, single-flight cache *per channel*) so the browser never hits
-    the rate-limited api.github.com directly (anonymous: 60/h-per-IP). `channel`
-    defaults to the orchestrator's SATHOP_CHANNEL (stable unless set to edge).
-    Returns {tag, html_url, current, channel}.
+    SATHOP_GIT_TOKEN) so the browser never hits the rate-limited api.github.com
+    directly (anonymous: 60/h-per-IP). `channel` defaults to SATHOP_CHANNEL (stable
+    unless set to edge). Returns {tag, html_url, current, channel, [stale, error]}.
 
-    Resilient to GitHub rate-limits / outages: the last successful result is kept
-    indefinitely and served (with stale=true) when a refresh fails, so a transient
-    403 never surfaces as a failure in the UI. A failed fetch also starts a short
-    cooldown during which we serve stale without re-hitting GitHub — otherwise
-    every page load would retry and keep us rate-limited. Only a first-ever fetch
-    with no prior good value returns tag="" + error.
+    Automatic (non-forced) requests query GitHub at most once per channel per
+    clock-hour: the result lands in the current hour bucket and is served for the
+    rest of the hour, so constant UI traffic — many tabs, frequent reloads, N worker
+    processes — can't drive repeated fetches. A failed fetch is bucketed too: it
+    serves the last-known-good value (stale=true) when one exists, else tag="" +
+    error, and does NOT re-hit GitHub again that hour, so an outage can't trigger a
+    retry storm. THIS hourly cap is the contract for automatic traffic only.
+
+    `force=true` (the manual "检查更新" button) is the deliberate operator override:
+    it always skips the bucket and re-hits GitHub immediately, then resets the cache
+    to the fresh result — the escape hatch when they need an answer before the next
+    hour boundary. Throttled by the UI (the button disables while a fetch is in
+    flight), so it can't be spammed into a storm.
 
     Double-checked locking (like _cached_overview): the cache-hit fast path never
     touches the lock, so a burst of UI tabs sharing one query key never queues
     behind it — and a slow/hanging GitHub stalls only true cache-miss callers."""
     ch = _normalize_channel(channel or settings.channel)
-    cached = _cached_latest(ch)
-    if cached is not None:
-        return {**cached, "current": __version__, "channel": ch}
-    async with _latest_lock:
-        cached = _cached_latest(ch)
+    bucket = _hour_bucket()
+    if not force:
+        cached = _cached_latest(ch, bucket)
         if cached is not None:
             return {**cached, "current": __version__, "channel": ch}
+    async with _latest_lock:
+        if not force:
+            cached = _cached_latest(ch, bucket)
+            if cached is not None:
+                return {**cached, "current": __version__, "channel": ch}
         good = _latest_good.get(ch)
-        # Recently failed → serve stale without hammering GitHub during cooldown.
-        if good is not None and time.time() - _latest_fail_at.get(ch, 0.0) < _LATEST_FAIL_COOLDOWN:
-            return {**good, "current": __version__, "channel": ch, "stale": True}
         try:
             data = await _fetch_latest_release(ch)
         except Exception as e:
-            _latest_fail_at[ch] = time.time()
-            if good is not None:  # serve last-known-good instead of a failure
-                return {**good, "current": __version__, "channel": ch, "stale": True, "error": str(e)}
-            return {
-                "tag": "",
-                "html_url": f"{_git_repo_base()}/releases",
-                "current": __version__,
-                "channel": ch,
-                "error": str(e),
-            }
-        _latest_cache[ch] = {"at": time.time(), "data": data}
+            # Bucket the failure so we don't re-hit GitHub until the next hour: serve
+            # last-known-good (stale) if we have it, else a bare error.
+            result = (
+                {**good, "stale": True, "error": str(e)}
+                if good is not None
+                else {"tag": "", "html_url": f"{_git_repo_base()}/releases", "error": str(e)}
+            )
+            _latest_cache[ch] = {"bucket": bucket, "result": result}
+            return {**result, "current": __version__, "channel": ch}
         _latest_good[ch] = data
+        _latest_cache[ch] = {"bucket": bucket, "result": data}
         return {**data, "current": __version__, "channel": ch}
 
 

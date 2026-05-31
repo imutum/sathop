@@ -18,22 +18,33 @@ export const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 
 export type VersionStatus = "unchecked" | "loading" | "current" | "outdated" | "unknown";
 
+// Set by refresh() so the very next fetch hits the orchestrator with ?force=true
+// (skip + reset its hourly GitHub cache); consumed on read so any later auto-refetch
+// stays cached. Module-scoped because there is one logical latest-release query
+// shared across all components (TanStack dedupes by key), so the flag must too.
+let forceNextFetch = false;
+
 async function fetchLatestRelease(): Promise<{ tag: string; htmlUrl: string; channel: string }> {
-  const j = await API.latestVersion();
-  if (j.error) throw new Error(j.error);
+  const force = forceNextFetch;
+  forceNextFetch = false;
+  const j = await API.latestVersion(force);
+  // A stale serve (GitHub unreachable, last-known-good returned) carries BOTH a valid
+  // tag AND error — that's the point of serve-stale, so use the tag and don't throw.
+  // Only a hard failure (error with no usable tag) surfaces as a query error.
+  if (j.error && !j.tag) throw new Error(j.error);
   return { tag: j.tag ?? "", htmlUrl: j.html_url ?? RELEASES_URL, channel: j.channel ?? "stable" };
 }
 
 // The shared latest-version query. Fetches once on mount (NOT a background poll —
-// no refetchInterval) and is cached for 5 min, matching the orchestrator's own
-// cache, so the upgrade button appears without a manual click while GitHub is hit
-// at most once per cache window. `refresh()` forces a re-check. Per-node cards
-// compare against the orchestrator version, not this, so they never refetch it.
+// no refetchInterval); the orchestrator caches one GitHub hit per clock-hour, so the
+// upgrade button appears without a manual click while GitHub stays well under its
+// rate limit. `refresh()` forces a fresh GitHub fetch (bypassing both caches). Per-node
+// cards compare against the orchestrator version, not this, so they never refetch it.
 export function useLatestRelease() {
   return useQuery({
     queryKey: [...K.githubRelease],
     queryFn: fetchLatestRelease,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 60 * 1000,
     retry: 1,
   });
 }
@@ -55,7 +66,10 @@ export function useVersionCheck(current: MaybeRefOrGetter<string | undefined>) {
     return compareSemver(currentVersion.value, latestTag.value) >= 0 ? "current" : "outdated";
   });
 
+  // Manual re-check: force the next fetch to bypass the orchestrator's hourly cache,
+  // then refetch (which also bypasses TanStack's staleTime).
   function refresh() {
+    forceNextFetch = true;
     void latest.refetch();
   }
 

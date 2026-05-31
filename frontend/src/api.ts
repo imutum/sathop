@@ -81,12 +81,18 @@ const adminApi = {
   }) => postJson<RolloutStatus>("/api/admin/rollout", body),
   abortRollout: () => postJson<RolloutStatus>("/api/admin/rollout/abort"),
   resumeRollout: () => postJson<RolloutStatus>("/api/admin/rollout/resume"),
-  // Newest release, resolved server-side (one IP, optional token, 5-min cache)
-  // so the browser never hits the rate-limited api.github.com directly.
-  latestVersion: () =>
-    getJson<{ tag: string; html_url: string; current: string; channel?: string; error?: string }>(
-      "/api/admin/latest-version",
-    ),
+  // Newest release, resolved server-side (one IP, optional token, cached one fetch
+  // per clock-hour) so the browser never hits the rate-limited api.github.com
+  // directly. `force` (manual "检查更新" button) skips + resets that hourly cache.
+  latestVersion: (force = false) =>
+    getJson<{
+      tag: string;
+      html_url: string;
+      current: string;
+      channel?: string;
+      stale?: boolean;
+      error?: string;
+    }>(`/api/admin/latest-version${force ? "?force=true" : ""}`),
 };
 
 const nodeApi = {
