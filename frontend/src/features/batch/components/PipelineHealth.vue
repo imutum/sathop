@@ -2,62 +2,57 @@
 import { computed } from "vue";
 import type { GranuleState } from "@/api";
 import { stateLabel } from "@/i18n";
-import { pipelineSegments, pipelineTotals } from "@/features/batch/pipelineSummary";
+import { pipelineGroups, pipelineSegments, pipelineTotals } from "@/features/batch/pipelineSummary";
 
-// `detailed` adds the per-state legend (the bottleneck locator operators read on
-// the batch-detail page). The overview omits it: the 4 rollup chips already carry
-// those numbers (待分配 is identical; the rest are this legend summed), so showing
-// both there is pure duplication.
-const props = defineProps<{ counts: Partial<Record<GranuleState, number>>; detailed?: boolean }>();
+// One component, one 口径 — used by both the overview (aggregate state_counts)
+// and a batch's 进度 (single-batch counts); only the data scope differs. Three
+// big stages (待分配 → 进行中 → 已交付) + 异常, each carrying its small stages in
+// processing order. The big-stage number is the sum; the small stages are its
+// breakdown (parent→child, intentionally both shown), so nothing is duplicated
+// — 待分配 is a leaf, present only as its card.
+const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
 
 // Stage colors stay local because they are presentation-only, not pipeline
 // semantics. Each literal hue carries a `dark:` shift one shade lighter so
-// the chip text and bar stay readable on the dark slate background (the
-// X-600/-700 text shades vanish on dark; X-500 bars look harsh).
-const STAGE: Record<GranuleState, { bar: string; chip: string; dot: string }> = {
-  pending:     { bar: "bg-muted-foreground/40",                  chip: "text-muted-foreground",                 dot: "bg-muted-foreground" },
-  queued:      { bar: "bg-amber-500/70 dark:bg-amber-400/60",    chip: "text-amber-600 dark:text-amber-400",    dot: "bg-amber-500 dark:bg-amber-400" },
-  downloading: { bar: "bg-sky-500 dark:bg-sky-400",              chip: "text-sky-600 dark:text-sky-400",        dot: "bg-sky-500 dark:bg-sky-400" },
-  downloaded:  { bar: "bg-sky-600 dark:bg-sky-500",              chip: "text-sky-700 dark:text-sky-400",        dot: "bg-sky-600 dark:bg-sky-500" },
-  processing:  { bar: "bg-indigo-500 dark:bg-indigo-400",        chip: "text-indigo-600 dark:text-indigo-400",  dot: "bg-indigo-500 dark:bg-indigo-400" },
-  processed:   { bar: "bg-indigo-600 dark:bg-indigo-500",        chip: "text-indigo-700 dark:text-indigo-400",  dot: "bg-indigo-600 dark:bg-indigo-500" },
-  uploading:   { bar: "bg-violet-500 dark:bg-violet-400",        chip: "text-violet-600 dark:text-violet-400",  dot: "bg-violet-500 dark:bg-violet-400" },
-  uploaded:    { bar: "bg-violet-600 dark:bg-violet-500",        chip: "text-violet-700 dark:text-violet-400",  dot: "bg-violet-600 dark:bg-violet-500" },
-  acked:       { bar: "bg-success/85",                            chip: "text-success",                          dot: "bg-success" },
-  deleted:     { bar: "bg-success",                               chip: "text-success",                          dot: "bg-success" },
-  failed:      { bar: "bg-danger",                                chip: "text-danger",                           dot: "bg-danger" },
-  blacklisted: { bar: "bg-danger/70",                             chip: "text-danger",                           dot: "bg-danger" },
+// the text/bar stay readable on the dark slate background.
+const STAGE: Record<GranuleState, { bar: string; dot: string }> = {
+  pending:     { bar: "bg-muted-foreground/40",               dot: "bg-muted-foreground" },
+  queued:      { bar: "bg-amber-500/70 dark:bg-amber-400/60", dot: "bg-amber-500 dark:bg-amber-400" },
+  downloading: { bar: "bg-sky-500 dark:bg-sky-400",           dot: "bg-sky-500 dark:bg-sky-400" },
+  downloaded:  { bar: "bg-sky-600 dark:bg-sky-500",           dot: "bg-sky-600 dark:bg-sky-500" },
+  processing:  { bar: "bg-indigo-500 dark:bg-indigo-400",     dot: "bg-indigo-500 dark:bg-indigo-400" },
+  processed:   { bar: "bg-indigo-600 dark:bg-indigo-500",     dot: "bg-indigo-600 dark:bg-indigo-500" },
+  uploading:   { bar: "bg-violet-500 dark:bg-violet-400",     dot: "bg-violet-500 dark:bg-violet-400" },
+  uploaded:    { bar: "bg-violet-600 dark:bg-violet-500",     dot: "bg-violet-600 dark:bg-violet-500" },
+  acked:       { bar: "bg-success/85",                        dot: "bg-success" },
+  deleted:     { bar: "bg-success",                           dot: "bg-success" },
+  failed:      { bar: "bg-danger",                            dot: "bg-danger" },
+  blacklisted: { bar: "bg-danger/70",                         dot: "bg-danger" },
 };
 
-const totals = computed(() => pipelineTotals(props.counts));
-const total = computed(() => totals.value.total);
-const pending = computed(() => totals.value.pending);
-const inFlight = computed(() => totals.value.active);
-const done = computed(() => totals.value.done);
-const failed = computed(() => totals.value.failed);
+// Big-stage header tone + a one-line tip (kept on the card, not the small rows).
+const GROUP: Record<string, { num: string; dot: string; tip: string }> = {
+  pending: { num: "text-muted-foreground",           dot: "bg-muted-foreground",        tip: "orchestrator 还没派给任何 worker 的数据粒" },
+  active:  { num: "text-sky-600 dark:text-sky-400",  dot: "bg-sky-500 dark:bg-sky-400", tip: "已 lease 到待交付之间的所有状态（含待分发：已上传待 receiver 拉取）；不含已交付" },
+  done:    { num: "text-success",                    dot: "bg-success",                 tip: "receiver 已确认（待清理）或已清理（已完成）——已交付" },
+  failed:  { num: "text-danger",                     dot: "bg-danger",                  tip: "待重试 + 已拉黑（达到重试上限）" },
+};
 
+const total = computed(() => pipelineTotals(props.counts).total);
+const groups = computed(() => pipelineGroups(props.counts));
 const segments = computed(() =>
-  pipelineSegments(props.counts).map((seg) => ({
-    ...seg,
-    label: stateLabel(seg.state),
-  })),
+  pipelineSegments(props.counts).map((seg) => ({ ...seg, label: stateLabel(seg.state) })),
 );
 
 function pct(n: number): string {
   if (total.value === 0) return "0%";
   return `${Math.round((n / total.value) * 100)}%`;
 }
-
-const chips = computed(() => [
-  { key: "pending",  label: "待分配", value: pending.value,  tone: "text-muted-foreground",            dot: "bg-muted-foreground",        tip: "orchestrator 还没派给任何 worker 的数据粒" },
-  { key: "inflight", label: "进行中", value: inFlight.value, tone: "text-sky-600 dark:text-sky-400",   dot: "bg-sky-500 dark:bg-sky-400", tip: "已 lease 到待交付之间的所有状态合计（含上传中、待分发）；不含已交付" },
-  { key: "done",     label: "已交付", value: done.value,     tone: "text-success",                     dot: "bg-success",                 tip: "receiver 已确认（acked）或已清理（deleted）——已交付" },
-  { key: "failed",   label: "异常",   value: failed.value,   tone: "text-danger",                      dot: "bg-danger",                  tip: "待重试 + 已拉黑（达到重试上限）的数据粒" },
-]);
 </script>
 
 <template>
   <div class="space-y-5">
+    <!-- 顶部：阶段分布条形图（全处理顺序，仅非零段） -->
     <div>
       <div class="mb-2 flex items-center justify-between text-xs">
         <span class="text-muted-foreground">阶段分布</span>
@@ -66,11 +61,7 @@ const chips = computed(() => [
         </span>
       </div>
       <div class="flex h-2.5 overflow-hidden rounded-full bg-muted">
-        <div
-          v-if="total === 0"
-          class="h-full w-full bg-muted-foreground/10"
-          aria-hidden
-        />
+        <div v-if="total === 0" class="h-full w-full bg-muted-foreground/10" aria-hidden />
         <div
           v-for="seg in segments"
           :key="seg.state"
@@ -81,36 +72,40 @@ const chips = computed(() => [
       </div>
     </div>
 
-    <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+    <!-- 分级：大阶段卡片 + 其小阶段。窄屏竖向堆叠，宽屏 4 列。 -->
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <div
-        v-for="c in chips"
-        :key="c.key"
+        v-for="g in groups"
+        :key="g.key"
         class="rounded-lg border border-border bg-muted/40 px-3 py-2.5"
-        :title="c.tip"
       >
-        <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span :class="['h-1.5 w-1.5 rounded-full', c.dot]" aria-hidden />
-          {{ c.label }}
+        <div class="flex items-center gap-1.5 text-xs text-muted-foreground" :title="GROUP[g.key].tip">
+          <span :class="['h-1.5 w-1.5 rounded-full', GROUP[g.key].dot]" aria-hidden />
+          {{ g.label }}
         </div>
         <div class="mt-1 flex items-baseline gap-1.5 tabular-nums">
-          <span :class="['text-xl font-semibold leading-none', c.tone]">
-            {{ c.value.toLocaleString() }}
+          <span :class="['text-xl font-semibold leading-none', GROUP[g.key].num]">
+            {{ g.total.toLocaleString() }}
           </span>
-          <span class="text-xs text-muted-foreground">{{ pct(c.value) }}</span>
+          <span class="text-xs text-muted-foreground">{{ pct(g.total) }}</span>
+        </div>
+        <!-- 小阶段：按处理顺序，count=0 也显示（位置稳定）；待分配为叶子无子项 -->
+        <div v-if="g.subs.length" class="mt-2.5 space-y-1 border-t border-border/50 pt-2">
+          <div
+            v-for="sub in g.subs"
+            :key="sub.state"
+            class="flex items-center justify-between gap-2 text-2xs"
+          >
+            <span class="inline-flex items-center gap-1.5 text-muted-foreground">
+              <span :class="['h-1.5 w-1.5 rounded-sm', STAGE[sub.state].dot]" aria-hidden />
+              {{ stateLabel(sub.state) }}
+            </span>
+            <span :class="['tabular-nums', sub.value ? 'text-foreground' : 'text-muted-foreground/40']">
+              {{ sub.value.toLocaleString() }}
+            </span>
+          </div>
         </div>
       </div>
-    </div>
-
-    <div v-if="detailed && segments.length > 0" class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <span
-        v-for="seg in segments"
-        :key="seg.state"
-        :class="['inline-flex items-center gap-1.5 text-xs', STAGE[seg.state].chip]"
-      >
-        <span :class="['h-2 w-2 rounded-sm', STAGE[seg.state].bar]" aria-hidden />
-        <span class="text-muted-foreground">{{ seg.label }}</span>
-        <span class="tabular-nums">{{ seg.value }}</span>
-      </span>
     </div>
   </div>
 </template>
