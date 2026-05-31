@@ -88,6 +88,9 @@ jobs:
   bundle:
     # One self-contained tarball per tag: backend source + deps manifest +
     # prebuilt frontend, so a deployed version can't have a mismatched UI.
+    # Published as a PRERELEASE (the edge channel); a stable release is made by
+    # running the Promote workflow, which clears the prerelease flag. Edge nodes
+    # (SATHOP_CHANNEL=edge) see it immediately; stable nodes only after promotion.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -117,6 +120,7 @@ jobs:
           rm -f seckey
       - uses: softprops/action-gh-release@v2
         with:
+          prerelease: true
           files: |
             sathop-bundle.tar.gz
             sathop-bundle.tar.gz.minisig

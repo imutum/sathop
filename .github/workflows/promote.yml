@@ -1,0 +1,33 @@
+name: Promote to stable
+
+# Promote an edge release to the stable channel. release.yml publishes every tag
+# as a prerelease (edge); this clears that flag and marks the release as latest,
+# so stable-channel nodes resolve it via GitHub's /releases/latest pointer
+# (orchestrator GET /api/admin/latest-version with SATHOP_CHANNEL=stable). Manual
+# by design — promotion is the human gate of "promote, not push".
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to promote to stable (e.g. v0.9.2)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Promote ${{ inputs.version }} to stable
+        # Pass the input via env, not direct ${{ }} interpolation into the script,
+        # so a crafted tag value can't inject shell.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          tag="$VERSION"
+          case "$tag" in v*) ;; *) tag="v$tag" ;; esac
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
+          echo "Promoted $tag to stable (cleared prerelease, set as latest)."
