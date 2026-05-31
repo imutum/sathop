@@ -21,7 +21,7 @@ const info = useQuery({
 });
 
 // Shared version check — same GitHub query the node cards use.
-const { latestTag, status, htmlUrl, isFetching, refresh: refreshLatest } = useVersionCheck(
+const { latestTag, channel, status, htmlUrl, isFetching, refresh: refreshLatest } = useVersionCheck(
   () => info.data.value?.version,
 );
 const currentVersion = computed(() => info.data.value?.version ?? "");
@@ -92,6 +92,11 @@ function refresh() {
       <div class="flex items-center justify-between">
         <div class="text-2xs font-medium tracking-label text-muted-foreground">
           当前版本
+          <span
+            v-if="channel === 'edge'"
+            class="ml-1 rounded bg-warning/15 px-1 py-0.5 font-mono text-warning"
+            title="正在跟踪 edge 渠道（含预发布）"
+          >edge</span>
         </div>
         <Button
           type="button"

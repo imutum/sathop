@@ -18,10 +18,10 @@ export const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 
 export type VersionStatus = "unchecked" | "loading" | "current" | "outdated" | "unknown";
 
-async function fetchLatestRelease(): Promise<{ tag: string; htmlUrl: string }> {
+async function fetchLatestRelease(): Promise<{ tag: string; htmlUrl: string; channel: string }> {
   const j = await API.latestVersion();
   if (j.error) throw new Error(j.error);
-  return { tag: j.tag ?? "", htmlUrl: j.html_url ?? RELEASES_URL };
+  return { tag: j.tag ?? "", htmlUrl: j.html_url ?? RELEASES_URL, channel: j.channel ?? "stable" };
 }
 
 // The shared latest-version query. Fetches once on mount (NOT a background poll —
@@ -44,6 +44,7 @@ export function useLatestRelease() {
 export function useVersionCheck(current: MaybeRefOrGetter<string | undefined>) {
   const latest = useLatestRelease();
   const latestTag = computed(() => latest.data.value?.tag ?? "");
+  const channel = computed(() => latest.data.value?.channel ?? "stable");
   const currentVersion = computed(() => toValue(current) ?? "");
   const htmlUrl = computed(() => latest.data.value?.htmlUrl ?? RELEASES_URL);
 
@@ -58,5 +59,5 @@ export function useVersionCheck(current: MaybeRefOrGetter<string | undefined>) {
     void latest.refetch();
   }
 
-  return { latest, latestTag, currentVersion, htmlUrl, status, isFetching: latest.isFetching, refresh };
+  return { latest, latestTag, channel, currentVersion, htmlUrl, status, isFetching: latest.isFetching, refresh };
 }

@@ -70,7 +70,7 @@ const adminApi = {
   // Newest release, resolved server-side (one IP, optional token, 5-min cache)
   // so the browser never hits the rate-limited api.github.com directly.
   latestVersion: () =>
-    getJson<{ tag: string; html_url: string; current: string; error?: string }>(
+    getJson<{ tag: string; html_url: string; current: string; channel?: string; error?: string }>(
       "/api/admin/latest-version",
     ),
 };
