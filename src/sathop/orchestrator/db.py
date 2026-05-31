@@ -117,6 +117,36 @@ class Receiver(Base):
     restart_requested_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
 
+class Rollout(Base):
+    """A staged fleet upgrade (L2). One active rollout at a time; the background
+    leader advances it canary→batch→fleet, gated purely by version-confirmed
+    liveness (a wave completes when its frozen member cohort all report
+    version==target; a wave that times out HALTs — per-node crash rollback is
+    L1's job, the orchestrator never rolls a fleet back). State is wholly on this
+    row so it survives multi-process Postgres + orch restart; the worker contract
+    is untouched (each wave reuses the existing per-worker update one-shot)."""
+
+    __tablename__ = "rollouts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String, default="worker")  # reserved for future receiver rollouts
+    target_version: Mapped[str] = mapped_column(String)
+    channel: Mapped[str | None] = mapped_column(String, nullable=True)  # display: channel resolved, None=concrete
+    # pending → running → (done | halted → running… | aborted)
+    phase: Mapped[str] = mapped_column(String, default="pending")
+    wave_index: Mapped[int] = mapped_column(Integer, default=-1)  # -1 pending, 0 canary, 1 batch, 2 fleet
+    wave_member_ids: Mapped[list] = mapped_column(JSON, default=list)  # frozen cohort for the current wave
+    wave_started_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    wave_deadline_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+    canary_count: Mapped[int] = mapped_column(Integer, default=1)
+    batch_pct: Mapped[float] = mapped_column(Float, default=0.25)
+    wave_timeout_sec: Mapped[int] = mapped_column(Integer, default=600)
+    halt_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
+
+
 class Batch(Base):
     __tablename__ = "batches"
     batch_id: Mapped[str] = mapped_column(String, primary_key=True)

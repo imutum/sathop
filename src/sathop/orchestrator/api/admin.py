@@ -279,6 +279,18 @@ def _bundle_asset_url(version: str) -> str:
     return f"{_git_repo_base()}/releases/download/v{version}/sathop-bundle.tar.gz"
 
 
+async def head_release_asset(version: str) -> None:
+    """HEAD the release bundle so a bad version fails fast (502) here instead of
+    crash-looping a container after the restart/upgrade. Shared by the orchestrator
+    self-upgrade and the staged-rollout start."""
+    url = _bundle_asset_url(version)
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as c:
+            (await c.head(url)).raise_for_status()
+    except Exception as e:
+        raise HTTPException(502, f"release v{version} not downloadable: {e}") from e
+
+
 def _github_headers() -> dict[str, str]:
     h = {"Accept": "application/vnd.github+json"}
     token = os.environ.get("SATHOP_GIT_TOKEN", "")
@@ -408,12 +420,7 @@ async def upgrade_orchestrator(req: UpgradeRequest, s: AsyncSession = Depends(se
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
 
-    url = _bundle_asset_url(version)
-    try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as c:
-            (await c.head(url)).raise_for_status()
-    except Exception as e:
-        raise HTTPException(502, f"release v{version} not downloadable: {e}")
+    await head_release_asset(version)
 
     write_pending_version(version)
     await log(s, "orchestrator", f"upgrade to v{version} requested via UI")

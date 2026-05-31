@@ -40,6 +40,12 @@ class Settings:
     # release) or "edge" (newest including prereleases). Resolution is read-only —
     # upgrading still installs a concrete version via the .pending-version path.
     channel: str = os.getenv("SATHOP_CHANNEL", "stable")
+    # Staged fleet rollout (L2) defaults — overridable per-rollout at start time.
+    # canary first, then a fraction of the rest, then everyone; a wave that doesn't
+    # confirm version==target within the timeout HALTs (no auto-rollback).
+    rollout_canary_count: int = max(1, int(os.getenv("SATHOP_ROLLOUT_CANARY_COUNT", "1")))
+    rollout_batch_pct: float = float(os.getenv("SATHOP_ROLLOUT_BATCH_PCT", "0.25"))
+    rollout_wave_timeout_sec: int = int(os.getenv("SATHOP_ROLLOUT_WAVE_TIMEOUT_SEC", "600"))
     # "Stuck" alarm threshold (hours): a non-terminal granule with no state
     # progress for this long is flagged on the dashboard + /metrics + reconcile.
     # Float so it can be tightened below an hour for live monitoring. This is a

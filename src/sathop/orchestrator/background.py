@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from datetime import timedelta
 
 from sqlalchemy import delete, select, text, update
@@ -13,7 +14,7 @@ from . import db, event_store, telemetry
 from .api._transition import apply_transition
 from .api.progress import evict_granule, evict_granules
 from .config import settings
-from .db import Granule, GranuleObject, Worker, get_session_maker, utcnow
+from .db import Granule, GranuleObject, Rollout, Worker, get_session_maker, utcnow
 from .pubsub import commit_and_publish, log_event, publish
 from .reaping import reap_granules
 
@@ -250,6 +251,132 @@ async def run_retention() -> None:
     )
 
 
+# ── Staged fleet rollout (L2) ─────────────────────────────────────────────
+# The leader advances ONE active rollout canary→batch→fleet. The actuator is the
+# existing per-worker update one-shot (worker contract unchanged); the gate is
+# version-confirmed liveness. Because each wave's cohort is frozen at version!=
+# target, "version==target" alone is sufficient proof of a post-stamp upgrade —
+# we need not also check last_seen (which is RAM-only per-heartbeat under SQLite),
+# and a crash-looping worker that L1 rolled back stays on the old version → never
+# confirms → the wave times out and HALTs (hard fact #2). No telemetry is read.
+ROLLOUT_TICK_SEC = 15
+_WAVE_LABELS = ("canary", "batch", "fleet")
+
+
+async def _active_rollout(s) -> Rollout | None:
+    return await s.scalar(
+        select(Rollout).where(Rollout.phase.in_(("pending", "running"))).order_by(Rollout.id.desc()).limit(1)
+    )
+
+
+async def _eligible_worker_ids(s, target: str) -> list[str]:
+    """Registered, not operator-paused, not yet on target — ordered stably."""
+    return list(
+        (
+            await s.execute(
+                select(Worker.worker_id)
+                .where(Worker.removed_at.is_(None))
+                .where((Worker.operator_paused.is_(None)) | (Worker.operator_paused.is_(False)))
+                .where(Worker.version != target)
+                .order_by(Worker.worker_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _wave_size(wave_index: int, eligible_n: int, r: Rollout) -> int:
+    if eligible_n == 0:
+        return 0
+    if wave_index == 0:  # canary
+        return min(r.canary_count, eligible_n)
+    if wave_index == 1:  # batch — a fraction of what's left, at least 1
+        return min(eligible_n, max(1, math.ceil(eligible_n * r.batch_pct)))
+    return eligible_n  # fleet — everyone remaining
+
+
+async def rollout_member_breakdown(s, r: Rollout) -> tuple[list[str], list[str], list[str]]:
+    """(confirmed, pending, excused) for the current frozen wave cohort. Excused =
+    gone/removed/operator-paused (dropped from the denominator so a paused or
+    deleted member can't block the wave forever)."""
+    ids = list(r.wave_member_ids or [])
+    if not ids:
+        return [], [], []
+    rows = {
+        w.worker_id: w
+        for w in (await s.execute(select(Worker).where(Worker.worker_id.in_(ids)))).scalars().all()
+    }
+    confirmed, pending, excused = [], [], []
+    for wid in ids:
+        w = rows.get(wid)
+        if w is None or w.removed_at is not None or w.operator_paused:
+            excused.append(wid)
+        elif w.version == r.target_version:
+            confirmed.append(wid)
+        else:
+            pending.append(wid)
+    return confirmed, pending, excused
+
+
+async def _enter_wave(s, r: Rollout, wave_index: int, now) -> None:
+    """Select + freeze + stamp the wave's cohort, or finish if nothing's left."""
+    eligible = await _eligible_worker_ids(s, r.target_version)
+    size = _wave_size(wave_index, len(eligible), r)
+    if size == 0:  # nothing eligible at/after this wave → rollout is complete
+        r.phase, r.finished_at, r.updated_at = "done", now, now
+        await log_event(s, "operator", f"rollout v{r.target_version} complete (no workers left to upgrade)")
+        return
+    members = eligible[:size]
+    rows = (await s.execute(select(Worker).where(Worker.worker_id.in_(members)))).scalars().all()
+    for w in rows:  # the existing per-worker update one-shot — consumed on next heartbeat
+        w.update_requested_at = now
+        w.update_to_version = r.target_version
+    r.phase, r.wave_index = "running", wave_index
+    r.wave_member_ids = members
+    r.wave_started_at = now
+    r.wave_deadline_at = now + timedelta(seconds=r.wave_timeout_sec)
+    r.updated_at = now
+    await log_event(
+        s, "operator", f"rollout v{r.target_version}: {_WAVE_LABELS[wave_index]} wave → {len(members)} worker(s)"
+    )
+
+
+async def advance_rollout() -> bool:
+    """One leader tick: drive the active rollout's state machine. Returns True when
+    it changed something (committed)."""
+    now = utcnow()
+    async with get_session_maker()() as s:
+        r = await _active_rollout(s)
+        if r is None:
+            return False
+        if r.phase == "pending":
+            await _enter_wave(s, r, 0, now)
+            await commit_and_publish(s, Scope.WORKERS, Scope.ROLLOUT)
+            return True
+        # phase == "running": gate the current wave on version-confirmed liveness.
+        _confirmed, pending, _excused = await rollout_member_breakdown(s, r)
+        if not pending:  # wave done → next wave, or finish after fleet
+            if r.wave_index >= 2:
+                r.phase, r.finished_at, r.updated_at = "done", now, now
+                await log_event(s, "operator", f"rollout v{r.target_version} complete")
+            else:
+                await _enter_wave(s, r, r.wave_index + 1, now)
+            await commit_and_publish(s, Scope.WORKERS, Scope.ROLLOUT)
+            return True
+        if r.wave_deadline_at is not None and now >= r.wave_deadline_at:
+            r.phase, r.updated_at = "halted", now
+            r.halt_reason = f"{_WAVE_LABELS[r.wave_index]} wave timed out; unconfirmed: {', '.join(pending)}"
+            await log_event(s, "operator", f"rollout v{r.target_version} HALTED — {r.halt_reason}", level="warn")
+            await commit_and_publish(s, Scope.ROLLOUT)
+            return True
+        return False  # still waiting within the window — no change
+
+
+async def run_rollout() -> None:
+    await run_periodic(advance_rollout, interval=ROLLOUT_TICK_SEC, log=_log, name="rollout")
+
+
 # Session-level advisory-lock key: the holder is the background-task leader. The
 # lock lives on that session's connection, so if the leader process dies the
 # connection drops and Postgres auto-releases it for another process to claim.
@@ -264,7 +391,7 @@ async def run_leader_tasks() -> None:
     crashed leader's connection drops → Postgres frees the lock → a contender
     picks it up on the next retry."""
     if not db.is_postgres():
-        await asyncio.gather(run_lease_sweeper(), run_retention())
+        await asyncio.gather(run_lease_sweeper(), run_retention(), run_rollout())
         return
     from .db import get_session_maker
 
@@ -276,7 +403,7 @@ async def run_leader_tasks() -> None:
                 try:
                     # Holds the lock for as long as lock_s stays open; gather only
                     # returns on cancellation (shutdown), which releases it.
-                    await asyncio.gather(run_lease_sweeper(), run_retention())
+                    await asyncio.gather(run_lease_sweeper(), run_retention(), run_rollout())
                 finally:
                     await lock_s.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _LEADER_KEY})
                 return

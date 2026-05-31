@@ -347,6 +347,7 @@ class Scope(str, Enum):
     BUNDLES = "bundles"
     SHARED = "shared"
     EVENTS = "events"
+    ROLLOUT = "rollout"
 
 
 @dataclass(frozen=True)
