@@ -5,7 +5,7 @@ import logging
 import math
 from datetime import timedelta
 
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, or_, select, text, update
 
 from sathop.shared.periodic import run_periodic
 from sathop.shared.state_machine import LEASED_STATES, GranuleState, ReconcileOrphanDeleted, Scope
@@ -28,23 +28,30 @@ _STARTED_AT = utcnow()
 
 
 async def sweep_expired_leases() -> int:
-    """The single carve-out from `state_machine.apply()`: stays as a bulk
-    UPDATE with a re-asserted predicate. Why: between the SELECT and the
-    write, a concurrent /heartbeat::renew_worker_leases call may have pushed
-    a granule's `lease_expires_at` forward. A per-row apply() would have to
-    `s.refresh(g)` each row to see that fresh value — doubling round-trips.
-    The bulk UPDATE re-evaluates the same predicate at write time, so a
-    just-renewed lease falls outside the WHERE clause and survives untouched.
+    """Reclaim in-flight granules that have lost their owning worker — back to
+    PENDING for re-lease, no retry bump (the granule didn't fail). A leased-state
+    granule is ownerless two ways, BOTH swept here:
+      - `lease_expires_at < now` — the lease expired (worker went silent).
+      - `leased_by IS NULL` — orphaned: an in-flight granule with no worker behind
+        it at all. The forward state machine never produces this (every clear of
+        `leased_by` also moves the state out of the leased band), so it only arises
+        out-of-band — a crash at an unlucky moment, a restored/migrated row, or an
+        older code path. Without this clause such a row strands forever: it is not
+        PENDING (so `claim_pending_granules` skips it), has no owner (so neither the
+        heartbeat reclaim nor `revoke-all` matches it), and a null expiry never trips
+        the expiry clause — a permanent leak the sweeper must self-heal.
 
-    All other granule state transitions go through state_machine.apply()."""
+    The single carve-out from `state_machine.apply()`: a bulk UPDATE with a
+    re-asserted predicate. Between the SELECT and the write a concurrent
+    /heartbeat::renew_worker_leases may push `lease_expires_at` forward; a per-row
+    apply() would have to `s.refresh(g)` each row to see it. The bulk UPDATE
+    re-evaluates the same predicate at write time, so a just-renewed lease
+    (owner set, expiry now in the future) satisfies neither clause and survives
+    untouched. All other granule state transitions go through state_machine.apply()."""
     now = utcnow()
+    ownerless = or_(Granule.leased_by.is_(None), Granule.lease_expires_at < now)
     async with get_session_maker()() as s:
-        stmt = (
-            select(Granule.granule_id)
-            .where(Granule.state.in_(LEASED_STATES))
-            .where(Granule.lease_expires_at.is_not(None))
-            .where(Granule.lease_expires_at < now)
-        )
+        stmt = select(Granule.granule_id).where(Granule.state.in_(LEASED_STATES)).where(ownerless)
         ids = (await s.execute(stmt)).scalars().all()
         if not ids:
             return 0
@@ -52,15 +59,14 @@ async def sweep_expired_leases() -> int:
             update(Granule)
             .where(Granule.granule_id.in_(ids))
             .where(Granule.state.in_(LEASED_STATES))
-            .where(Granule.lease_expires_at.is_not(None))
-            .where(Granule.lease_expires_at < now)
+            .where(ownerless)
             .values(state=GranuleState.PENDING.value, leased_by=None, lease_expires_at=None, updated_at=now)
         )
         actually_reclaimed = getattr(result, "rowcount", 0) or 0
         if actually_reclaimed == 0:
             return 0
         evict_granules(ids)
-        await log_event(s, "scheduler", f"reclaimed {actually_reclaimed} expired leases", level="warn")
+        await log_event(s, "scheduler", f"reclaimed {actually_reclaimed} ownerless lease(s)", level="warn")
         await commit_and_publish(s, Scope.BATCHES)
         return actually_reclaimed
 

@@ -162,6 +162,31 @@ async def test_sweeper_ignores_uploaded(client):
     assert await sweep_expired_leases() == 0
 
 
+@pytest.mark.parametrize(
+    "state",
+    [
+        GranuleState.QUEUED.value,
+        GranuleState.DOWNLOADING.value,
+        GranuleState.DOWNLOADED.value,
+        GranuleState.PROCESSING.value,
+        GranuleState.PROCESSED.value,
+        GranuleState.UPLOADING.value,
+    ],
+)
+async def test_sweeper_reclaims_ownerless_in_flight_granule(client, state):
+    """An in-flight granule with no owner at all (leased_by/lease_expires_at both
+    NULL) — the forward state machine never produces this, but a restored row or an
+    unlucky crash can. It would otherwise strand forever (not PENDING, no owner)."""
+    await _seed(state=state, leased_by=None)  # leased_by=None ⇒ lease_expires_at=None
+    assert await sweep_expired_leases() == 1
+    async with orch_db._session_maker() as s:
+        g = await s.get(Granule, "g1")
+        assert g is not None
+        assert g.state == GranuleState.PENDING.value
+        assert g.leased_by is None
+        assert g.lease_expires_at is None
+
+
 async def test_sweeper_ignores_unexpired(client):
     await _seed(state=GranuleState.PROCESSING.value, expires_in=timedelta(minutes=5))
     assert await sweep_expired_leases() == 0
