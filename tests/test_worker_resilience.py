@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from sathop.shared.protocol import (
+    LeaseItem,
     LeaseRequest,
     LeaseResponse,
     WorkerHeartbeat,
@@ -255,6 +256,63 @@ async def test_lease_success_resets_backoff(tmp_path):
 
         # backoff bumped during the 403 attempt; reset on the next success
         assert w._lease_backoff_factor == 1
+    finally:
+        await w.client.aclose()
+
+
+# ─── empty-result lease → adaptive poll backoff ────────────────────────────
+
+
+async def test_lease_empty_grows_then_resets_backoff(tmp_path):
+    """An empty lease (200 with no items) decays the poll rate so an idle fleet
+    stops hammering /lease; a lease that returns work snaps it back to base."""
+    s = _settings(tmp_path)
+    w = Worker(s)
+    try:
+        empty = LeaseResponse(items=[], lease_expires_at=datetime.now(UTC) + timedelta(minutes=30))
+        item = LeaseItem(granule_id="g1", batch_id="b1", bundle_ref="orch:x@1", inputs=[], meta={})
+        with_work = LeaseResponse(items=[item], lease_expires_at=datetime.now(UTC) + timedelta(minutes=30))
+        started: list[str] = []
+        w._start_handler = lambda it: started.append(it.granule_id)  # type: ignore[method-assign]
+
+        async def all_empty(req):
+            return empty
+
+        w.client.lease = all_empty  # type: ignore[method-assign]
+        assert w._empty_backoff_factor == 1
+
+        task = asyncio.create_task(w._pipeline_loop())
+        await asyncio.sleep(2.5)  # polls at t=0 (×1), t=1 (×2), t=3 (×4)…
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        assert w._empty_backoff_factor >= 4  # decayed across empty polls
+
+        # A lease that returns work resets the factor to base. The second call
+        # parks forever so no follow-up empty poll bumps it back up.
+        blocked = asyncio.Event()
+        calls = 0
+
+        async def work_then_park(req):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return with_work
+            await blocked.wait()
+            return empty
+
+        w.client.lease = work_then_park  # type: ignore[method-assign]
+        task = asyncio.create_task(w._pipeline_loop())
+        await asyncio.sleep(0.1)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        assert started == ["g1"]
+        assert w._empty_backoff_factor == 1
     finally:
         await w.client.aclose()
 

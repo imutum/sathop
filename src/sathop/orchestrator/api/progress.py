@@ -82,7 +82,11 @@ async def ingress(granule_id: str, event: ProgressEvent) -> dict:
         timeline[-1] = entry
     if batch_id:
         _latest_by_batch.setdefault(batch_id, {})[granule_id] = entry
-    publish({"scope": "progress", "granule_id": granule_id, "batch_id": batch_id})
+    # Bare {scope} so the nudge rides pubsub's 1s per-scope coalesce window — a
+    # burst of progress POSTs collapses to ~1 fan-out/sec instead of one
+    # NOTIFY + UI refetch per POST. The UI invalidates the progress queries by
+    # scope (it never reads the ids off the nudge), so dropping them is free.
+    publish({"scope": "progress"})
     return {"ok": True}
 
 

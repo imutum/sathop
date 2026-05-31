@@ -157,11 +157,14 @@ async def claim_pending_granules(
     if not claimed_ids:
         return []
     rows = (await s.execute(select(Granule).where(Granule.granule_id.in_(claimed_ids)))).scalars().all()
-    items: list[LeaseItem] = []
-    for granule in rows:
-        batch = await s.get(Batch, granule.batch_id)
-        items.append(lease_item(granule, batch))
-    return items
+    # Bulk-load the referenced batches in one query instead of a per-granule
+    # s.get(Batch) — at the saturation claim rate that N+1 is real marginal CPU
+    # on the orchestrator's single core. Claim counts are bounded by lease
+    # capacity, so the IN() lists stay small (no PG bind-param ceiling risk).
+    batch_ids = {g.batch_id for g in rows}
+    batches = (await s.execute(select(Batch).where(Batch.batch_id.in_(batch_ids)))).scalars().all()
+    by_id = {b.batch_id: b for b in batches}
+    return [lease_item(granule, by_id.get(granule.batch_id)) for granule in rows]
 
 
 async def renew_worker_leases(s: AsyncSession, worker_id: str, now) -> int:

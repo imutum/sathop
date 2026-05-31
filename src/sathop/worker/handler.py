@@ -58,8 +58,11 @@ from .storage import render_key
 
 log = logging.getLogger("sathop.worker")
 
-DOWNLOAD_PROGRESS_MIN_INTERVAL_SECONDS = 2.0
-DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT = 5.0
+# Progress is display-only, stale within seconds. Coarser throttle = far fewer
+# unbatched progress POSTs (each pays the orchestrator's full per-request tax),
+# at the cost of a coarser progress bar. is_final still always emits.
+DOWNLOAD_PROGRESS_MIN_INTERVAL_SECONDS = 5.0
+DOWNLOAD_PROGRESS_MIN_DELTA_PERCENT = 10.0
 
 
 class GranuleHandler:

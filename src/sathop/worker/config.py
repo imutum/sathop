@@ -92,7 +92,7 @@ def load() -> Settings:
         storage_root=Path(os.getenv("SATHOP_STORAGE_ROOT", "/app/data/storage")),
         storage_port=int(os.getenv("SATHOP_STORAGE_PORT", "9000")),
         progress_port=int(os.getenv("SATHOP_PROGRESS_PORT", "9002")),
-        heartbeat_interval=int(os.getenv("SATHOP_HEARTBEAT", "15")),
+        heartbeat_interval=int(os.getenv("SATHOP_HEARTBEAT", "30")),
         lease_poll_interval=int(os.getenv("SATHOP_LEASE_POLL", "10")),
         download_concurrency=download_conc,
         process_concurrency=process_conc,

@@ -67,6 +67,7 @@ class Worker:
         self._reconfiguring = False
         self._ca_pem: str | None = None
         self._lease_backoff_factor = 1
+        self._empty_backoff_factor = 1
         self.progress = ProgressServer(self.client, port=s.progress_port)
         self._events = EventBuffer(self.client)
         self._handler = GranuleHandler(
@@ -326,9 +327,17 @@ class Worker:
                 continue
 
             if not resp.items:
-                await asyncio.sleep(self.s.lease_poll_interval)
+                # No pending work for us: decay the empty-poll rate (×2 up to the
+                # cap) so an idle fleet stops hammering /lease — the orchestrator
+                # pays its full per-request tax even on an empty claim. Reset to
+                # base the instant a lease returns work, so pickup stays fast
+                # under load. Distinct from the failure backoff above.
+                sleep_for = self.s.lease_poll_interval * self._empty_backoff_factor
+                self._empty_backoff_factor = min(LEASE_MAX_BACKOFF_FACTOR, self._empty_backoff_factor * 2)
+                await asyncio.sleep(sleep_for)
                 continue
 
+            self._empty_backoff_factor = 1
             for item in resp.items:
                 self._start_handler(item)
 
