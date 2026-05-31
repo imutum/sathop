@@ -43,6 +43,7 @@ def free_port() -> int:
 @pytest.fixture(autouse=True)
 def _clear_in_memory_stores():
     from sathop.orchestrator.api.admin import reset_latest_cache, reset_overview_cache
+    from sathop.orchestrator.api.batches import reset_batches_cache
     from sathop.orchestrator.api.metrics import reset_metrics_cache
     from sathop.orchestrator.api.progress import _clear as clear_progress
     from sathop.orchestrator.event_store import _clear as clear_events
@@ -56,6 +57,7 @@ def _clear_in_memory_stores():
     reset_coalesce()  # cancel pending nudge-window timers so they don't cross tests
     reset_overview_cache()  # 1s TTL cache must not leak a stale overview across tests
     reset_metrics_cache()  # same 1s TTL cache, on the metrics scrape path
+    reset_batches_cache()  # 1s TTL cache on the batch-list aggregate
     reset_latest_cache()  # 5min latest-release cache must not leak across tests
     yield
     clear_events()
@@ -65,6 +67,7 @@ def _clear_in_memory_stores():
     reset_coalesce()
     reset_overview_cache()
     reset_metrics_cache()
+    reset_batches_cache()
     reset_latest_cache()
 
 

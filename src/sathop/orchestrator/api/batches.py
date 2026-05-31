@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select, update
@@ -53,6 +55,23 @@ from .batch_readmodels import (
 from .progress import evict_granule, evict_granules
 
 router = APIRouter(prefix="/batches", tags=["batches"], dependencies=[Depends(require_token)])
+
+# 1s single-flight TTL cache for the batch list — same pattern as admin's
+# _cached_overview. Each open UI tab refetches /api/batches on every 'batches'
+# SSE nudge, and summaries() runs three O(rows) GROUP BYs (state_counts,
+# exhausted-pull, recent-delivery) over the granules / stage_timing / objects
+# tables; bursts of concurrent calls within the window collapse onto one
+# computation. Set TTL=0 to disable. The list is stale at most 1s — SSE drives
+# real-time invalidation, so the window is invisible to users.
+_LIST_TTL = 1.0
+_list_lock = asyncio.Lock()
+_list_cache: tuple[float, list[BatchSummary]] | None = None
+
+
+def reset_batches_cache() -> None:
+    """Drop the cached batch list — used by tests to avoid cross-test staleness."""
+    global _list_cache
+    _list_cache = None
 
 
 def _compose_gid(batch_id: str, user_gid: str) -> str:
@@ -182,8 +201,20 @@ async def create(req: BatchCreate, s: AsyncSession = Depends(session)) -> BatchS
 
 @router.get("", response_model=list[BatchSummary])
 async def list_batches(s: AsyncSession = Depends(session)) -> list[BatchSummary]:
-    rows = (await s.execute(select(Batch).order_by(Batch.created_at.desc()))).scalars().all()
-    return await summaries(s, list(rows))
+    global _list_cache
+    if _LIST_TTL > 0 and _list_cache is not None:
+        ts, body = _list_cache
+        if time.monotonic() - ts < _LIST_TTL:
+            return body
+    async with _list_lock:
+        if _LIST_TTL > 0 and _list_cache is not None:
+            ts, body = _list_cache
+            if time.monotonic() - ts < _LIST_TTL:
+                return body
+        rows = (await s.execute(select(Batch).order_by(Batch.created_at.desc()))).scalars().all()
+        body = await summaries(s, list(rows))
+        _list_cache = (time.monotonic(), body)
+        return body
 
 
 @router.get("/{batch_id}", response_model=BatchSummary)
