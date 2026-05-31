@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -287,22 +287,41 @@ def _github_headers() -> dict[str, str]:
     return h
 
 
-async def _fetch_latest_release() -> dict[str, str]:
-    """Resolve the newest release tag from the GitHub API, falling back to the
-    newest tag when no release is published. Server-side so the browser never
-    hits api.github.com (anonymous 60/h-per-IP limit); an optional
-    SATHOP_GIT_TOKEN lifts the rate limit to 5000/h."""
+def _normalize_channel(channel: str) -> str:
+    """Two release channels only: edge (newest, incl. prereleases) and stable
+    (newest promoted release). Anything else collapses to stable."""
+    return "edge" if channel == "edge" else "stable"
+
+
+async def _fetch_latest_release(channel: str = "stable") -> dict[str, str]:
+    """Resolve a release channel to its newest tag via the GitHub API, server-side
+    so the browser never hits api.github.com (anonymous 60/h-per-IP limit; an
+    optional SATHOP_GIT_TOKEN lifts it to 5000/h).
+
+    stable → GitHub's newest *non-prerelease* release (/releases/latest), falling
+    back to the newest tag when nothing is published. edge → the newest release
+    *including* prereleases (the /releases list is newest-first), so an edge build
+    is visible before it is promoted to stable."""
     base = _git_repo_base()
     repo_path = base.split("github.com/", 1)[-1]  # owner/repo
-    releases_url = f"https://api.github.com/repos/{repo_path}/releases/latest"
     async with httpx.AsyncClient(follow_redirects=True, timeout=10) as c:
-        r = await c.get(releases_url, headers=_github_headers())
+        if channel == "edge":
+            r = await c.get(
+                f"https://api.github.com/repos/{repo_path}/releases?per_page=1", headers=_github_headers()
+            )
+            r.raise_for_status()
+            rels = r.json()
+            j = rels[0] if isinstance(rels, list) and rels else {}
+            return {"tag": j.get("tag_name") or "", "html_url": j.get("html_url") or f"{base}/releases"}
+        r = await c.get(
+            f"https://api.github.com/repos/{repo_path}/releases/latest", headers=_github_headers()
+        )
         if r.status_code == 200:
             j = r.json()
             return {"tag": j.get("tag_name") or "", "html_url": j.get("html_url") or f"{base}/releases"}
         if r.status_code != 404:
             r.raise_for_status()
-        # No published release — fall back to the newest tag.
+        # No published stable release — fall back to the newest tag.
         rt = await c.get(
             f"https://api.github.com/repos/{repo_path}/tags?per_page=1", headers=_github_headers()
         )
@@ -313,51 +332,53 @@ async def _fetch_latest_release() -> dict[str, str]:
 
 
 _LATEST_TTL = 300.0
-_latest_cache: dict[str, Any] = {"at": 0.0, "data": None}
+_latest_cache: dict[str, dict] = {}  # channel -> {"at": float, "data": dict}
 _latest_lock = asyncio.Lock()
 
 
 def reset_latest_cache() -> None:
-    """Drop the cached latest-release — used by tests to avoid cross-test staleness."""
-    _latest_cache["data"] = None
+    """Drop cached latest-release data — used by tests to avoid cross-test staleness."""
+    _latest_cache.clear()
 
 
-def _cached_latest() -> dict | None:
-    data = _latest_cache["data"]
-    if data is not None and time.time() - _latest_cache["at"] < _LATEST_TTL:
-        return data
+def _cached_latest(channel: str) -> dict | None:
+    entry = _latest_cache.get(channel)
+    if entry is not None and time.time() - entry["at"] < _LATEST_TTL:
+        return entry["data"]
     return None
 
 
 @router.get("/latest-version")
-async def latest_version() -> dict:
-    """What's the newest SatHop release? Proxied server-side (one IP, optional
-    token, 5-min single-flight cache) so the browser never hits the rate-limited
-    api.github.com directly. Returns {tag, html_url, current}; tag="" + error on
-    failure (not cached, so a later success still populates).
+async def latest_version(channel: str = Query(default="")) -> dict:
+    """Newest SatHop release on a channel. Proxied server-side (one IP, optional
+    token, 5-min single-flight cache *per channel*) so the browser never hits the
+    rate-limited api.github.com directly. `channel` defaults to the orchestrator's
+    SATHOP_CHANNEL (stable unless set to edge). Returns {tag, html_url, current,
+    channel}; tag="" + error on failure (not cached, so a later success populates).
 
     Double-checked locking (like _cached_overview): the cache-hit fast path never
     touches the lock, so a burst of UI tabs sharing one query key never queues
     behind it — and a slow/hanging GitHub stalls only true cache-miss callers."""
-    cached = _cached_latest()
+    ch = _normalize_channel(channel or settings.channel)
+    cached = _cached_latest(ch)
     if cached is not None:
-        return {**cached, "current": __version__}
+        return {**cached, "current": __version__, "channel": ch}
     async with _latest_lock:
-        cached = _cached_latest()
+        cached = _cached_latest(ch)
         if cached is not None:
-            return {**cached, "current": __version__}
+            return {**cached, "current": __version__, "channel": ch}
         try:
-            data = await _fetch_latest_release()
+            data = await _fetch_latest_release(ch)
         except Exception as e:
             return {
                 "tag": "",
                 "html_url": f"{_git_repo_base()}/releases",
                 "current": __version__,
+                "channel": ch,
                 "error": str(e),
             }
-        _latest_cache["data"] = data
-        _latest_cache["at"] = time.time()
-        return {**data, "current": __version__}
+        _latest_cache[ch] = {"at": time.time(), "data": data}
+        return {**data, "current": __version__, "channel": ch}
 
 
 class UpgradeRequest(BaseModel):

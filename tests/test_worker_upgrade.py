@@ -126,24 +126,58 @@ async def test_update_all_carries_version(client):
 async def test_latest_version_returns_tag_and_current(client, monkeypatch):
     from sathop.orchestrator.api import admin
 
-    async def fake():
+    async def fake(channel="stable"):
         return {"tag": "v0.9.0", "html_url": "https://example/releases/tag/v0.9.0"}
 
     monkeypatch.setattr(admin, "_fetch_latest_release", fake)
     body = client.get("/api/admin/latest-version").json()
     assert body["tag"] == "v0.9.0"
     assert body["current"]  # the orchestrator's own version is injected
+    assert body["channel"] == "stable"  # default channel
     assert "error" not in body
 
 
 async def test_latest_version_error_is_surfaced_not_cached(client, monkeypatch):
     from sathop.orchestrator.api import admin
 
-    async def boom():
+    async def boom(channel="stable"):
         raise RuntimeError("API rate limit exceeded")
 
     monkeypatch.setattr(admin, "_fetch_latest_release", boom)
     body = client.get("/api/admin/latest-version").json()
     assert body["tag"] == ""
     assert "rate limit" in body["error"]
-    assert admin._latest_cache["data"] is None  # failures aren't cached
+    assert admin._latest_cache == {}  # failures aren't cached (no channel entry)
+
+
+async def test_latest_version_edge_channel_is_resolved_and_cached_separately(client, monkeypatch):
+    from sathop.orchestrator.api import admin
+
+    seen: list[str] = []
+
+    async def fake(channel="stable"):
+        seen.append(channel)
+        return {"tag": f"v9.9.9-{channel}", "html_url": f"https://example/{channel}"}
+
+    monkeypatch.setattr(admin, "_fetch_latest_release", fake)
+    edge = client.get("/api/admin/latest-version?channel=edge").json()
+    assert edge["tag"] == "v9.9.9-edge"
+    assert edge["channel"] == "edge"
+    stable = client.get("/api/admin/latest-version?channel=stable").json()
+    assert stable["tag"] == "v9.9.9-stable"
+    assert seen == ["edge", "stable"]  # each channel resolved once, cached independently
+    assert set(admin._latest_cache) == {"edge", "stable"}
+
+
+async def test_latest_version_defaults_to_configured_channel(client, monkeypatch, patch_settings):
+    from sathop.orchestrator.api import admin
+
+    patch_settings(channel="edge")
+
+    async def fake(channel="stable"):
+        return {"tag": f"v1.0.0-{channel}", "html_url": "https://example"}
+
+    monkeypatch.setattr(admin, "_fetch_latest_release", fake)
+    body = client.get("/api/admin/latest-version").json()  # no ?channel → uses SATHOP_CHANNEL
+    assert body["channel"] == "edge"
+    assert body["tag"] == "v1.0.0-edge"

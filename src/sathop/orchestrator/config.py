@@ -36,6 +36,10 @@ class Settings:
     # success=true to retire an object early; no auto-recovery once exhausted.
     max_pull_failures: int = max(1, int(os.getenv("SATHOP_MAX_PULL_FAILURES", "5")))
     min_worker_version: str = os.getenv("SATHOP_MIN_WORKER_VERSION", "")
+    # Release channel the version banner tracks: "stable" (newest promoted
+    # release) or "edge" (newest including prereleases). Resolution is read-only —
+    # upgrading still installs a concrete version via the .pending-version path.
+    channel: str = os.getenv("SATHOP_CHANNEL", "stable")
     # "Stuck" alarm threshold (hours): a non-terminal granule with no state
     # progress for this long is flagged on the dashboard + /metrics + reconcile.
     # Float so it can be tightened below an hour for live monitoring. This is a
