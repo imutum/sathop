@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     TypeDecorator,
     event,
+    select,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -318,6 +319,16 @@ def is_postgres() -> bool:
     """True when a Postgres URL is configured (multi-process mode); else SQLite
     (single-process MVP default)."""
     return settings.database_url.startswith(("postgresql", "postgres"))
+
+
+def not_in_paused_batch():
+    """SQL filter: Granule rows whose batch is NOT paused. Shared by the lease
+    claim and the stuck-granule reads — a paused batch's held PENDING granules
+    must be both unclaimable AND not flagged 'stuck' (they're intentionally held,
+    not stalled). A plain read subquery over the tiny batches table; it locks
+    nothing, so the claim's FOR UPDATE SKIP LOCKED still contends only on
+    granule rows."""
+    return Granule.batch_id.not_in(select(Batch.batch_id).where(Batch.status == "paused"))
 
 
 def _url() -> str:

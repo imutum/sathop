@@ -12,7 +12,7 @@ from sathop.shared.state_machine import ACTIVE_STATES, NON_TERMINAL_STATES, Gran
 
 from .. import db, event_store
 from ..config import settings
-from ..db import Batch, Granule
+from ..db import Batch, Granule, not_in_paused_batch
 from .batch_readmodels import system_delivery_rate
 
 NON_TERMINAL = set(NON_TERMINAL_STATES)
@@ -72,6 +72,7 @@ async def admin_overview(s: AsyncSession, *, now: datetime) -> dict[str, Any]:
                 select(Granule.state, func.count(Granule.granule_id))
                 .where(Granule.state.in_(list(NON_TERMINAL)))
                 .where(Granule.updated_at < stuck_threshold(now))
+                .where(not_in_paused_batch())  # a paused batch's held granules aren't stuck
                 .group_by(Granule.state)
             )
         ).all()
@@ -114,6 +115,7 @@ async def stuck_granule_rows(
     stmt = (
         select(Granule)
         .where(Granule.updated_at < stuck_threshold(now))
+        .where(not_in_paused_batch())  # paused batches are intentionally held, not stuck
         .order_by(Granule.updated_at.asc())
         .limit(limit)
     )

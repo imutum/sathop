@@ -276,6 +276,35 @@ async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dic
     return {"ok": True, "reset": len(rows)}
 
 
+@router.post("/{batch_id}/pause")
+async def pause_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dict:
+    """Batch-level flow control: stop leasing this batch's *pending* granules.
+
+    Non-destructive and orthogonal to the granule state machine — in-flight
+    granules keep draining, no granule states change, nothing is re-downloaded.
+    This is the batch-level counterpart to the atomic, per-granule cancel: to
+    temporarily halt a batch you pause it, not cancel-then-redistribute. Resume
+    with /resume. Idempotent."""
+    b = await get_or_404(s, Batch, batch_id, "batch not found")
+    if b.status != "paused":
+        b.status = "paused"
+        await log(s, "admin", f"paused batch {batch_id}", level="warn")
+        await commit_and_publish(s, Scope.BATCHES)
+    return {"ok": True, "status": b.status}
+
+
+@router.post("/{batch_id}/resume")
+async def resume_batch(batch_id: str, s: AsyncSession = Depends(session)) -> dict:
+    """Resume a paused batch: its pending granules become claimable again on the
+    next worker lease. Idempotent."""
+    b = await get_or_404(s, Batch, batch_id, "batch not found")
+    if b.status != "running":
+        b.status = "running"
+        await log(s, "admin", f"resumed batch {batch_id}")
+        await commit_and_publish(s, Scope.BATCHES)
+    return {"ok": True, "status": b.status}
+
+
 @router.post("/{batch_id}/granules/{granule_id}/cancel")
 async def cancel_granule(batch_id: str, granule_id: str, s: AsyncSession = Depends(session)) -> dict:
     g = await _granule_in_batch_or_404(s, batch_id, granule_id)

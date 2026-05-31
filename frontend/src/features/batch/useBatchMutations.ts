@@ -71,7 +71,17 @@ export function useBatchListMutations() {
     },
   });
 
-  return { retry, cancel, remove, invalidate: inv.lists };
+  const setPaused = useMutation({
+    mutationFn: ({ id, paused }: { id: string; paused: boolean }) =>
+      paused ? API.pauseBatch(id) : API.resumeBatch(id),
+    onSuccess: (res) => {
+      inv.lists();
+      toast.success(res.status === "paused" ? "已暂停，不再分发新数据粒" : "已恢复分发");
+    },
+    onError: (e: Error) => toast.error(`操作失败：${e.message}`),
+  });
+
+  return { retry, cancel, remove, setPaused, invalidate: inv.lists };
 }
 
 export function useBatchDetailMutations(batchId: Ref<string>) {
@@ -151,5 +161,26 @@ export function useBatchDetailMutations(batchId: Ref<string>) {
     },
   });
 
-  return { cancel, retry, retryAll, cancelAll, resetExhausted, deleteBatch, invalidate: inv.detail };
+  // Batch-level flow control (pause/resume): non-destructive, sits above the
+  // atomic per-granule cancel/retry above.
+  const setPaused = useMutation({
+    mutationFn: (paused: boolean) =>
+      paused ? API.pauseBatch(batchId.value) : API.resumeBatch(batchId.value),
+    onSuccess: (res) => {
+      inv.detail();
+      toast.success(res.status === "paused" ? "已暂停，不再分发新数据粒" : "已恢复分发");
+    },
+    onError: (e: Error) => toast.error(`操作失败：${e.message}`),
+  });
+
+  return {
+    cancel,
+    retry,
+    retryAll,
+    cancelAll,
+    resetExhausted,
+    deleteBatch,
+    setPaused,
+    invalidate: inv.detail,
+  };
 }

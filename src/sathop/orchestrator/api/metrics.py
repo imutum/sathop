@@ -31,7 +31,7 @@ from sathop.shared.state_machine import NON_TERMINAL_STATES, GranuleState
 
 from .. import db, event_store, telemetry
 from ..config import require_token_or_query, settings
-from ..db import Batch, Granule, Receiver, Worker, session
+from ..db import Batch, Granule, Receiver, Worker, not_in_paused_batch, session
 
 router = APIRouter(tags=["metrics"], dependencies=[Depends(require_token_or_query)])
 
@@ -186,6 +186,7 @@ async def _collect(s: AsyncSession) -> bytes:
                 select(Granule.state, func.count(Granule.granule_id))
                 .where(Granule.state.in_(list(NON_TERMINAL)))
                 .where(Granule.updated_at < stuck_threshold)
+                .where(not_in_paused_batch())  # paused-batch granules are held, not stuck
                 .group_by(Granule.state)
             )
         ).all()

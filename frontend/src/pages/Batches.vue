@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -46,12 +46,13 @@ type BatchListRow = {
   errors: number;
   inFlight: number;
   pct: number;
+  closed: boolean;
   bundleLink: { name: string; version: string } | null;
 };
 
 const route = useRoute();
 const router = useRouter();
-const { retry, cancel, remove, invalidate: invalidateBatches } = useBatchListMutations();
+const { retry, cancel, remove, setPaused, invalidate: invalidateBatches } = useBatchListMutations();
 
 const initialBundle = (route.query.bundle as string | undefined) ?? null;
 const showCreate = ref(!!initialBundle);
@@ -94,6 +95,7 @@ function toBatchListRow(b: BatchSummary): BatchListRow {
     errors: errorTotal(b),
     inFlight: inFlightTotal(b),
     pct: t > 0 ? Math.round((d / t) * 100) : 0,
+    closed: isBatchClosed(b),
     bundleLink: bundleLink(b.bundle_ref),
   };
 }
@@ -253,7 +255,10 @@ function onCreated() {
                     <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
                   </div>
                 </RouterLink>
-                <Badge tone="info" class="shrink-0">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
+                <div class="flex shrink-0 items-center gap-1.5">
+                  <Badge v-if="r.b.status === 'paused'" tone="warn">已暂停</Badge>
+                  <Badge tone="info">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
+                </div>
               </div>
               <RouterLink
                 v-if="r.bundleLink"
@@ -303,6 +308,14 @@ function onCreated() {
                     </Button>
                   </template>
                   <DropdownMenuItem
+                    v-if="r.b.status === 'paused' || !r.closed"
+                    :disabled="setPaused.isPending.value && setPaused.variables.value?.id === r.b.batch_id"
+                    @select="setPaused.mutate({ id: r.b.batch_id, paused: r.b.status !== 'paused' })"
+                  >
+                    {{ r.b.status === "paused" ? "恢复分发" : "暂停分发" }}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
                     class="text-danger focus:bg-danger/10 focus:text-danger"
                     @select="confirmDelete(r.b)"
                   >
@@ -329,7 +342,10 @@ function onCreated() {
                 <TableRow v-for="r in visible" :key="r.b.batch_id">
                   <TableCell class="px-5 py-3.5">
                     <RouterLink :to="`/batches/${r.b.batch_id}`" class="block">
-                      <div class="font-medium text-foreground transition-colors hover:text-primary">{{ r.b.name }}</div>
+                      <div class="flex items-center gap-2">
+                        <span class="font-medium text-foreground transition-colors hover:text-primary">{{ r.b.name }}</span>
+                        <Badge v-if="r.b.status === 'paused'" tone="warn">已暂停</Badge>
+                      </div>
                       <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground">
                         {{ r.b.batch_id }}
                         <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
@@ -388,6 +404,14 @@ function onCreated() {
                           取消 ({{ r.inFlight }})
                         </Button>
                       </template>
+                      <DropdownMenuItem
+                        v-if="r.b.status === 'paused' || !r.closed"
+                        :disabled="setPaused.isPending.value && setPaused.variables.value?.id === r.b.batch_id"
+                        @select="setPaused.mutate({ id: r.b.batch_id, paused: r.b.status !== 'paused' })"
+                      >
+                        {{ r.b.status === "paused" ? "恢复分发" : "暂停分发" }}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
                       <DropdownMenuItem
                         class="text-danger focus:bg-danger/10 focus:text-danger"
                         @select="confirmDelete(r.b)"

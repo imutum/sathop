@@ -102,6 +102,8 @@ def main() -> int:
             tag = f"{done}/{total}  {pct:.0f}%"
             if err:
                 tag += f"  !!{err} errors"
+            if b.get("status") == "paused":
+                tag += "  [paused]"  # intentionally held — its pending granules won't show as stuck
             print(f"  {b['batch_id']:<24}  target={b['target_receiver_id'] or 'any':<16}  {tag}")
             if err:
                 issues.append(f"batch {b['batch_id']}: {err} failed/blacklisted granules")

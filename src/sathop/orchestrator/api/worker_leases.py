@@ -31,7 +31,7 @@ from sathop.shared.state_machine import (
 )
 
 from ..config import settings
-from ..db import Batch, Granule, GranuleObject
+from ..db import Batch, Granule, GranuleObject, not_in_paused_batch
 from ._transition import apply_transition
 from .progress import evict_granule
 
@@ -125,6 +125,10 @@ async def claim_pending_granules(
         select(Granule.granule_id)
         .where(Granule.state == GranuleState.PENDING.value)
         .where((Granule.leased_by.is_(None)) | (Granule.lease_expires_at < now))
+        # Batch-level pause: pending granules of a paused batch stay unclaimable
+        # (in-flight drains, no state change) until /resume. Shared with the
+        # stuck-detection reads so a paused batch is never flagged 'stuck' either.
+        .where(not_in_paused_batch())
         .limit(limit)
         # Postgres: lock the picked rows and skip any a concurrent claimer already
         # holds, so N processes claim disjoint sets without blocking. SQLite has no

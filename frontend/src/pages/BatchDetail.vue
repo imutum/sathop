@@ -23,7 +23,7 @@ import BatchEventLog from "@/features/batch/components/BatchEventLog.vue";
 import BatchGranuleTable from "@/features/batch/components/BatchGranuleTable.vue";
 import BatchProgress from "@/features/batch/components/BatchProgress.vue";
 import BatchTimingCard from "@/features/batch/components/BatchTimingCard.vue";
-import { errorTotal, inFlightTotal, totalCount } from "@/features/batch/summary";
+import { errorTotal, inFlightTotal, isBatchClosed, totalCount } from "@/features/batch/summary";
 import { stripBatchPrefix } from "@/lib/utils";
 import { Icon } from "@/components/Icon";
 
@@ -57,7 +57,7 @@ const LOG_LEVEL_OPTIONS = [
 const route = useRoute();
 
 const batchId = computed(() => (route.params.batchId as string) ?? "");
-const { cancel, retry, retryAll, cancelAll, resetExhausted, deleteBatch } =
+const { cancel, retry, retryAll, cancelAll, resetExhausted, deleteBatch, setPaused } =
   useBatchDetailMutations(batchId);
 const highlight = computed(() => (route.query.granule as string | undefined) ?? null);
 
@@ -131,6 +131,12 @@ const filteredTotal = computed(() => {
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredTotal.value / PAGE_SIZE)));
 const hasPrev = computed(() => page.value > 0);
 const hasNext = computed(() => page.value < totalPages.value - 1);
+
+const paused = computed(() => b.value?.status === "paused");
+// Pause is batch-level flow control over *pending* work; offer it only while the
+// batch still has work to gate (not fully delivered). A paused batch always
+// offers 恢复 so it can never get stuck paused.
+const closed = computed(() => (b.value ? isBatchClosed(b.value) : true));
 
 const failedCount = computed(() => (b.value ? errorTotal(b.value) : 0));
 // Server-authoritative; for batches with >200 granules the per-row sum from
@@ -239,6 +245,28 @@ async function confirmDelete() {
             <RowActions align="end">
               <template #primary>
                 <Button
+                  v-if="paused"
+                  size="sm"
+                  :pending="setPaused.isPending.value"
+                  pending-label="恢复中…"
+                  @click="setPaused.mutate(false)"
+                >
+                  <Icon name="play" :size="13" />
+                  恢复
+                </Button>
+                <Button
+                  v-else-if="!closed"
+                  size="sm"
+                  variant="outline"
+                  :pending="setPaused.isPending.value"
+                  pending-label="暂停中…"
+                  title="暂停后不再分发该批次的新数据粒，在途的继续完成；可随时恢复"
+                  @click="setPaused.mutate(true)"
+                >
+                  <Icon name="pause" :size="13" />
+                  暂停
+                </Button>
+                <Button
                   v-if="failedCount > 0"
                   size="sm"
                   :pending="retryAll.isPending.value"
@@ -247,17 +275,17 @@ async function confirmDelete() {
                 >
                   重试失败 ({{ failedCount }})
                 </Button>
-                <Button
-                  v-if="inflightCount > 0"
-                  variant="destructive"
-                  size="sm"
-                  :pending="cancelAll.isPending.value"
-                  pending-label="取消中…"
-                  @click="confirmCancelAll"
-                >
-                  取消 ({{ inflightCount }})
-                </Button>
               </template>
+              <!-- 批次级的整体动作。逐粒取消/重试在「数据粒」页签的行内（原子层）。 -->
+              <DropdownMenuItem
+                v-if="inflightCount > 0"
+                :disabled="cancelAll.isPending.value"
+                class="text-danger focus:bg-danger/10 focus:text-danger"
+                title="把在途数据粒批量取消（逐粒拉黑）——这是原子层的批量操作，不同于暂停"
+                @select="confirmCancelAll"
+              >
+                取消在途数据粒 ({{ inflightCount }})
+              </DropdownMenuItem>
               <DropdownMenuItem
                 v-if="exhaustedCount > 0"
                 :disabled="resetExhausted.isPending.value"
@@ -266,7 +294,7 @@ async function confirmDelete() {
               >
                 重置已放弃产物 ({{ exhaustedCount }})
               </DropdownMenuItem>
-              <DropdownMenuSeparator v-if="exhaustedCount > 0" />
+              <DropdownMenuSeparator v-if="inflightCount > 0 || exhaustedCount > 0" />
               <DropdownMenuItem
                 :disabled="deleteBatch.isPending.value"
                 class="text-danger focus:bg-danger/10 focus:text-danger"
@@ -308,7 +336,11 @@ async function confirmDelete() {
       <span aria-hidden>·</span>
       <span>创建 {{ fmtAge(b.created_at) }}</span>
       <span aria-hidden>·</span>
-      <span>状态 <span class="text-foreground">{{ b.status }}</span></span>
+      <span class="inline-flex items-center gap-1.5">
+        状态
+        <Badge v-if="paused" tone="warn">已暂停</Badge>
+        <span v-else class="text-foreground">运行中</span>
+      </span>
     </div>
 
     <Tabs v-if="b" v-model="tab">

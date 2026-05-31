@@ -178,6 +178,12 @@ const batchApi = {
     postJson<{ reset: number }>(`/api/batches/${batchId}/reset-exhausted-objects`),
   cancelBatch: (batchId: string) =>
     postJson<{ cancelled: number }>(`/api/batches/${batchId}/cancel`),
+  // Batch-level flow control: pause stops leasing new granules (in-flight drains,
+  // non-destructive); resume re-enables it. Distinct from cancel (atomic/per-granule).
+  pauseBatch: (batchId: string) =>
+    postJson<{ status: string }>(`/api/batches/${batchId}/pause`),
+  resumeBatch: (batchId: string) =>
+    postJson<{ status: string }>(`/api/batches/${batchId}/resume`),
   deleteBatch: (batchId: string, force = false) =>
     deleteJson<{
       ok: boolean;
