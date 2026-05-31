@@ -26,6 +26,9 @@ logs/
 .env.local
 *.key
 *.pem
+# minisign release signing secret — paste into the GH Actions secret, never commit
+.release-seckey
+deploy/runtime/.release-seckey
 
 # Node
 node_modules/

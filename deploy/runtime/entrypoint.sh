@@ -29,6 +29,7 @@ GIT_REPO="${SATHOP_GIT_REPO:-https://github.com/imutum/sathop.git}"
 ASSET_BASE="${GIT_REPO%.git}"
 ASSET_NAME="sathop-bundle.tar.gz"
 GATE_SEC="${SATHOP_HEALTH_GATE_SEC:-60}"    # candidate must stay alive this long to commit
+RELEASE_PUBKEY="${SATHOP_RELEASE_PUBKEY:-/app/sathop-release.pub}"  # baked minisign trust root
 
 CURL_AUTH=()
 if [ -n "${SATHOP_GIT_TOKEN:-}" ]; then
@@ -63,6 +64,23 @@ install_slot() {
   if ! curl -fSL "${CURL_AUTH[@]}" "$url" -o "$tmp"; then
     echo "[entrypoint] download failed: $url" >&2; rm -f "$tmp"; return 1
   fi
+
+  # Verify the release signature before trusting any bytes (TUF-lite: the same
+  # integrity-by-cryptography discipline as per-granule SHA256). minisign's
+  # ed25519 signature subsumes the content hash, so there is no separate sha256.
+  if [ -f "$RELEASE_PUBKEY" ]; then
+    if ! curl -fSL "${CURL_AUTH[@]}" "${url}.minisig" -o "$tmp.minisig"; then
+      echo "[entrypoint] signature download failed: ${url}.minisig" >&2; rm -f "$tmp" "$tmp.minisig"; return 1
+    fi
+    if ! minisign -V -q -p "$RELEASE_PUBKEY" -m "$tmp" -x "$tmp.minisig"; then
+      echo "[entrypoint] SIGNATURE VERIFICATION FAILED for $ver — refusing bundle" >&2; rm -f "$tmp" "$tmp.minisig"; return 1
+    fi
+    rm -f "$tmp.minisig"
+    echo "[entrypoint] signature verified ($ver)" >&2
+  else
+    echo "[entrypoint] WARNING: no release pubkey at $RELEASE_PUBKEY — skipping signature check" >&2
+  fi
+
   rm -rf "$staging"; mkdir -p "$staging"
   if ! tar -xzf "$tmp" -C "$staging"; then
     echo "[entrypoint] archive extract failed" >&2; rm -rf "$tmp" "$staging"; return 1

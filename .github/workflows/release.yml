@@ -101,6 +101,22 @@ jobs:
         working-directory: frontend
       - name: Package bundle
         run: tar -czf sathop-bundle.tar.gz src pyproject.toml uv.lock frontend/dist
+      - name: Sign bundle (ed25519 / minisign)
+        # The entrypoint refuses any bundle whose signature does not verify against
+        # the public key baked into the runtime image, so a missing secret must
+        # fail the release rather than ship an unsigned (un-installable) bundle.
+        env:
+          MINISIGN_KEY: ${{ secrets.SATHOP_MINISIGN_KEY }}
+        run: |
+          if [ -z "$MINISIGN_KEY" ]; then
+            echo "::error::SATHOP_MINISIGN_KEY is not set — refusing to publish an unsigned bundle"; exit 1
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+          printf '%s\n' "$MINISIGN_KEY" > seckey
+          minisign -S -s seckey -m sathop-bundle.tar.gz -t "sathop ${GITHUB_REF_NAME}"
+          rm -f seckey
       - uses: softprops/action-gh-release@v2
         with:
-          files: sathop-bundle.tar.gz
+          files: |
+            sathop-bundle.tar.gz
+            sathop-bundle.tar.gz.minisig

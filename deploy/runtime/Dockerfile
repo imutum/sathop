@@ -14,8 +14,14 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       ca-certificates git curl tini \
+       ca-certificates git curl tini minisign \
     && rm -rf /var/lib/apt/lists/*
+
+# Release signing trust root: the entrypoint verifies every downloaded bundle
+# against this ed25519 public key (minisign) before extracting. The matching
+# secret key lives only in the CI signing secret; baking the public half makes
+# the image itself the trust anchor (TUF-lite, same discipline as per-granule SHA256).
+COPY deploy/runtime/sathop-release.pub /app/sathop-release.pub
 
 WORKDIR /app
 
