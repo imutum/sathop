@@ -1,3 +1,6 @@
 # Container shell scripts must keep LF endings — a CRLF checkout on Windows
 # would corrupt the shebang and break the entrypoint inside the Linux image.
 *.sh text eol=lf
+# The minisign release public key is parsed byte-for-byte; a CRLF would corrupt
+# the base64 and fail signature verification in a local Windows image build.
+deploy/runtime/sathop-release.pub text eol=lf
