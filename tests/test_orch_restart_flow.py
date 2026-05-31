@@ -9,6 +9,7 @@ matching frontend — so they can't drift)."""
 from __future__ import annotations
 
 import asyncio
+import os
 
 import httpx
 import pytest
@@ -134,6 +135,84 @@ def test_upgrade_writes_pending_and_triggers_shutdown(tmp_path, monkeypatch, cli
     assert r.json() == {"ok": True, "version": "9.9.9"}
     assert (tmp_path / ".pending-version").read_text() == "9.9.9"
     assert triggered["v"] is True
+
+
+# ─── shutdown signal target: which PID restarts the CONTAINER ────────────────
+# Multi-process uvicorn: a worker SIGTERMing itself only gets respawned by the
+# master — the container never restarts and .pending-version is never consumed.
+# The signal must hit the master (the worker's parent); single-process keeps self.
+
+
+def test_shutdown_target_single_process_signals_self(monkeypatch, patch_settings):
+    from sathop.orchestrator.api import admin
+
+    patch_settings(orch_workers=1)
+    monkeypatch.setattr(admin, "is_postgres", lambda: True)
+    assert admin._shutdown_target_pid() == os.getpid()
+
+
+def test_shutdown_target_multiprocess_signals_master(monkeypatch, patch_settings):
+    from sathop.orchestrator.api import admin
+
+    patch_settings(orch_workers=4)
+    monkeypatch.setattr(admin, "is_postgres", lambda: True)
+    monkeypatch.setattr(os, "getppid", lambda: 4242)
+    assert admin._shutdown_target_pid() == 4242
+
+
+def test_shutdown_target_multiprocess_on_sqlite_signals_self(monkeypatch, patch_settings):
+    # workers>1 but SQLite → run() forces a single process → self is correct.
+    from sathop.orchestrator.api import admin
+
+    patch_settings(orch_workers=4)
+    monkeypatch.setattr(admin, "is_postgres", lambda: False)
+    assert admin._shutdown_target_pid() == os.getpid()
+
+
+def test_shutdown_target_orphaned_master_falls_back_to_self(monkeypatch, patch_settings):
+    # Parent already reaped → reparented to PID 1 (tini); must NOT SIGTERM it
+    # (that stops the container), fall back to self.
+    from sathop.orchestrator.api import admin
+
+    patch_settings(orch_workers=4)
+    monkeypatch.setattr(admin, "is_postgres", lambda: True)
+    monkeypatch.setattr(os, "getppid", lambda: 1)
+    assert admin._shutdown_target_pid() == os.getpid()
+
+
+# ─── .pending-version stamp lands where the entrypoint reads it ──────────────
+# Under the A/B-slots editable layout repo_root() is the slot dir; the stamp must
+# climb to the slots parent (REPO_DIR) or the upgrade silently no-ops. These do
+# NOT monkeypatch the resolver away — they reproduce the slot layout.
+
+
+def test_stamp_dir_climbs_out_of_slot(monkeypatch, tmp_path):
+    from sathop.shared import release
+
+    monkeypatch.delenv("SATHOP_REPO_DIR", raising=False)
+    slot = tmp_path / "slots" / "1.0.2"
+    slot.mkdir(parents=True)
+    monkeypatch.setattr(release, "repo_root", lambda: slot)
+    assert release.stamp_dir() == tmp_path
+    p = release.write_pending_version("1.0.2")
+    assert p == tmp_path / ".pending-version"  # REPO_DIR, not the slot
+    assert p.read_text() == "1.0.2"
+
+
+def test_stamp_dir_env_override_wins(monkeypatch, tmp_path):
+    from sathop.shared import release
+
+    monkeypatch.setenv("SATHOP_REPO_DIR", str(tmp_path))
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path / "slots" / "x")
+    assert release.stamp_dir() == tmp_path
+
+
+def test_stamp_dir_dev_checkout_uses_repo_root(monkeypatch, tmp_path):
+    from sathop.shared import release
+
+    monkeypatch.delenv("SATHOP_REPO_DIR", raising=False)
+    monkeypatch.setattr(release, "repo_root", lambda: tmp_path)  # not under slots/
+    assert release.stamp_dir() == tmp_path
 
 
 def test_upgrade_502_when_asset_missing(tmp_path, monkeypatch, client):

@@ -23,7 +23,7 @@ from sathop.shared.release import normalize_version, write_pending_version
 from sathop.shared.state_machine import GranuleState, RequeueGranule, Scope
 
 from ..config import require_token, settings
-from ..db import Batch, Bundle, Granule, GranuleObject, session, utcnow
+from ..db import Batch, Bundle, Granule, GranuleObject, is_postgres, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import object_is_exhausted, object_is_pullable
@@ -343,14 +343,20 @@ async def _fetch_latest_release(channel: str = "stable") -> dict[str, str]:
         return {"tag": name, "html_url": f"{base}/releases/tag/{name}" if name else f"{base}/releases"}
 
 
-_LATEST_TTL = 300.0
-_latest_cache: dict[str, dict] = {}  # channel -> {"at": float, "data": dict}
+_LATEST_TTL = 900.0  # success freshness; releases change rarely, so a long TTL
+# also cuts GitHub volume under N worker processes (each has its own cache).
+_LATEST_FAIL_COOLDOWN = 120.0  # after a GitHub error, don't re-hit it for this long
+_latest_cache: dict[str, dict] = {}  # channel -> {"at": float, "data": dict}  (TTL-gated)
+_latest_good: dict[str, dict] = {}  # channel -> last successful data, kept indefinitely
+_latest_fail_at: dict[str, float] = {}  # channel -> last fetch-failure time (negative cache)
 _latest_lock = asyncio.Lock()
 
 
 def reset_latest_cache() -> None:
     """Drop cached latest-release data — used by tests to avoid cross-test staleness."""
     _latest_cache.clear()
+    _latest_good.clear()
+    _latest_fail_at.clear()
 
 
 def _cached_latest(channel: str) -> dict | None:
@@ -363,10 +369,17 @@ def _cached_latest(channel: str) -> dict | None:
 @router.get("/latest-version")
 async def latest_version(channel: str = Query(default="")) -> dict:
     """Newest SatHop release on a channel. Proxied server-side (one IP, optional
-    token, 5-min single-flight cache *per channel*) so the browser never hits the
-    rate-limited api.github.com directly. `channel` defaults to the orchestrator's
-    SATHOP_CHANNEL (stable unless set to edge). Returns {tag, html_url, current,
-    channel}; tag="" + error on failure (not cached, so a later success populates).
+    SATHOP_GIT_TOKEN, single-flight cache *per channel*) so the browser never hits
+    the rate-limited api.github.com directly (anonymous: 60/h-per-IP). `channel`
+    defaults to the orchestrator's SATHOP_CHANNEL (stable unless set to edge).
+    Returns {tag, html_url, current, channel}.
+
+    Resilient to GitHub rate-limits / outages: the last successful result is kept
+    indefinitely and served (with stale=true) when a refresh fails, so a transient
+    403 never surfaces as a failure in the UI. A failed fetch also starts a short
+    cooldown during which we serve stale without re-hitting GitHub — otherwise
+    every page load would retry and keep us rate-limited. Only a first-ever fetch
+    with no prior good value returns tag="" + error.
 
     Double-checked locking (like _cached_overview): the cache-hit fast path never
     touches the lock, so a burst of UI tabs sharing one query key never queues
@@ -379,9 +392,16 @@ async def latest_version(channel: str = Query(default="")) -> dict:
         cached = _cached_latest(ch)
         if cached is not None:
             return {**cached, "current": __version__, "channel": ch}
+        good = _latest_good.get(ch)
+        # Recently failed → serve stale without hammering GitHub during cooldown.
+        if good is not None and time.time() - _latest_fail_at.get(ch, 0.0) < _LATEST_FAIL_COOLDOWN:
+            return {**good, "current": __version__, "channel": ch, "stale": True}
         try:
             data = await _fetch_latest_release(ch)
         except Exception as e:
+            _latest_fail_at[ch] = time.time()
+            if good is not None:  # serve last-known-good instead of a failure
+                return {**good, "current": __version__, "channel": ch, "stale": True, "error": str(e)}
             return {
                 "tag": "",
                 "html_url": f"{_git_repo_base()}/releases",
@@ -390,6 +410,7 @@ async def latest_version(channel: str = Query(default="")) -> dict:
                 "error": str(e),
             }
         _latest_cache[ch] = {"at": time.time(), "data": data}
+        _latest_good[ch] = data
         return {**data, "current": __version__, "channel": ch}
 
 
@@ -397,13 +418,40 @@ class UpgradeRequest(BaseModel):
     version: str
 
 
+def _shutdown_target_pid() -> int:
+    """PID to SIGTERM so the entrypoint supervisor relaunches the container.
+
+    Single-process: the uvicorn server IS the bash supervisor's `$CHILD`, so signal
+    self → it exits 0 → supervisor loops and consumes any `.pending-version`.
+
+    Multi-process (uvicorn workers=N, active only when orch_workers>1 AND Postgres —
+    mirroring main.run()'s own guard): the request runs inside a *worker*, whose
+    parent is the uvicorn master (the process bash waits on). SIGTERM-ing self would
+    only kill the worker — the master respawns it and the container never restarts.
+    Signal the master (our parent) instead, so it stops all workers and exits 0.
+    Guard: if the parent is already PID 1 (master gone, reparented to tini), fall
+    back to self — never SIGTERM the bash supervisor, which would STOP not restart."""
+    if not (settings.orch_workers > 1 and is_postgres()):
+        return os.getpid()
+    ppid = os.getppid()
+    return ppid if ppid > 1 else os.getpid()
+
+
 def _trigger_shutdown() -> None:
-    """Close SSE streams, then SIGTERM self after a beat so the HTTP response
-    flushes first. The entrypoint supervisor catches the clean exit (code 0)."""
+    """Close SSE streams, then SIGTERM the right process after a beat so the HTTP
+    response flushes first. The entrypoint supervisor catches the clean exit (0)."""
     from ..pubsub import request_shutdown
 
     request_shutdown()
-    asyncio.get_running_loop().call_later(0.5, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    target = _shutdown_target_pid()  # capture eagerly: getppid() may shift after the delay
+
+    def _kill() -> None:
+        try:
+            os.kill(target, signal.SIGTERM)
+        except ProcessLookupError:
+            pass  # already exiting (e.g. another worker signalled the master) — fine
+
+    asyncio.get_running_loop().call_later(0.5, _kill)
 
 
 @router.post("/upgrade")

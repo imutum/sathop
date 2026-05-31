@@ -21,6 +21,11 @@ esac
 # after a forward schema migration would invert the orch-before-worker contract);
 # it commits on start and a bad release is recovered by an explicit re-upgrade.
 REPO_DIR="/app/repo"
+# The component writes .pending-version here (orchestrator/worker self-upgrade).
+# Export it so the app stamps REPO_DIR directly instead of guessing from its own
+# install path — under the slots layout the editable src lives in slots/<ver>/,
+# so a path walk-up would otherwise land the stamp in the slot, not REPO_DIR.
+export SATHOP_REPO_DIR="$REPO_DIR"
 SLOTS_DIR="$REPO_DIR/slots"
 COMMITTED_FILE="$REPO_DIR/committed"   # concrete version proven healthy (rollback target)
 INTENT_FILE="$REPO_DIR/intent"         # concrete version currently being brought up

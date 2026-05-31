@@ -150,6 +150,38 @@ async def test_latest_version_error_is_surfaced_not_cached(client, monkeypatch):
     assert admin._latest_cache == {}  # failures aren't cached (no channel entry)
 
 
+async def test_latest_version_serves_stale_on_error(client, monkeypatch):
+    """A GitHub rate-limit (403) after a prior success must serve the last-known-good
+    result (stale) instead of surfacing a failure, and must not re-hit GitHub during
+    the cooldown — otherwise every page load retries and keeps us rate-limited."""
+    from sathop.orchestrator.api import admin
+
+    async def good(channel="stable"):
+        return {"tag": "v1.2.3", "html_url": "https://example/v1.2.3"}
+
+    monkeypatch.setattr(admin, "_fetch_latest_release", good)
+    first = client.get("/api/admin/latest-version").json()
+    assert first["tag"] == "v1.2.3" and "stale" not in first
+
+    monkeypatch.setattr(admin, "_LATEST_TTL", 0.0)  # force cache-miss on every call
+    calls = {"n": 0}
+
+    async def boom(channel="stable"):
+        calls["n"] += 1
+        raise RuntimeError("403 rate limit exceeded")
+
+    monkeypatch.setattr(admin, "_fetch_latest_release", boom)
+    stale = client.get("/api/admin/latest-version").json()
+    assert stale["tag"] == "v1.2.3"  # last-known-good, not ""
+    assert stale.get("stale") is True
+    assert "rate limit" in stale["error"]
+    assert calls["n"] == 1
+
+    again = client.get("/api/admin/latest-version").json()  # within cooldown
+    assert again["tag"] == "v1.2.3" and again.get("stale") is True
+    assert calls["n"] == 1  # no extra GitHub hit during cooldown
+
+
 async def test_latest_version_edge_channel_is_resolved_and_cached_separately(client, monkeypatch):
     from sathop.orchestrator.api import admin
 
