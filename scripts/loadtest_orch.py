@@ -82,7 +82,12 @@ def _granule_events(gid: str, wid: str) -> list[dict]:
             "worker_id": wid,
             "process_ms": 5,
             "objects": [
-                {"object_key": f"{gid}.out", "presigned_url": f"http://w/{gid}.out", "sha256": _SHA, "size": 100}
+                {
+                    "object_key": f"{gid}.out",
+                    "presigned_url": f"http://w/{gid}.out",
+                    "sha256": _SHA,
+                    "size": 100,
+                }
             ],
         },
     ]
@@ -220,14 +225,25 @@ async def main() -> None:
     ap.add_argument("--capacity", type=int, default=20)
     ap.add_argument("--duration", type=int, default=60)
     ap.add_argument("--tag", default="", help="disambiguates the batch id + node ids for parallel drivers")
-    ap.add_argument("--batch", action="store_true", help="emit events via /events/batch (new buffered worker)")
+    ap.add_argument(
+        "--batch", action="store_true", help="emit events via /events/batch (new buffered worker)"
+    )
     ap.add_argument("--seed-only", action="store_true")
     # Opt-in SLA gates (turn the measurement into a CI pass/fail). The health p95
     # ceiling is the runner-robust signal: a blocked event loop spikes it ~100×.
-    ap.add_argument("--max-health-p95-ms", type=float, default=0.0, help="fail if /api/health p95 exceeds this (0=off)")
-    ap.add_argument("--max-health-max-ms", type=float, default=0.0, help="fail if /api/health max exceeds this (0=off)")
+    ap.add_argument(
+        "--max-health-p95-ms", type=float, default=0.0, help="fail if /api/health p95 exceeds this (0=off)"
+    )
+    ap.add_argument(
+        "--max-health-max-ms", type=float, default=0.0, help="fail if /api/health max exceeds this (0=off)"
+    )
     ap.add_argument("--max-errors", type=int, default=-1, help="fail if client errors exceed this (-1=off)")
-    ap.add_argument("--min-delivered", type=int, default=0, help="fail if fewer granules delivered (0=off; catches starvation)")
+    ap.add_argument(
+        "--min-delivered",
+        type=int,
+        default=0,
+        help="fail if fewer granules delivered (0=off; catches starvation)",
+    )
     a = ap.parse_args()
 
     tag = a.tag or "0"
@@ -298,7 +314,9 @@ async def main() -> None:
     if gates:
         failures = []
         if a.max_health_p95_ms and p95 > a.max_health_p95_ms:
-            failures.append(f"health p95 {p95:.1f}ms > {a.max_health_p95_ms:.0f}ms (event loop likely blocked)")
+            failures.append(
+                f"health p95 {p95:.1f}ms > {a.max_health_p95_ms:.0f}ms (event loop likely blocked)"
+            )
         if a.max_health_max_ms and hmax > a.max_health_max_ms:
             failures.append(f"health max {hmax:.1f}ms > {a.max_health_max_ms:.0f}ms")
         if a.max_errors >= 0 and st.errors > a.max_errors:

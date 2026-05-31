@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 
 
 async def run_periodic(
-    body: Callable[[], Awaitable[None]],
+    body: Callable[[], Awaitable[object]],  # return value is awaited for side effects, then ignored
     *,
     interval: float,
     log: logging.Logger,

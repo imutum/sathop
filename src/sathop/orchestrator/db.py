@@ -130,7 +130,9 @@ class Rollout(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     kind: Mapped[str] = mapped_column(String, default="worker")  # reserved for future receiver rollouts
     target_version: Mapped[str] = mapped_column(String)
-    channel: Mapped[str | None] = mapped_column(String, nullable=True)  # display: channel resolved, None=concrete
+    channel: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )  # display: channel resolved, None=concrete
     # pending → running → (done | halted → running… | aborted)
     phase: Mapped[str] = mapped_column(String, default="pending")
     wave_index: Mapped[int] = mapped_column(Integer, default=-1)  # -1 pending, 0 canary, 1 batch, 2 fleet

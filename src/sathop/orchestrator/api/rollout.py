@@ -79,7 +79,9 @@ def _status(r: Rollout, confirmed: list[str], pending: list[str], excused: list[
 
 
 async def _active_rollout(s: AsyncSession) -> Rollout | None:
-    return await s.scalar(select(Rollout).where(Rollout.phase.in_(_ACTIVE)).order_by(Rollout.id.desc()).limit(1))
+    return await s.scalar(
+        select(Rollout).where(Rollout.phase.in_(_ACTIVE)).order_by(Rollout.id.desc()).limit(1)
+    )
 
 
 @router.post("")

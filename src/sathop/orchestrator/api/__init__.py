@@ -16,5 +16,18 @@ from . import (
 )
 
 router = APIRouter(prefix="/api")
-for mod in [workers, receivers, batches, events, admin, rollout, stream, metrics, progress, bundles, shared, timing]:
+for mod in [
+    workers,
+    receivers,
+    batches,
+    events,
+    admin,
+    rollout,
+    stream,
+    metrics,
+    progress,
+    bundles,
+    shared,
+    timing,
+]:
     router.include_router(mod.router)

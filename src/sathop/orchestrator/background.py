@@ -338,7 +338,9 @@ async def _enter_wave(s, r: Rollout, wave_index: int, now) -> None:
     r.wave_deadline_at = now + timedelta(seconds=r.wave_timeout_sec)
     r.updated_at = now
     await log_event(
-        s, "operator", f"rollout v{r.target_version}: {_WAVE_LABELS[wave_index]} wave → {len(members)} worker(s)"
+        s,
+        "operator",
+        f"rollout v{r.target_version}: {_WAVE_LABELS[wave_index]} wave → {len(members)} worker(s)",
     )
 
 
@@ -367,7 +369,9 @@ async def advance_rollout() -> bool:
         if r.wave_deadline_at is not None and now >= r.wave_deadline_at:
             r.phase, r.updated_at = "halted", now
             r.halt_reason = f"{_WAVE_LABELS[r.wave_index]} wave timed out; unconfirmed: {', '.join(pending)}"
-            await log_event(s, "operator", f"rollout v{r.target_version} HALTED — {r.halt_reason}", level="warn")
+            await log_event(
+                s, "operator", f"rollout v{r.target_version} HALTED — {r.halt_reason}", level="warn"
+            )
             await commit_and_publish(s, Scope.ROLLOUT)
             return True
         return False  # still waiting within the window — no change

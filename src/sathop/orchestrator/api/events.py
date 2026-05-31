@@ -28,7 +28,18 @@ async def recent_events(
     level: str | None = Query(default=None, description="'warn' or 'error' to narrow"),
     s: AsyncSession = Depends(session),
 ) -> list[dict]:
-    kw = dict(
+    if db.is_postgres():
+        return await event_store.query_db(
+            s,
+            limit=limit,
+            since_id=since_id,
+            before_id=before_id,
+            batch_id=batch_id,
+            granule_id=granule_id,
+            source=source,
+            level=level,
+        )
+    return event_store.query(
         limit=limit,
         since_id=since_id,
         before_id=before_id,
@@ -37,9 +48,6 @@ async def recent_events(
         source=source,
         level=level,
     )
-    if db.is_postgres():
-        return await event_store.query_db(s, **kw)
-    return event_store.query(**kw)
 
 
 @router.get("/workers")

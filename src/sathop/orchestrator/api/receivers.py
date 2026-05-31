@@ -126,8 +126,9 @@ async def _record_pull_failure(
 ) -> bool:
     """Bump the object's failed-pull counter and log it; return whether it's now
     exhausted (>= max_pull_failures). Shared by /ack and /ack/batch."""
-    obj.failed_pulls = (obj.failed_pulls or 0) + 1
-    exhausted = obj.failed_pulls >= settings.max_pull_failures
+    count = (obj.failed_pulls or 0) + 1
+    obj.failed_pulls = count
+    exhausted = count >= settings.max_pull_failures
     await log(
         s,
         receiver_id,
