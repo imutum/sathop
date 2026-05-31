@@ -222,6 +222,12 @@ async def main() -> None:
     ap.add_argument("--tag", default="", help="disambiguates the batch id + node ids for parallel drivers")
     ap.add_argument("--batch", action="store_true", help="emit events via /events/batch (new buffered worker)")
     ap.add_argument("--seed-only", action="store_true")
+    # Opt-in SLA gates (turn the measurement into a CI pass/fail). The health p95
+    # ceiling is the runner-robust signal: a blocked event loop spikes it ~100×.
+    ap.add_argument("--max-health-p95-ms", type=float, default=0.0, help="fail if /api/health p95 exceeds this (0=off)")
+    ap.add_argument("--max-health-max-ms", type=float, default=0.0, help="fail if /api/health max exceeds this (0=off)")
+    ap.add_argument("--max-errors", type=int, default=-1, help="fail if client errors exceed this (-1=off)")
+    ap.add_argument("--min-delivered", type=int, default=0, help="fail if fewer granules delivered (0=off; catches starvation)")
     a = ap.parse_args()
 
     tag = a.tag or "0"
@@ -280,11 +286,31 @@ async def main() -> None:
     print(f"delivered={done} in {elapsed:.1f}s  →  {done / elapsed * 60:.1f}/min", flush=True)
     print(f"events={st.events} acks={st.acks} deletes={st.deletes} errors={st.errors}", flush=True)
     h = st.health
+    p95 = pct(h, 0.95)
+    hmax = max(h) if h else 0.0
     print(
         f"health latency (n={len(h)}): p50={pct(h, 0.5):.1f}ms "
-        f"p95={pct(h, 0.95):.1f}ms p99={pct(h, 0.99):.1f}ms max={max(h) if h else 0:.1f}ms",
+        f"p95={p95:.1f}ms p99={pct(h, 0.99):.1f}ms max={hmax:.1f}ms",
         flush=True,
     )
+
+    gates = a.max_health_p95_ms or a.max_health_max_ms or a.max_errors >= 0 or a.min_delivered
+    if gates:
+        failures = []
+        if a.max_health_p95_ms and p95 > a.max_health_p95_ms:
+            failures.append(f"health p95 {p95:.1f}ms > {a.max_health_p95_ms:.0f}ms (event loop likely blocked)")
+        if a.max_health_max_ms and hmax > a.max_health_max_ms:
+            failures.append(f"health max {hmax:.1f}ms > {a.max_health_max_ms:.0f}ms")
+        if a.max_errors >= 0 and st.errors > a.max_errors:
+            failures.append(f"errors {st.errors} > {a.max_errors}")
+        if a.min_delivered and done < a.min_delivered:
+            failures.append(f"delivered {done} < {a.min_delivered} (starvation/deadlock)")
+        if failures:
+            print("\n=== GATE FAILED ===", flush=True)
+            for f in failures:
+                print(f"  x {f}", flush=True)
+            sys.exit(1)
+        print("\n=== GATE PASSED ===", flush=True)
 
 
 if __name__ == "__main__":

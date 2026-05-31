@@ -99,6 +99,65 @@ jobs:
         env:
           PYTHONUNBUFFERED: "1"
 
+  e2e-scale:
+    # The single-process SQLite `tests` job cannot catch the multi-process +
+    # Postgres regression class (event-loop blocking from sync calls on the loop
+    # or unbounded read-path scans — the 0.9.0/0.9.1 health spikes that a
+    # single-process preview missed). Boot a REAL multi-process orchestrator
+    # against a Postgres service and drive the full pending→delivered pipeline at
+    # volume while sampling /api/health: a blocked loop spikes p95 ~100×.
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sathop
+          POSTGRES_PASSWORD: sathop
+          POSTGRES_DB: sathop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sathop -d sathop"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      SATHOP_DATABASE_URL: postgresql+asyncpg://sathop:sathop@localhost:5432/sathop
+      SATHOP_ORCH_WORKERS: "2"
+      SATHOP_PORT: "8000"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.11"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Sync orchestrator deps
+        run: uv sync --extra orchestrator
+      - name: Boot multi-process orchestrator + pipeline load test + /api/health gate
+        run: |
+          set -e
+          uv run sathop-orchestrator > orch.log 2>&1 &
+          for i in $(seq 1 40); do
+            curl -fsS http://127.0.0.1:8000/api/health >/dev/null 2>&1 && break || sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/api/health >/dev/null \
+            || { echo "orchestrator did not become healthy"; cat orch.log; exit 1; }
+          # Guard against silent single-process degrade: run() forces workers=1
+          # unless a Postgres URL is active, so <2 server processes means the
+          # multi-process/PG path we mean to exercise never engaged.
+          n=$(grep -c "Started server process" orch.log || true)
+          echo "uvicorn server processes: $n"
+          test "$n" -ge 2 || { echo "not multi-process (got $n) — Postgres path inactive"; cat orch.log; exit 1; }
+          uv run python scripts/loadtest_orch.py \
+            --pg "$SATHOP_DATABASE_URL" --orch http://127.0.0.1:8000 \
+            --granules 3000 --workers 12 --receivers 3 --duration 60 --batch \
+            --max-health-p95-ms 3000 --max-health-max-ms 10000 --max-errors 100 --min-delivered 300
+      - name: Orchestrator log tail
+        if: always()
+        run: tail -n 80 orch.log || true
+
   frontend-build:
     runs-on: ubuntu-latest
     timeout-minutes: 5
