@@ -4,7 +4,11 @@ import type { GranuleState } from "@/api";
 import { stateLabel } from "@/i18n";
 import { pipelineSegments, pipelineTotals } from "@/features/batch/pipelineSummary";
 
-const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
+// `detailed` adds the per-state legend (the bottleneck locator operators read on
+// the batch-detail page). The overview omits it: the 4 rollup chips already carry
+// those numbers (待分配 is identical; the rest are this legend summed), so showing
+// both there is pure duplication.
+const props = defineProps<{ counts: Partial<Record<GranuleState, number>>; detailed?: boolean }>();
 
 // Stage colors stay local because they are presentation-only, not pipeline
 // semantics. Each literal hue carries a `dark:` shift one shade lighter so
@@ -97,7 +101,7 @@ const chips = computed(() => [
       </div>
     </div>
 
-    <div v-if="segments.length > 0" class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+    <div v-if="detailed && segments.length > 0" class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
       <span
         v-for="seg in segments"
         :key="seg.state"

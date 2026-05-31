@@ -14,7 +14,7 @@ const etaSeconds = computed(() => props.summary.eta_realtime);
 
 <template>
   <div class="space-y-5">
-    <PipelineHealth :counts="summary.counts" />
+    <PipelineHealth :counts="summary.counts" :detailed="true" />
     <DeliveryStats :throughput-per-min="summary.throughput_per_min" :eta-seconds="etaSeconds" />
   </div>
 </template>
