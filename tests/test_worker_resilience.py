@@ -22,7 +22,7 @@ from sathop.shared.protocol import (
 from sathop.worker.agent import OrchestratorClient
 from sathop.worker.cleanup import prune_work_dir_orphans
 from sathop.worker.config import Settings
-from sathop.worker.runtime import Worker
+from sathop.worker.runtime import LEASE_MAX_BACKOFF_FACTOR, Worker
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -288,7 +288,9 @@ async def test_lease_empty_grows_then_resets_backoff(tmp_path):
             await task
         except asyncio.CancelledError:
             pass
-        assert w._empty_backoff_factor >= 4  # decayed across empty polls
+        # decayed across empty polls, but never past the cap (cap-agnostic so the
+        # assertion survives tuning LEASE_MAX_BACKOFF_FACTOR)
+        assert 2 <= w._empty_backoff_factor <= LEASE_MAX_BACKOFF_FACTOR
 
         # A lease that returns work resets the factor to base. The second call
         # parks forever so no follow-up empty poll bumps it back up.

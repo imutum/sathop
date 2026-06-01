@@ -41,10 +41,34 @@ services:
     image: postgres:16-alpine
     profiles: ["scale"]
     restart: unless-stopped
+    # Docker's default /dev/shm is 64MB; parallel VACUUM / large sorts spill there
+    # and fail with "No space left on device". 256MB is ample for this workload.
+    shm_size: "256mb"
     environment:
       POSTGRES_USER: ${SATHOP_PG_USER:-sathop}
       POSTGRES_PASSWORD: ${SATHOP_PG_PASSWORD:?set SATHOP_PG_PASSWORD in .env to enable multi-process}
       POSTGRES_DB: ${SATHOP_PG_DB:-sathop}
+    # Conservative GUCs for a small shared box (memory-tight). Per-table autovacuum
+    # aggressiveness + fillfactor live in code (db.py::_ensure_pg_table_tuning) so
+    # they survive a fresh-PG migration; these are the cluster-wide knobs.
+    # idle_in_transaction_session_timeout is a belt-and-suspenders backstop: the
+    # leader idle-in-txn leak that pinned xmin is fixed in code, but any future
+    # stray long-lived transaction gets reaped after 5min instead of bloating the
+    # heap. Override any of these via SATHOP_PG_* in .env.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=${SATHOP_PG_SHARED_BUFFERS:-256MB}"
+      - "-c"
+      - "effective_cache_size=${SATHOP_PG_EFFECTIVE_CACHE:-2GB}"
+      - "-c"
+      - "work_mem=${SATHOP_PG_WORK_MEM:-8MB}"
+      - "-c"
+      - "maintenance_work_mem=${SATHOP_PG_MAINT_WORK_MEM:-128MB}"
+      - "-c"
+      - "random_page_cost=1.1"
+      - "-c"
+      - "idle_in_transaction_session_timeout=${SATHOP_PG_IDLE_TXN_TIMEOUT_MS:-300000}"
     volumes:
       - ./pgdata:/var/lib/postgresql/data
     healthcheck:

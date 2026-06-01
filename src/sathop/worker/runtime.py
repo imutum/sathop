@@ -38,7 +38,12 @@ class WorkerRemoved(BaseException):
     """Inherits BaseException so run_periodic's `except Exception` won't swallow it."""
 
 
-LEASE_MAX_BACKOFF_FACTOR = 6
+# Empty-poll backoff caps at 3× lease_poll_interval (was 6×). A worker that gets
+# an empty lease while 100k+ granules are pending isn't truly idle — it just lost
+# a SKIP-LOCKED race to a sibling process or hit a transient orch CPU stall, so a
+# full 60s sit-out (6×10s) needlessly starved the fleet. 3× (~30s) still throttles
+# a genuinely-idle fleet off /lease without leaving work unclaimed for a minute.
+LEASE_MAX_BACKOFF_FACTOR = 3
 DRAIN_WATCHDOG_TIMEOUT_SEC = 60
 EXIT_CODE_REMOVED = 42
 

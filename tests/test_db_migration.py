@@ -9,7 +9,30 @@ import sqlite3
 
 from sqlalchemy import create_engine, insert, inspect, text
 
-from sathop.orchestrator.db import Base, Worker, _drop_obsolete_tables, _ensure_columns
+from sathop.orchestrator.db import (
+    Base,
+    Worker,
+    _drop_obsolete_tables,
+    _engine_kwargs,
+    _ensure_columns,
+)
+
+
+def test_engine_kwargs_sqlite_path_is_minimal():
+    """SQLite (single-process MVP) gets no pool/connect_args — byte-identical to
+    the pre-tuning engine, so the default path is untouched."""
+    kw = _engine_kwargs(False)
+    assert kw == {"echo": False, "future": True}
+    assert "connect_args" not in kw and "pool_size" not in kw
+
+
+def test_engine_kwargs_postgres_adds_jit_off_and_bounded_pool():
+    """Postgres (multi-process) disables JIT (repeated planning CPU on the hot
+    lease/IN queries) and pins a bounded, pre-pinged pool."""
+    kw = _engine_kwargs(True)
+    assert kw["connect_args"]["server_settings"]["jit"] == "off"
+    assert kw["pool_size"] == 5 and kw["max_overflow"] == 10
+    assert kw["pool_pre_ping"] is True and kw["pool_recycle"] == 1800
 
 
 def test_ensure_columns_drops_obsolete_not_null_column(tmp_path):

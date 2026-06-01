@@ -367,10 +367,36 @@ def _set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
 _SCHEMA_LOCK_KEY = 0x5A7409
 
 
+def _engine_kwargs(pg: bool) -> dict:
+    """create_async_engine kwargs. The SQLite (single-process MVP) path stays
+    byte-identical; the Postgres (multi-process) path adds two CPU/contention
+    levers that only matter once N processes hammer one server:
+      • jit=off — PG16 defaults jit=on and LLVM-compiles the lease
+        `FOR UPDATE SKIP LOCKED` subquery and the bulk `granule_id IN (...)`
+        statements on every call; fired thousands/sec that is pure repeated
+        planning CPU burned on the single bottleneck core. Off is the textbook
+        OLTP setting and is the one lever that also helps the *un-batchable*
+        lease/heartbeat handlers the batch endpoints can't touch.
+      • a bounded, pre-pinged pool — keeps total backends well under PG's
+        max_connections across the N orchestrator processes (each also holds a
+        few raw asyncpg connections for LISTEN / NOTIFY-sender / leader);
+        pool_pre_ping + pool_recycle survive a Postgres restart without handing
+        out a dead connection. Defaults match SQLAlchemy's async pool but are
+        pinned explicitly so the per-process backend budget is auditable."""
+    kw: dict = {"echo": False, "future": True}
+    if pg:
+        kw["connect_args"] = {"server_settings": {"jit": "off"}}
+        kw["pool_size"] = 5
+        kw["max_overflow"] = 10
+        kw["pool_pre_ping"] = True
+        kw["pool_recycle"] = 1800
+    return kw
+
+
 async def init_db() -> None:
     global _engine, _session_maker
     pg = is_postgres()
-    _engine = create_async_engine(_url(), echo=False, future=True)
+    _engine = create_async_engine(_url(), **_engine_kwargs(pg))
     if not pg:
         event.listen(_engine.sync_engine, "connect", _set_sqlite_pragmas)
     _session_maker = async_sessionmaker(_engine, expire_on_commit=False)
@@ -383,6 +409,8 @@ async def init_db() -> None:
         await conn.run_sync(_ensure_columns)
         await conn.run_sync(_ensure_indexes)
         await conn.run_sync(_drop_obsolete_tables)
+        if pg:
+            await conn.run_sync(_ensure_pg_table_tuning)
         if not pg:
             # Refresh planner stats so the partial idx_granule_objects_pending is
             # actually chosen — SQLite ignores an index with no sqlite_stat1 row.
@@ -485,6 +513,63 @@ def _drop_obsolete_tables(sync_conn) -> None:
             log.info("dropped obsolete table %s", name)
         except Exception:
             log.exception("failed to drop obsolete table %s", name)
+
+
+# Per-table storage + autovacuum tuning for the high-churn hot tables (Postgres
+# only). This is the code-resident form of the emergency mitigation applied BY
+# HAND during the 2026-06-01 meltdown and observed to stabilise dead tuples
+# (batches ~53 / granules ~970 steady-state afterward): a long
+# idle-in-transaction leader had pinned the xmin horizon, autovacuum could
+# reclaim nothing, and the handful of red-hot `batches` rows (delivered_count++
+# on every delivery) bloated into a tuple-chain deadlock storm. The hand-applied
+# reloptions did NOT survive a redeploy / fresh-PG migration; pinning them here
+# means every boot re-asserts them idempotently via `ALTER TABLE ... SET`.
+#   - small, extremely hot rows (heartbeat telemetry, delivered_count, receiver
+#     state): fillfactor leaves in-page room for HOT updates (these columns are
+#     un-indexed -> HOT-eligible) and autovacuum fires on a tiny absolute count
+#     instead of waiting for ~20% of the table to die.
+#   - large high-churn tables: lower the scale factor so autovacuum keeps pace
+#     with the state-transition UPDATE stream. NO fillfactor (the dominant UPDATE
+#     touches the indexed `updated_at`, so the row can't go HOT, and rewriting a
+#     multi-GB heap is not worth it) and cost_delay left at the PG default so a
+#     big-table vacuum can't hog the shared box's cores away from the orch loop.
+# Reloptions apply to FUTURE tuples only, so the pre-existing bloated tables
+# still need a separately-scheduled one-time VACUUM FULL / pg_repack.
+_PG_SMALL_HOT = (
+    "fillfactor=70, autovacuum_vacuum_scale_factor=0.0, autovacuum_vacuum_threshold=100, "
+    "autovacuum_analyze_scale_factor=0.0, autovacuum_analyze_threshold=100, autovacuum_vacuum_cost_delay=0"
+)
+_PG_BIG_HOT = (
+    "autovacuum_vacuum_scale_factor=0.05, autovacuum_vacuum_threshold=5000, "
+    "autovacuum_analyze_scale_factor=0.05, autovacuum_analyze_threshold=5000"
+)
+_PG_TABLE_TUNING = {
+    "workers": _PG_SMALL_HOT,
+    "batches": _PG_SMALL_HOT,
+    "receivers": _PG_SMALL_HOT,
+    "granules": _PG_BIG_HOT,
+    "granule_objects": _PG_BIG_HOT,
+}
+
+
+def _ensure_pg_table_tuning(sync_conn) -> None:
+    """Idempotently re-assert the per-table storage/autovacuum reloptions above.
+    `ALTER TABLE ... SET (...)` is a catalog-only change (no table rewrite), runs
+    under the boot schema advisory lock alongside the other reconciliation steps,
+    and is safe to repeat on every boot. A failed SET is logged, not fatal — a
+    missing reloption degrades to PG defaults, it doesn't break the orchestrator."""
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import text
+
+    log = logging.getLogger("sathop.orchestrator.db")
+    present = set(sa_inspect(sync_conn).get_table_names())
+    for table_name, opts in _PG_TABLE_TUNING.items():
+        if table_name not in present:
+            continue
+        try:
+            sync_conn.execute(text(f'ALTER TABLE "{table_name}" SET ({opts})'))
+        except Exception:
+            log.exception("failed to set storage tuning on %s", table_name)
 
 
 async def shutdown_db() -> None:
