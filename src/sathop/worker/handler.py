@@ -246,17 +246,17 @@ class GranuleHandler:
             if pct is not None:
                 last_pct = pct
             done = is_final
-            try:
-                await self.client.report_progress(
-                    gid,
-                    ProgressEvent(
-                        step=f"download:{filename}",
-                        pct=pct,
-                        detail=downloader.progress_detail(downloaded, total),
-                        batch_id=batch_id,
-                    ),
-                )
-            except Exception as e:
-                log.debug("[%s] download progress emit failed: %s", gid, e)
+            # Non-blocking enqueue into the shared progress buffer (via the same
+            # funnel the bundle uses), coalesced with every other granule's ticks
+            # into one batched POST per flush — never awaits the orchestrator.
+            self.progress.forward(
+                gid,
+                ProgressEvent(
+                    step=f"download:{filename}",
+                    pct=pct,
+                    detail=downloader.progress_detail(downloaded, total),
+                    batch_id=batch_id,
+                ),
+            )
 
         return cb

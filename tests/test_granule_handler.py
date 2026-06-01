@@ -19,8 +19,8 @@ from sathop.worker.stages import WorkerStages
 
 
 class _FakeClient:
-    async def report_progress(self, granule_id, event) -> None:
-        pass
+    """Placeholder collaborator. The handler stores it but no longer calls it for
+    progress (that goes through the ProgressServer sink), so nothing is stubbed."""
 
 
 class _FakeEvents:
@@ -80,7 +80,13 @@ def _handler(
     s = _settings(tmp_path)
     s.work_root.mkdir(parents=True, exist_ok=True)
     return GranuleHandler(
-        s, client, _FakeDownloader(), storage, ProgressServer(client, port=0), WorkerStages(), events
+        s,
+        client,
+        _FakeDownloader(),
+        storage,
+        ProgressServer(lambda _gid, _ev: None, port=0),  # progress sink: no-op here
+        WorkerStages(),
+        events,
     )
 
 

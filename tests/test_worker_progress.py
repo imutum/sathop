@@ -8,20 +8,23 @@ from sathop.shared.protocol import ProgressEvent
 from sathop.worker.progress import ProgressServer
 
 
-class _FakeClient:
+class _Sink:
+    """Stand-in for ProgressBuffer.enqueue_event — a non-blocking callable that
+    collects forwarded checkpoints (or raises, to prove the server swallows it)."""
+
     def __init__(self, *, fail: bool = False) -> None:
         self.calls: list[tuple[str, ProgressEvent]] = []
         self._fail = fail
 
-    async def report_progress(self, granule_id: str, event: ProgressEvent) -> None:
+    def __call__(self, granule_id: str, event: ProgressEvent) -> None:
         if self._fail:
-            raise RuntimeError("upstream down")
+            raise RuntimeError("buffer error")
         self.calls.append((granule_id, event))
 
 
-def _server(client=None) -> tuple[ProgressServer, TestClient]:
-    fc = client or _FakeClient()
-    srv = ProgressServer(fc, port=0)  # port unused: we drive via TestClient
+def _server(sink=None) -> tuple[ProgressServer, TestClient]:
+    s = sink or _Sink()
+    srv = ProgressServer(s, port=0)  # port unused: we drive via TestClient
     return srv, TestClient(srv.app)
 
 
@@ -33,8 +36,8 @@ def test_valid_nonce_forwards_event():
     r = tc.post(f"/progress/{nonce}", json={"step": "read", "pct": 20})
     assert r.status_code == 200
     assert r.json() == {"ok": True}
-    assert len(srv._client.calls) == 1  # type: ignore[attr-defined]
-    gid, evt = srv._client.calls[0]  # type: ignore[attr-defined]
+    assert len(srv._sink.calls) == 1  # type: ignore[attr-defined]
+    gid, evt = srv._sink.calls[0]  # type: ignore[attr-defined]
     assert gid == "g-abc"
     assert evt.step == "read"
     assert evt.pct == 20
@@ -74,10 +77,11 @@ def test_missing_step_returns_422():
     assert r.status_code == 422
 
 
-def test_upstream_failure_still_returns_200():
-    """Bundle's progress report must NOT fail because orchestrator is briefly down —
-    that would corrupt the bundle's own error handling."""
-    srv, tc = _server(client=_FakeClient(fail=True))
+def test_sink_failure_still_returns_200():
+    """Bundle's progress report must NOT fail because the sink raised (e.g. the
+    buffer is briefly unhappy) — that would corrupt the bundle's own error
+    handling. The server swallows sink errors in `forward()`."""
+    srv, tc = _server(sink=_Sink(fail=True))
     _, url = srv.issue("g-abc", "b1")
     nonce = url.rsplit("/", 1)[-1]
     r = tc.post(f"/progress/{nonce}", json={"step": "read"})

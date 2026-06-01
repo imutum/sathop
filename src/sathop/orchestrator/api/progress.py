@@ -21,7 +21,7 @@ from collections.abc import Iterable
 
 from fastapi import APIRouter, Depends
 
-from sathop.shared.protocol import ProgressEvent
+from sathop.shared.protocol import ProgressBatch, ProgressEvent
 
 from ..config import require_token
 from ..db import utcnow
@@ -71,8 +71,10 @@ def _clear() -> None:
     _latest_by_batch.clear()
 
 
-@router.post("/granules/{granule_id}/progress")
-async def ingress(granule_id: str, event: ProgressEvent) -> dict:
+def _ingest(granule_id: str, event: ProgressEvent) -> None:
+    """Append one checkpoint to the in-memory timeline + per-batch latest index.
+    Shared by the single (/progress) and batch (/progress/batch) ingress paths;
+    never publishes (the caller decides how many nudges to fan out)."""
     batch_id = event.batch_id or ""
     entry = _make_entry(granule_id, batch_id, event)
     timeline = _by_granule.setdefault(granule_id, [])
@@ -82,6 +84,27 @@ async def ingress(granule_id: str, event: ProgressEvent) -> dict:
         timeline[-1] = entry
     if batch_id:
         _latest_by_batch.setdefault(batch_id, {})[granule_id] = entry
+
+
+@router.post("/granules/progress/batch")
+async def ingress_batch(batch: ProgressBatch) -> dict:
+    """Batched twin of /granules/{id}/progress: a worker's coalesced checkpoints
+    in ONE request. Pure in-memory appends, then a SINGLE `progress` nudge for the
+    whole batch — so a chatty bundle costs the orchestrator one request + one
+    fan-out per flush instead of one per checkpoint."""
+    for item in batch.items:
+        _ingest(item.granule_id, item.event)
+    if batch.items:
+        publish({"scope": "progress"})
+    return {"ok": True, "n": len(batch.items)}
+
+
+@router.post("/granules/{granule_id}/progress")
+async def ingress(granule_id: str, event: ProgressEvent) -> dict:
+    """Single-checkpoint ingress. Kept alongside the batch endpoint for rolling
+    upgrades (orchestrator upgrades before workers, so a not-yet-upgraded worker
+    still has a path) and direct/manual posts."""
+    _ingest(granule_id, event)
     # Bare {scope} so the nudge rides pubsub's 1s per-scope coalesce window — a
     # burst of progress POSTs collapses to ~1 fan-out/sec instead of one
     # NOTIFY + UI refetch per POST. The UI invalidates the progress queries by

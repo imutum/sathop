@@ -13,7 +13,7 @@ from sathop.shared.protocol import (
     DeletableGranule,
     LeaseRequest,
     LeaseResponse,
-    ProgressEvent,
+    ProgressBatch,
     WorkerEventBatch,
     WorkerEventBatchResponse,
     WorkerHeartbeat,
@@ -43,8 +43,11 @@ class OrchestratorClient(OrchClient):
         r = await self.get(f"/api/workers/deletable/{worker_id}")
         return [DeletableGranule.model_validate(x) for x in r.json()]
 
-    async def report_progress(self, granule_id: str, event: ProgressEvent) -> None:
+    async def report_progress_batch(self, batch: ProgressBatch) -> None:
+        # Display-only checkpoints, coalesced into one POST per flush (see
+        # ProgressBuffer). exclude_none keeps the payload small — most events omit
+        # detail/ts. The orchestrator stores them in memory; never a DB write.
         await self.post(
-            f"/api/granules/{granule_id}/progress",
-            json=event.model_dump(mode="json", exclude_none=True),
+            "/api/granules/progress/batch",
+            json=batch.model_dump(mode="json", exclude_none=True),
         )

@@ -28,6 +28,7 @@ from .config import Settings
 from .event_buffer import EventBuffer
 from .handler import GranuleHandler
 from .progress import ProgressServer
+from .progress_buffer import ProgressBuffer
 from .stages import WorkerStages
 
 log = logging.getLogger("sathop.worker")
@@ -68,7 +69,8 @@ class Worker:
         self._ca_pem: str | None = None
         self._lease_backoff_factor = 1
         self._empty_backoff_factor = 1
-        self.progress = ProgressServer(self.client, port=s.progress_port)
+        self._progress_buf = ProgressBuffer(self.client)
+        self.progress = ProgressServer(self._progress_buf.enqueue_event, port=s.progress_port)
         self._events = EventBuffer(self.client)
         self._handler = GranuleHandler(
             s, self.client, self.downloader, self.storage, self.progress, self.stages, self._events
@@ -167,6 +169,7 @@ class Worker:
         def create_tasks(tg: asyncio.TaskGroup) -> None:
             tg.create_task(self._heartbeat_loop())
             tg.create_task(self._events.loop())
+            tg.create_task(self._progress_buf.loop())
             tg.create_task(self._pipeline_loop())
             tg.create_task(self._janitor_loop())
             tg.create_task(self._backpressure_loop())

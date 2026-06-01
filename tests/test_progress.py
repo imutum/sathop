@@ -72,6 +72,37 @@ async def test_ingress_without_batch_id_still_works(client):
     assert rows[0]["batch_id"] == ""
 
 
+async def test_ingress_batch_stores_all_items_in_order(client):
+    await _seed_batch_and_granule("b1", "g1")
+    r = client.post(
+        "/api/granules/progress/batch",
+        json={
+            "items": [
+                {"granule_id": "g1", "event": {"step": "read", "pct": 10, "batch_id": "b1"}},
+                {"granule_id": "g1", "event": {"step": "resample", "pct": 60, "batch_id": "b1"}},
+                {"granule_id": "g2", "event": {"step": "write", "pct": 90, "batch_id": "b1"}},
+            ]
+        },
+    )
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "n": 3}
+
+    # A granule's own checkpoints keep insertion order in the timeline...
+    g1 = client.get("/api/granules/g1/progress").json()
+    assert [row["step"] for row in g1] == ["read", "resample"]
+    # ...and latest-per-batch reflects the last checkpoint per granule.
+    latest = client.get("/api/batches/b1/progress/latest").json()
+    assert set(latest.keys()) == {"g1", "g2"}
+    assert latest["g1"]["step"] == "resample"
+    assert latest["g2"]["step"] == "write"
+
+
+async def test_ingress_batch_empty_is_noop(client):
+    r = client.post("/api/granules/progress/batch", json={"items": []})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "n": 0}
+
+
 async def test_timeline_returns_rows_in_insertion_order(client):
     for step, pct in [("a", 10), ("b", 50), ("c", 90)]:
         client.post("/api/granules/g1/progress", json={"step": step, "pct": pct, "batch_id": "b1"})

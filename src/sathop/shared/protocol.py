@@ -339,3 +339,20 @@ class ProgressEvent(BaseModel):
     detail: str | None = None
     ts: datetime | None = None
     batch_id: str | None = None
+
+
+class ProgressBatchItem(BaseModel):
+    """One progress checkpoint tagged with its granule, for batched transport."""
+
+    granule_id: str
+    event: ProgressEvent
+
+
+class ProgressBatch(BaseModel):
+    """A worker's buffered progress checkpoints, flushed in one POST. Display-only
+    telemetry coalesced on the worker exactly like transition events: a chatty
+    bundle's per-step reports (and the download callback's per-granule ticks across
+    every in-flight granule) cost the orchestrator one request per flush instead of
+    one per checkpoint. Loss is harmless — never persisted, re-reported in seconds."""
+
+    items: list[ProgressBatchItem] = []

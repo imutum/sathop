@@ -2,30 +2,32 @@
 
 Binds 127.0.0.1:<progress_port>. For each granule we issue a short-lived
 nonce that rides in the URL path — the nonce IS the auth, and it's revoked
-the moment the granule finishes. Events are forwarded to the orchestrator
-via the worker's existing client; forward-failure is swallowed (bundle
-shouldn't care if upstream is briefly down)."""
+the moment the granule finishes. Each checkpoint is handed to a non-blocking
+sink (the worker's `ProgressBuffer`) that coalesces it with every other
+in-flight granule's progress into batched POSTs upstream; the download
+callback's ticks feed the same sink via `forward()`, so this server is the
+single progress funnel. Sink-failure is swallowed (the bundle shouldn't care
+if upstream is briefly down — the buffer owns retry/shedding)."""
 
 from __future__ import annotations
 
 import logging
 import secrets
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 
 from sathop.shared.protocol import ProgressEvent
 
-if TYPE_CHECKING:
-    from .agent import OrchestratorClient
-
 log = logging.getLogger("sathop.worker.progress")
+
+ProgressSink = Callable[[str, ProgressEvent], None]
 
 
 class ProgressServer:
-    def __init__(self, client: OrchestratorClient, port: int, host: str = "127.0.0.1") -> None:
-        self._client = client
+    def __init__(self, sink: ProgressSink, port: int, host: str = "127.0.0.1") -> None:
+        self._sink = sink
         self._port = port
         self._host = host
         self._tokens: dict[str, tuple[str, str]] = {}  # nonce → (granule_id, batch_id)
@@ -51,11 +53,17 @@ class ProgressServer:
             except Exception as e:
                 raise HTTPException(422, f"bad event shape: {e}")
             event.batch_id = batch_id
-            try:
-                await self._client.report_progress(gid, event)
-            except Exception as e:
-                log.warning("forward progress for %s failed: %s", gid, e)
+            self.forward(gid, event)
             return {"ok": True}
+
+    def forward(self, granule_id: str, event: ProgressEvent) -> None:
+        """Hand a checkpoint to the buffer. Non-blocking and best-effort: a sink
+        error is swallowed so neither the bundle's POST nor the download callback
+        is ever broken by progress plumbing."""
+        try:
+            self._sink(granule_id, event)
+        except Exception as e:  # noqa: BLE001
+            log.warning("forward progress for %s failed: %s", granule_id, e)
 
     def issue(self, granule_id: str, batch_id: str) -> tuple[str, str]:
         nonce = secrets.token_urlsafe(16)

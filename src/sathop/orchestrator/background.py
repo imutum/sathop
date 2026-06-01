@@ -5,7 +5,7 @@ import logging
 import math
 from datetime import timedelta
 
-from sqlalchemy import delete, or_, select, text, update
+from sqlalchemy import delete, or_, select, update
 
 from sathop.shared.periodic import run_periodic
 from sathop.shared.state_machine import LEASED_STATES, GranuleState, ReconcileOrphanDeleted, Scope
