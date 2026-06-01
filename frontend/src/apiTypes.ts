@@ -282,6 +282,8 @@ export type OrchestratorInfo = {
   stuck_age_hours: number;
   dev_mode: boolean;
   auth_open: boolean;
+  // Effective fleet reporting detail, toggled at runtime from the Settings page.
+  worker_detail: "verbose" | "fast";
 };
 
 export type StuckGranule = {

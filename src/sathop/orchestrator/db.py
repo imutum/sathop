@@ -327,6 +327,49 @@ Index("idx_stage_timing_batch_stage", GranuleStageTiming.batch_id, GranuleStageT
 Index("idx_stage_timing_stage_finished", GranuleStageTiming.stage, GranuleStageTiming.finished_at)
 
 
+class AppSetting(Base):
+    """Runtime-mutable orchestrator settings flipped from the Web UI (not env/
+    compose). A tiny key→value store: a row, when present, OVERRIDES the matching
+    env-var default, persists across restarts, and — being in the authoritative
+    DB — is shared across every multi-process uvicorn worker. Absence means "use
+    the env default", so we never write at boot (no N-process seed race) and an
+    operator who never touches the UI keeps the env-declared behavior."""
+
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+
+
+# Setting keys live here so the read (heartbeat) and write (admin API) sides
+# can never drift on the string.
+WORKER_DETAIL_KEY = "worker_detail"
+_WORKER_DETAIL_VALUES = ("verbose", "fast")
+
+
+async def get_setting(s: AsyncSession, key: str) -> str | None:
+    """Read a runtime setting; None when no operator override exists."""
+    return await s.scalar(select(AppSetting.value).where(AppSetting.key == key))
+
+
+async def set_setting(s: AsyncSession, key: str, value: str) -> None:
+    """Upsert a runtime setting (caller commits)."""
+    row = await s.get(AppSetting, key)
+    if row is None:
+        s.add(AppSetting(key=key, value=value, updated_at=utcnow()))
+    else:
+        row.value = value
+        row.updated_at = utcnow()
+
+
+async def get_worker_detail(s: AsyncSession) -> str:
+    """Effective fleet reporting detail: the operator's UI override if set and
+    valid, else the ``SATHOP_WORKER_DETAIL`` env default. This is what the
+    heartbeat reply pushes to every worker."""
+    v = await get_setting(s, WORKER_DETAIL_KEY)
+    return v if v in _WORKER_DETAIL_VALUES else settings.worker_detail
+
+
 _engine = None
 _session_maker: async_sessionmaker[AsyncSession] | None = None
 

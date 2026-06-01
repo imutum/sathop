@@ -12,6 +12,7 @@ import CardSection from "@/components/CardSection.vue";
 import Field from "@/components/Field.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RolloutPanel from "@/components/RolloutPanel.vue";
+import Segmented from "@/components/Segmented.vue";
 import { Icon } from "@/components/Icon";
 
 const toast = useToast();
@@ -51,6 +52,37 @@ const dotClass = computed(() => {
 });
 
 const busy = ref(false);
+
+// ── fleet reporting detail (runtime toggle) ───────────────────────────────
+// Optimistic: `pendingDetail` shows the operator's pick immediately, then
+// clears once the refetch confirms server truth (or reverts on error). No
+// watcher loop — the getter just prefers the pending value over the query.
+const detailBusy = ref(false);
+const pendingDetail = ref<"verbose" | "fast" | null>(null);
+const detail = computed<string>({
+  get: () => pendingDetail.value ?? info.data.value?.worker_detail ?? "verbose",
+  set: (v) => void applyDetail(v as "verbose" | "fast"),
+});
+
+async function applyDetail(next: "verbose" | "fast") {
+  if (next === (info.data.value?.worker_detail ?? "verbose")) return;
+  pendingDetail.value = next;
+  detailBusy.value = true;
+  try {
+    await API.setWorkerDetail(next);
+    await info.refetch();
+    toast.success(
+      next === "fast"
+        ? "已切换为极速模式 · 下次心跳起全机群只报终态"
+        : "已切换为详细模式 · 下次心跳起全机群恢复逐阶段上报",
+    );
+  } catch (e: any) {
+    toast.error(`切换失败：${e.message ?? e}`);
+  } finally {
+    pendingDetail.value = null;
+    detailBusy.value = false;
+  }
+}
 
 async function confirmUpgrade() {
   const target = latestTag.value.replace(/^v/, "");
@@ -186,6 +218,55 @@ async function confirmRestart() {
         </Field>
       </div>
       <div v-else class="py-6 text-sm text-muted-foreground">加载中…</div>
+    </CardSection>
+
+    <CardSection
+      title="上报详细程度"
+      description="控制全机群 worker 向 Orchestrator 回报的粒度——运行时切换，下次心跳起对所有 worker 生效，无需重启 orch 或 worker"
+    >
+      <div class="space-y-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <Segmented
+            v-model="detail"
+            :options="[
+              { value: 'verbose', label: '详细' },
+              { value: 'fast', label: '极速' },
+            ]"
+            aria-label="worker 上报详细程度"
+          />
+          <span
+            v-if="detailBusy"
+            class="flex items-center gap-1.5 text-2xs text-muted-foreground"
+          >
+            <Icon name="refresh" :size="12" class="animate-spin" />
+            应用中…
+          </span>
+        </div>
+        <dl class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div
+            class="rounded-lg border p-3 transition-colors"
+            :class="detail === 'verbose' ? 'border-foreground/20 bg-muted/40' : 'border-border'"
+          >
+            <dt class="text-xs font-medium text-foreground">
+              详细 <span class="font-mono text-2xs text-muted-foreground">verbose</span>
+            </dt>
+            <dd class="mt-1 text-2xs leading-relaxed text-muted-foreground">
+              每阶段都上报路标（开始下载、开始处理）+ 实时进度。初期验证、排查问题时用——面板能看到逐阶段 WIP（下载中 / 处理中 / 上传中）。
+            </dd>
+          </div>
+          <div
+            class="rounded-lg border p-3 transition-colors"
+            :class="detail === 'fast' ? 'border-foreground/20 bg-muted/40' : 'border-border'"
+          >
+            <dt class="text-xs font-medium text-foreground">
+              极速 <span class="font-mono text-2xs text-muted-foreground">fast</span>
+            </dt>
+            <dd class="mt-1 text-2xs leading-relaxed text-muted-foreground">
+              跳过路标与进度，只报终态（仍携带各阶段实测时长）。大规模放量时用——每数据粒的 Orchestrator 写入更少、吞吐更高，代价是丢失实时逐阶段 WIP 可见性。
+            </dd>
+          </div>
+        </dl>
+      </div>
     </CardSection>
 
     <CardSection

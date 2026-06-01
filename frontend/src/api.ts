@@ -63,6 +63,11 @@ const adminApi = {
   inFlight: (limit = 50) => getJson<InFlightRow[]>(`/api/admin/in-flight?limit=${limit}`),
   stuck: (limit = 50) => getJson<StuckGranule[]>(`/api/admin/stuck?limit=${limit}`),
   orchestratorInfo: () => getJson<OrchestratorInfo>("/api/admin/settings/info"),
+  // Flip the fleet-wide reporting detail at runtime (persisted in the DB, shared
+  // across all orch processes). Each worker honors it on its next heartbeat —
+  // no orch or worker restart.
+  setWorkerDetail: (detail: "verbose" | "fast") =>
+    postJson<{ detail: "verbose" | "fast" }>("/api/admin/settings/worker-detail", { detail }),
   // Upgrade to a specific release: the orchestrator writes .pending-version and
   // self-restarts; the entrypoint installs that version's self-contained bundle
   // (backend + matching frontend) on the next boot. Restart = same-version.

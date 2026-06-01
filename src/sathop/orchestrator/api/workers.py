@@ -31,7 +31,7 @@ from sathop.shared.versioning import parse_version
 
 from .. import telemetry
 from ..config import require_token, settings
-from ..db import Granule, GranuleObject, Worker, session, utcnow
+from ..db import Granule, GranuleObject, Worker, get_worker_detail, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import all_objects_acked, get_or_404
@@ -160,7 +160,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         update_to_version=update_to_version,
         operator_paused=bool(w.operator_paused),
         gc_requested=gc_requested,
-        detail=settings.worker_detail,
+        detail=await get_worker_detail(s),
     )
 
 

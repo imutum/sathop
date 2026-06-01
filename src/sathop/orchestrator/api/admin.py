@@ -9,7 +9,7 @@ import signal
 import sys
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,7 +23,18 @@ from sathop.shared.release import normalize_version, write_pending_version
 from sathop.shared.state_machine import GranuleState, RequeueGranule, Scope
 
 from ..config import require_token, settings
-from ..db import Batch, Bundle, Granule, GranuleObject, is_postgres, session, utcnow
+from ..db import (
+    WORKER_DETAIL_KEY,
+    Batch,
+    Bundle,
+    Granule,
+    GranuleObject,
+    get_worker_detail,
+    is_postgres,
+    session,
+    set_setting,
+    utcnow,
+)
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import object_is_exhausted, object_is_pullable
@@ -119,6 +130,10 @@ class OrchestratorInfo(BaseModel):
     stuck_age_hours: float
     dev_mode: bool
     auth_open: bool
+    # Effective fleet reporting detail (runtime, toggled from this page). The env
+    # var SATHOP_WORKER_DETAIL is only the initial default; the operator's UI
+    # choice (persisted in the DB) overrides it from here on.
+    worker_detail: str
 
 
 @router.post("/gc/bundles")
@@ -507,7 +522,7 @@ async def restart_orchestrator(s: AsyncSession = Depends(session)) -> dict:
 
 
 @router.get("/settings/info", response_model=OrchestratorInfo)
-async def orchestrator_info() -> OrchestratorInfo:
+async def orchestrator_info(s: AsyncSession = Depends(session)) -> OrchestratorInfo:
     return OrchestratorInfo(
         version=__version__,
         python_version=sys.version.split()[0],
@@ -522,4 +537,26 @@ async def orchestrator_info() -> OrchestratorInfo:
         stuck_age_hours=STUCK_AGE_HOURS,
         dev_mode=settings.dev,
         auth_open=not settings.token,
+        worker_detail=await get_worker_detail(s),
     )
+
+
+class WorkerDetailUpdate(BaseModel):
+    detail: Literal["verbose", "fast"]
+
+
+@router.post("/settings/worker-detail")
+async def set_worker_detail_setting(body: WorkerDetailUpdate, s: AsyncSession = Depends(session)) -> dict:
+    """Flip the fleet-wide reporting detail at runtime (no restart). Persisted in
+    the DB so it survives restarts, is shared across all multi-process workers,
+    and overrides the SATHOP_WORKER_DETAIL env default. Each worker honors the
+    new value on its next heartbeat (≤ one heartbeat interval) — no worker
+    restart. "verbose" reports every per-stage waypoint + progress (best for
+    bring-up / debugging); "fast" reports only the terminal upload (still
+    carrying the measured stage durations), cutting per-granule orchestrator
+    writes at scale at the cost of live per-stage WIP visibility."""
+    await set_setting(s, WORKER_DETAIL_KEY, body.detail)
+    label = "极速" if body.detail == "fast" else "详细"
+    await log(s, "operator", f"机群上报详细程度切换为「{label}」（下次心跳起生效，无需重启 worker）")
+    await commit_and_publish(s, Scope.WORKERS)
+    return {"detail": body.detail}
