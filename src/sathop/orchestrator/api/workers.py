@@ -160,6 +160,7 @@ async def heartbeat(req: WorkerHeartbeat, s: AsyncSession = Depends(session)) ->
         update_to_version=update_to_version,
         operator_paused=bool(w.operator_paused),
         gc_requested=gc_requested,
+        detail=settings.worker_detail,
     )
 
 

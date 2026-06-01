@@ -70,6 +70,10 @@ class Worker:
         self._handlers: dict[str, asyncio.Task[None]] = {}
         self._live_download = s.download_concurrency
         self._live_process = s.process_concurrency
+        # Detail mode, pushed from the orchestrator heartbeat. Start verbose; the
+        # first heartbeat reconciles it. Mirrored onto the handler (gates the
+        # waypoint events) and the progress server (gates display progress).
+        self._verbose = True
         self._reconfiguring = False
         self._ca_pem: str | None = None
         self._lease_backoff_factor = 1
@@ -78,7 +82,14 @@ class Worker:
         self.progress = ProgressServer(self._progress_buf.enqueue_event, port=s.progress_port)
         self._events = EventBuffer(self.client)
         self._handler = GranuleHandler(
-            s, self.client, self.downloader, self.storage, self.progress, self.stages, self._events
+            s,
+            self.client,
+            self.downloader,
+            self.storage,
+            self.progress,
+            self.stages,
+            self._events,
+            verbose=self._verbose,
         )
         for path in (s.work_root, s.bundle_cache, s.venv_cache, s.shared_cache, s.storage_root):
             path.mkdir(parents=True, exist_ok=True)
@@ -259,6 +270,20 @@ class Worker:
                 log.info("[%s] cancelling handler — orchestrator revoked lease", gid)
                 task.cancel()
         self._reconcile_concurrency(resp.download_concurrency, resp.process_concurrency)
+        self._reconcile_detail(resp.detail)
+
+    def _reconcile_detail(self, detail: str | None) -> None:
+        """Apply the orchestrator's pushed detail mode in place. Only an explicit
+        "fast" flips to fast; anything else (incl. an older orch that omits the
+        field → None) stays verbose. No handler rebuild needed — the flag is read
+        at each emit, and the progress server gates both progress funnels."""
+        verbose = detail != "fast"
+        if verbose == self._verbose:
+            return
+        self._verbose = verbose
+        self._handler._verbose = verbose
+        self.progress._enabled = verbose
+        log.info("reporting detail -> %s", "verbose" if verbose else "fast")
 
     def _reconcile_concurrency(self, ov_dl: int | None, ov_pr: int | None) -> None:
         target_dl = ov_dl if ov_dl is not None else self.s.download_concurrency
@@ -311,6 +336,7 @@ class Worker:
                 self._events,
                 download_concurrency=target_dl,
                 process_concurrency=target_pr,
+                verbose=self._verbose,
             )
             self._live_download, self._live_process = target_dl, target_pr
             log.info("concurrency reconfig applied dl=%d pr=%d", target_dl, target_pr)

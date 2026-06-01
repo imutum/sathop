@@ -82,6 +82,7 @@ class GranuleHandler:
         *,
         download_concurrency: int | None = None,
         process_concurrency: int | None = None,
+        verbose: bool = True,
     ) -> None:
         self.s = settings
         self.client = client
@@ -90,6 +91,13 @@ class GranuleHandler:
         self.progress = progress
         self.stages = stages
         self._events = events
+        # Detail mode (pushed live from the orchestrator heartbeat). Verbose emits
+        # the DownloadStarted/ProcessStarted waypoints; fast skips them and folds
+        # both stage durations into the terminal UploadCompleted. A plain mutable
+        # attribute: the heartbeat flips it in place, the next granule's emits read
+        # the new value (a granule mid-flight using the old value for one event is
+        # harmless — these are observability waypoints, not coordination).
+        self._verbose = verbose
         dl = download_concurrency if download_concurrency is not None else settings.download_concurrency
         pr = process_concurrency if process_concurrency is not None else settings.process_concurrency
         self._download_sem = asyncio.Semaphore(dl)
@@ -124,7 +132,7 @@ class GranuleHandler:
                 log.warning("[%s] processing failed exit=%s", gid, result.exit_code)
                 return
 
-            await self._upload_outputs(item, handle, result.outputs, process_ms, stage)
+            await self._upload_outputs(item, handle, result.outputs, download_ms, process_ms, stage)
 
         except asyncio.CancelledError:
             # Lease revoked: the heartbeat loop cancels this task. Don't emit —
@@ -145,7 +153,8 @@ class GranuleHandler:
         gid = item.granule_id
         paths: list[Path] = []
         async with staged(stage, PENDING_DOWNLOAD, self._download_sem, DOWNLOADING):
-            self._events.enqueue(DownloadStarted(granule_id=gid, worker_id=self.s.worker_id))
+            if self._verbose:
+                self._events.enqueue(DownloadStarted(granule_id=gid, worker_id=self.s.worker_id))
             log.info("[%s] downloading %d input(s)", gid, len(item.inputs))
             t0 = time.monotonic()
             for spec in item.inputs:
@@ -181,9 +190,10 @@ class GranuleHandler:
             self.s.token,
         )
         async with staged(stage, PENDING_PROCESSING, self._process_sem, PROCESSING):
-            self._events.enqueue(
-                ProcessStarted(granule_id=gid, worker_id=self.s.worker_id, download_ms=download_ms)
-            )
+            if self._verbose:
+                self._events.enqueue(
+                    ProcessStarted(granule_id=gid, worker_id=self.s.worker_id, download_ms=download_ms)
+                )
             t0 = time.monotonic()
             result = await run_bundle(
                 handle,
@@ -203,13 +213,17 @@ class GranuleHandler:
         item: LeaseItem,
         handle: bundle.BundleHandle,
         outputs: list[Path],
+        download_ms: int,
         process_ms: int,
         stage: StageTracker,
     ) -> None:
         gid = item.granule_id
-        # ProcessFinished + UploadStarted folded into UploadCompleted(process_ms):
-        # the granule stays PROCESSING through the (sub-second) upload, then jumps
-        # straight to UPLOADED — two fewer round-trips per granule.
+        # Verbose: ProcessFinished + UploadStarted folded into UploadCompleted(process_ms)
+        # — the granule stayed PROCESSING through the (sub-second) upload, now jumps to
+        # UPLOADED (two fewer round-trips). Fast: also folds in DownloadStarted +
+        # ProcessStarted, so this carries download_ms too and the granule jumps straight
+        # QUEUED → UPLOADED — the orchestrator reconstructs both stage rows from the
+        # measured durations.
         async with staged(stage, PENDING_UPLOAD, self._upload_sem, UPLOADING):
             uploaded: list[UploadedObject] = []
             key_tpl = handle.manifest.outputs.object_key_template
@@ -222,6 +236,9 @@ class GranuleHandler:
                     worker_id=self.s.worker_id,
                     objects=uploaded,
                     process_ms=process_ms,
+                    # Verbose already sent download_ms on ProcessStarted; only the
+                    # fast path needs it here (else the `download` stage double-counts).
+                    download_ms=None if self._verbose else download_ms,
                 )
             )
         log.info("[%s] uploaded %d object(s)", gid, len(uploaded))

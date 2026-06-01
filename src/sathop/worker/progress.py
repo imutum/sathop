@@ -28,6 +28,11 @@ ProgressSink = Callable[[str, ProgressEvent], None]
 class ProgressServer:
     def __init__(self, sink: ProgressSink, port: int, host: str = "127.0.0.1") -> None:
         self._sink = sink
+        # Display-only progress can be turned off fleet-wide (fast detail mode):
+        # both funnels — the download callback and the bundle's self-report — go
+        # through forward(), so this one flag suppresses every progress checkpoint
+        # without refusing the bundle's POST (it still gets a 200).
+        self._enabled = True
         self._port = port
         self._host = host
         self._tokens: dict[str, tuple[str, str]] = {}  # nonce → (granule_id, batch_id)
@@ -59,7 +64,10 @@ class ProgressServer:
     def forward(self, granule_id: str, event: ProgressEvent) -> None:
         """Hand a checkpoint to the buffer. Non-blocking and best-effort: a sink
         error is swallowed so neither the bundle's POST nor the download callback
-        is ever broken by progress plumbing."""
+        is ever broken by progress plumbing. A no-op when progress is disabled
+        (fast detail mode)."""
+        if not self._enabled:
+            return
         try:
             self._sink(granule_id, event)
         except Exception as e:  # noqa: BLE001

@@ -319,6 +319,25 @@ async def test_lease_empty_grows_then_resets_backoff(tmp_path):
         await w.client.aclose()
 
 
+async def test_reconcile_detail_flips_verbose_handler_and_progress(tmp_path):
+    """The heartbeat-pushed detail mode flips the worker's verbose flag, the
+    handler's emit gate, and the progress server's enable flag together — in
+    place, no handler rebuild. Only an explicit "fast" flips; None (older orch
+    without the field) and "verbose" stay verbose."""
+    s = _settings(tmp_path)
+    w = Worker(s)
+    try:
+        assert w._verbose and w._handler._verbose and w.progress._enabled
+        w._reconcile_detail("fast")
+        assert not w._verbose and not w._handler._verbose and not w.progress._enabled
+        w._reconcile_detail("verbose")
+        assert w._verbose and w._handler._verbose and w.progress._enabled
+        w._reconcile_detail(None)  # missing field (older orchestrator) → stay verbose
+        assert w._verbose
+    finally:
+        await w.client.aclose()
+
+
 async def test_pipeline_capacity_counts_handlers_not_stage_queue(tmp_path):
     s = _settings(tmp_path)
     w = Worker(s)

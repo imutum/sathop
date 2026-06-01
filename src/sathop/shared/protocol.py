@@ -56,6 +56,13 @@ class WorkerHeartbeatResponse(BaseModel):
     operator_paused: bool = False
     gc_requested: bool = False
     removed: bool = False
+    # Reporting verbosity pushed to the worker fleet: "verbose" = full per-stage
+    # transitions (download_started / process_started) + display progress; "fast"
+    # = the worker skips those waypoints and progress, reporting only the terminal
+    # UploadCompleted (which carries the measured stage durations). Default verbose
+    # so an older orchestrator without this field, or a fresh deploy, keeps full
+    # detail; the operator opts into "fast" once a workload is proven at scale.
+    detail: Literal["verbose", "fast"] = "verbose"
 
 
 class WorkerEventBatch(BaseModel):

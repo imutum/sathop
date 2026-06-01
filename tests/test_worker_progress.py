@@ -88,6 +88,20 @@ def test_sink_failure_still_returns_200():
     assert r.status_code == 200
 
 
+def test_disabled_server_drops_progress_but_still_200():
+    """Fast detail mode: _enabled=False makes forward() a no-op, so neither the
+    bundle self-report nor the download callback reaches the sink — yet the
+    bundle's POST still gets a 200 (it must never break on progress plumbing)."""
+    sink = _Sink()
+    srv, tc = _server(sink=sink)
+    srv._enabled = False
+    _, url = srv.issue("g-abc", "b1")
+    nonce = url.rsplit("/", 1)[-1]
+    r = tc.post(f"/progress/{nonce}", json={"step": "read", "pct": 50})
+    assert r.status_code == 200
+    assert sink.calls == []  # suppressed
+
+
 def test_multiple_granules_get_distinct_nonces():
     srv, _ = _server()
     n1, _ = srv.issue("g1", "b1")

@@ -40,6 +40,17 @@ class Settings:
     # release) or "edge" (newest including prereleases). Resolution is read-only —
     # upgrading still installs a concrete version via the .pending-version path.
     channel: str = os.getenv("SATHOP_CHANNEL", "stable")
+    # Worker reporting verbosity, pushed to the whole fleet via the heartbeat reply.
+    # "verbose" (default): workers report every per-stage transition + display
+    # progress — best for early bring-up / debugging. "fast": workers skip the
+    # download/process waypoints + progress and report only the terminal
+    # UploadCompleted (carrying the measured stage durations) — fewer orchestrator
+    # writes at scale, at the cost of live per-stage WIP visibility. Flip it and
+    # restart the orchestrator to re-push to the fleet (workers honor it live, no
+    # worker restart). Anything other than "fast" normalises to "verbose".
+    worker_detail: str = (
+        "fast" if os.getenv("SATHOP_WORKER_DETAIL", "verbose").lower() == "fast" else "verbose"
+    )
     # Staged fleet rollout (L2) defaults — overridable per-rollout at start time.
     # canary first, then a fraction of the rest, then everyone; a wave that doesn't
     # confirm version==target within the timeout HALTs (no auto-rollback).

@@ -29,9 +29,11 @@ class _FakeEvents:
 
     def __init__(self) -> None:
         self.kinds: list[str] = []
+        self.events: list[object] = []
 
     def enqueue(self, event) -> None:
         self.kinds.append(event.kind)
+        self.events.append(event)
 
 
 class _FakeDownloader:
@@ -116,6 +118,24 @@ async def test_handle_happy_path_emits_collapsed_event_sequence(tmp_path, monkey
         "process_started",
         "upload_completed",
     ]
+    assert storage.puts == ["out.tif"]
+
+
+async def test_handle_fast_mode_emits_only_upload_completed_with_durations(tmp_path, monkeypatch):
+    """Fast detail mode (verbose=False): the worker skips the DownloadStarted /
+    ProcessStarted waypoints entirely — a single upload_completed carries both
+    measured stage durations so the orchestrator can still reconstruct timing."""
+    client, storage, events = _FakeClient(), _FakeStorage(), _FakeEvents()
+    _patch_bundle(monkeypatch, ProcessResult(True, [Path("out.tif")], "", "", 0))
+
+    h = _handler(tmp_path, storage, client, events)
+    h._verbose = False
+    await h.handle(_item())
+
+    assert events.kinds == ["upload_completed"]
+    uc = events.events[0]
+    assert uc.download_ms is not None  # folded in (verbose sends it on ProcessStarted)
+    assert uc.process_ms is not None
     assert storage.puts == ["out.tif"]
 
 

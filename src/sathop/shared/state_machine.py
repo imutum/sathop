@@ -185,6 +185,11 @@ class UploadCompleted(_EventBase):
     # stage row stays accurate without the ProcessFinished / UploadStarted
     # round-trips. None ⇒ legacy 6-event worker (process timed from residence).
     process_ms: int | None = None
+    # Fast detail mode: the worker skipped DownloadStarted/ProcessStarted entirely
+    # and reports only this terminal event, so it carries the measured download
+    # duration too (the verbose path sends it on ProcessStarted instead, leaving
+    # this None to avoid double-recording the `download` stage).
+    download_ms: int | None = None
 
 
 class ProcessingFailed(_EventBase):
@@ -431,21 +436,36 @@ def _enter_processing(snap: GranuleSnapshot, ev: ProcessStarted, now: datetime) 
 
 
 def _complete_upload(snap: GranuleSnapshot, ev: UploadCompleted, now: datetime) -> TransitionResult:
-    """UploadCompleted accepts two predecessors (rolling-upgrade safe):
+    """UploadCompleted accepts three predecessors (rolling-upgrade + detail-mode safe):
+      QUEUED — fast detail mode; the worker skipped the DOWNLOADING/PROCESSING
+        waypoints and reports only this terminal event, carrying both measured
+        durations so the `download` + `process` stage rows stay accurate without
+        the intermediate round-trips.
       PROCESSING — collapsed 3-event worker; worker-measured ``process_ms`` is the
         `process` stage (the sub-second upload is folded in, not separately timed).
       UPLOADING — legacy 6-event worker; close `upload` from residence.
     Clears lease + stale failure tails and inserts the uploaded object rows in
-    either case.
+    every case.
     """
-    if snap.state == GranuleState.PROCESSING:
-        stage = (
+    if snap.state == GranuleState.QUEUED:
+        rows: list[StageRow] = []
+        if ev.download_ms is not None:
+            rows.append(_measured_stage("download", ev.download_ms, now))
+        if ev.process_ms is not None:
+            rows.append(_measured_stage("process", ev.process_ms, now))
+        # Defensive: a fast-mode worker that somehow omitted both durations still
+        # gets one residence-timed row so the timeline isn't empty.
+        if not rows:
+            rows.append(StageRow(stage="process", started_at=snap.updated_at, finished_at=now))
+        stage_rows: tuple[StageRow, ...] = tuple(rows)
+    elif snap.state == GranuleState.PROCESSING:
+        stage_rows = (
             _measured_stage("process", ev.process_ms, now)
             if ev.process_ms is not None
-            else StageRow(stage="process", started_at=snap.updated_at, finished_at=now)
+            else StageRow(stage="process", started_at=snap.updated_at, finished_at=now),
         )
     elif snap.state == GranuleState.UPLOADING:
-        stage = StageRow(stage="upload", started_at=snap.updated_at, finished_at=now)
+        stage_rows = (StageRow(stage="upload", started_at=snap.updated_at, finished_at=now),)
     else:
         raise StateConflict(f"cannot transition {snap.state.value!r} → 'uploaded'")
     return TransitionResult(
@@ -458,7 +478,7 @@ def _complete_upload(snap: GranuleSnapshot, ev: UploadCompleted, now: datetime) 
             "stderr_tail": None,
             "updated_at": now,
         },
-        stage_rows=(stage,),
+        stage_rows=stage_rows,
         new_objects=tuple(
             ObjectRow(
                 worker_id=ev.worker_id,
@@ -495,7 +515,8 @@ def apply(
         case UploadStarted():
             return _forward_stage_transition(snap, GranuleState.UPLOADING, now)
         case UploadCompleted() as ev:
-            # Collapsed (processing→uploaded) or legacy (uploading→uploaded).
+            # fast (queued→uploaded), collapsed (processing→uploaded), or legacy
+            # (uploading→uploaded) — predecessor decides which stage rows to write.
             return _complete_upload(snap, ev, now)
         case ProcessingFailed(error=error, stdout_tail=stdout_tail, stderr_tail=stderr_tail):
             if snap.state.value not in LEASED_STATES:

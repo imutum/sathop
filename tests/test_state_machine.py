@@ -232,6 +232,43 @@ def test_upload_completed_collapsed_processing_to_uploaded_records_process():
     assert [o.object_key for o in result.new_objects] == ["out.tif"]
 
 
+# ─── fast detail mode (terminal-only, QUEUED → UPLOADED) ───────────────────
+
+
+def test_upload_completed_fast_queued_to_uploaded_records_both_stages():
+    """Fast detail mode: the worker skipped DownloadStarted/ProcessStarted and
+    reports only UploadCompleted straight from QUEUED, carrying both measured
+    durations — the orchestrator reconstructs the download + process stage rows."""
+    obj = UploadedObject(object_key="out.tif", presigned_url="http://w/out.tif", sha256="0" * 64, size=42)
+    result = apply(
+        _snap(GranuleState.QUEUED),
+        UploadCompleted(granule_id="g", worker_id="w1", objects=[obj], download_ms=4000, process_ms=9000),
+        now=_NOW,
+        max_retries=3,
+    )
+    assert result.new_state == GranuleState.UPLOADED
+    assert result.fields["leased_by"] is None
+    assert [r.stage for r in result.stage_rows] == ["download", "process"]
+    assert result.stage_rows[0].started_at == _NOW - timedelta(milliseconds=4000)
+    assert result.stage_rows[1].started_at == _NOW - timedelta(milliseconds=9000)
+    assert [o.object_key for o in result.new_objects] == ["out.tif"]
+
+
+def test_upload_completed_fast_without_durations_falls_back_to_one_row():
+    """A fast-mode event missing both durations (defensive) still yields one
+    residence-timed row so the timeline isn't empty."""
+    obj = UploadedObject(object_key="out.tif", presigned_url="http://w/out.tif", sha256="0" * 64, size=1)
+    result = apply(
+        _snap(GranuleState.QUEUED),
+        UploadCompleted(granule_id="g", worker_id="w1", objects=[obj]),
+        now=_NOW,
+        max_retries=3,
+    )
+    assert result.new_state == GranuleState.UPLOADED
+    assert [r.stage for r in result.stage_rows] == ["process"]
+    assert result.stage_rows[0].started_at == _PREV  # residence: snap.updated_at
+
+
 def test_upload_completed_rejects_unexpected_predecessor():
     with pytest.raises(StateConflict, match="uploaded"):
         apply(
