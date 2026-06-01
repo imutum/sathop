@@ -40,10 +40,15 @@ from .progress import evict_granule
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_token)])
 
-# 1s single-flight TTL cache for the overview aggregate: every open UI tab
+# 5s single-flight TTL cache for the overview aggregate: every open UI tab
 # refetches it on each 'batches' SSE nudge, so bursts of concurrent calls within
-# the window collapse onto one DB computation. Set TTL=0 to disable.
-_OVERVIEW_TTL = 1.0
+# the window collapse onto one DB computation. The aggregate is two GROUP-BY-state
+# scans over ~500k non-deleted granule rows — the dominant orchestrator read cost
+# under Postgres multi-process (the cache is per-process, so a 1s window let each
+# of N uvicorn workers re-run the scan ~once/s). 5s keeps the big numbers live
+# enough (per-entity lists still update instantly via SSE) at 1/5th the scan rate.
+# Set TTL=0 to disable.
+_OVERVIEW_TTL = 5.0
 _overview_lock = asyncio.Lock()
 _overview_cache: tuple[float, dict] | None = None
 

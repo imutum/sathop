@@ -403,18 +403,53 @@ async def run_leader_tasks() -> None:
     if not db.is_postgres():
         await asyncio.gather(run_lease_sweeper(), run_retention(), run_rollout())
         return
-    from .db import get_session_maker
+    import asyncpg
 
-    while True:
-        async with get_session_maker()() as lock_s:
-            got = bool(await lock_s.scalar(text("SELECT pg_try_advisory_lock(:k)"), {"k": _LEADER_KEY}))
-            if got:
-                _log.info("became background-task leader (pg advisory lock)")
-                try:
-                    # Holds the lock for as long as lock_s stays open; gather only
-                    # returns on cancellation (shutdown), which releases it.
-                    await asyncio.gather(run_lease_sweeper(), run_retention(), run_rollout())
-                finally:
-                    await lock_s.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": _LEADER_KEY})
-                return
-        await asyncio.sleep(7)  # not leader — retry so a dead leader is replaced
+    from .pubsub import _dsn
+
+    # A *session-level* advisory lock (pg_try_advisory_lock, not the _xact_ variant)
+    # is held on the connection, NOT the transaction — so we must never keep a
+    # transaction open while holding it. The previous SQLAlchemy session left its
+    # acquiring transaction open for the leader's entire lifetime (idle in
+    # transaction), which pinned the xmin horizon → autovacuum could reclaim
+    # nothing → hot tables bloated → CPU/lock meltdown. asyncpg runs each statement
+    # in autocommit unless an explicit transaction is opened, so this dedicated
+    # connection stays `idle` (never `idle in transaction`) and never pins xmin.
+    # One connection is held across retries (mirrors pubsub.run_listener) so a
+    # non-leader process re-polls the lock on the same idle connection rather than
+    # churning a connect+auth+close cycle every 7s against an already-busy DB.
+    conn: asyncpg.Connection | None = None
+    try:
+        while True:
+            try:
+                if conn is None:
+                    conn = await asyncpg.connect(_dsn())
+                if await conn.fetchval("SELECT pg_try_advisory_lock($1)", _LEADER_KEY):
+                    _log.info("became background-task leader (pg advisory lock)")
+                    try:
+                        await asyncio.gather(run_lease_sweeper(), run_retention(), run_rollout())
+                    finally:
+                        try:
+                            await conn.execute("SELECT pg_advisory_unlock($1)", _LEADER_KEY)
+                        except Exception:  # noqa: BLE001 — best-effort; close frees it anyway
+                            pass
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — the leader MUST self-heal from ANY error
+                # Not just asyncpg.PostgresError/OSError (conn drop): also a stray
+                # error that escapes the sweepers' gather (e.g. a SQLAlchemy
+                # DBAPIError wrapping a deadlock). A narrow catch let the task die
+                # silently — gather(return_exceptions=True) in lifespan swallows it —
+                # and then NO process runs the sweepers fleet-wide. Always reconnect
+                # and retry so a transient blip can never permanently unseat the leader.
+                _log.exception("leader-lock loop error; reconnecting + retrying in 7s")
+                if conn is not None:
+                    try:
+                        await conn.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                conn = None  # a dropped conn already freed the lock; force reconnect
+            await asyncio.sleep(7)  # not leader (or errored) — retry so a dead leader is replaced
+    finally:
+        if conn is not None:
+            await conn.close()  # clean shutdown: drop the conn (frees the lock if still held)

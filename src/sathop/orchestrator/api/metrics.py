@@ -201,9 +201,11 @@ async def _collect(s: AsyncSession) -> bytes:
 # rebuilds the registry and runs two granule GROUP BYs on the one shared aiosqlite
 # connection; without this, concurrent scrapes (Prometheus + a curl probe, or two
 # Prometheus replicas) each re-run that work and serialize on the connection. The
-# 1s window collapses a burst onto one computation while staying real-time enough
-# for any sane scrape interval. Set TTL=0 to disable.
-_METRICS_TTL = 1.0
+# 5s window collapses a burst onto one computation while staying real-time enough
+# for any sane scrape interval (the cache is per-process, so under N uvicorn
+# workers a 1s window still let the GROUP-BY-state scan run ~N times/s). Set
+# TTL=0 to disable.
+_METRICS_TTL = 5.0
 _metrics_lock = asyncio.Lock()
 _metrics_cache: tuple[float, bytes] | None = None
 

@@ -86,10 +86,11 @@ async def _active_rollout(s: AsyncSession) -> Rollout | None:
 
 @router.post("")
 async def start_rollout(body: RolloutStart, s: AsyncSession = Depends(session)) -> RolloutStatus:
-    if await _active_rollout(s) is not None:
-        raise HTTPException(409, "a rollout is already in progress; abort it first")
-
-    # Resolve the concrete target: an explicit version wins, else resolve a channel.
+    # Resolve the concrete target FIRST. All outbound GitHub HTTP below must run
+    # BEFORE any DB query opens a transaction on the asyncpg connection — otherwise
+    # the session sits 'idle in transaction' for the full httpx timeout (~25s),
+    # pinning the xmin horizon (the same failure class as the old leader leak).
+    # Mirrors the network-before-DB ordering in admin.upgrade_orchestrator.
     if body.target_version:
         try:
             target = normalize_version(body.target_version)
@@ -115,6 +116,12 @@ async def start_rollout(body: RolloutStart, s: AsyncSession = Depends(session)) 
 
     # Fail fast on an undownloadable release (shared with POST /api/admin/upgrade).
     await admin.head_release_asset(target)
+
+    # Only now touch the DB: this first SELECT opens the transaction, immediately
+    # followed by the INSERT + commit below, so the connection is never left idle
+    # in transaction across the GitHub network I/O above.
+    if await _active_rollout(s) is not None:
+        raise HTTPException(409, "a rollout is already in progress; abort it first")
 
     r = Rollout(
         target_version=target,

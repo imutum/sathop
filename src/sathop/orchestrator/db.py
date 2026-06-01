@@ -201,6 +201,22 @@ class Granule(Base):
 Index("idx_granule_state_batch", Granule.state, Granule.batch_id)
 # Serves the stuck query: WHERE state IN(...) AND updated_at < threshold.
 Index("idx_granule_state_updated", Granule.state, Granule.updated_at)
+# Covering partial index for the dashboard/metrics per-state GROUP BY
+# (admin_readmodels.admin_overview + metrics._collect run
+# `SELECT state, count(granule_id) WHERE state != 'deleted' GROUP BY state`).
+# INCLUDE(granule_id) + the matching partial predicate lets Postgres answer it
+# with an Index-Only Scan over just the live rows — no heap visit and no scan of
+# the huge terminal `deleted` rows — dropping the query from a ~1.1s parallel seq
+# scan of the 1.4GB heap to tens of ms (needs a current visibility map, i.e. a
+# healthy autovacuum). SQLite ignores the postgresql_* kwargs and uses the
+# sqlite_where partial. Mirrors the idx_granule_objects_pending pattern below.
+Index(
+    "idx_granule_state_live_cov",
+    Granule.state,
+    postgresql_include=["granule_id"],
+    postgresql_where=Granule.state != "deleted",
+    sqlite_where=Granule.state != "deleted",
+)
 
 
 class GranuleObject(Base):
