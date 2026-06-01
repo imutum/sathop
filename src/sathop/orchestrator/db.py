@@ -528,11 +528,15 @@ def _drop_obsolete_tables(sync_conn) -> None:
 #     state): fillfactor leaves in-page room for HOT updates (these columns are
 #     un-indexed -> HOT-eligible) and autovacuum fires on a tiny absolute count
 #     instead of waiting for ~20% of the table to die.
-#   - large high-churn tables: lower the scale factor so autovacuum keeps pace
-#     with the state-transition UPDATE stream. NO fillfactor (the dominant UPDATE
-#     touches the indexed `updated_at`, so the row can't go HOT, and rewriting a
-#     multi-GB heap is not worth it) and cost_delay left at the PG default so a
-#     big-table vacuum can't hog the shared box's cores away from the orch loop.
+#   - large high-churn tables: lower the scale factor to 0.02 (vs PG's 0.2
+#     default) so autovacuum keeps pace with the state-transition UPDATE stream —
+#     this mirrors the value running on the live cluster that holds dead tuples at
+#     ~1%. NO fillfactor (the dominant UPDATE touches the indexed `updated_at`, so
+#     the row can't go HOT, and rewriting a multi-GB heap is not worth it). We
+#     deliberately DON'T set cost_delay here: `ALTER ... SET` leaves unlisted
+#     options intact, so the live tables keep whatever they have, while a FRESH PG
+#     gets PG's gentle default delay instead of an unthrottled big-table vacuum
+#     hogging the shared box's cores away from the orch loop.
 # Reloptions apply to FUTURE tuples only, so the pre-existing bloated tables
 # still need a separately-scheduled one-time VACUUM FULL / pg_repack.
 _PG_SMALL_HOT = (
@@ -540,7 +544,7 @@ _PG_SMALL_HOT = (
     "autovacuum_analyze_scale_factor=0.0, autovacuum_analyze_threshold=100, autovacuum_vacuum_cost_delay=0"
 )
 _PG_BIG_HOT = (
-    "autovacuum_vacuum_scale_factor=0.05, autovacuum_vacuum_threshold=5000, "
+    "autovacuum_vacuum_scale_factor=0.02, autovacuum_vacuum_threshold=5000, "
     "autovacuum_analyze_scale_factor=0.05, autovacuum_analyze_threshold=5000"
 )
 _PG_TABLE_TUNING = {
