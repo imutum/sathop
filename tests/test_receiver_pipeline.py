@@ -231,6 +231,58 @@ async def test_pipeline_dedups_inflight_object_ids(tmp_path):
         srv.shutdown()
 
 
+# ─── invariant 3b: producer claims only what it can drain (A3 soft-claim) ──
+#
+# /pull now soft-claims server-side, so over-requesting would pin objects this
+# receiver can't process and starve peers. The producer must size each request
+# to free queue room and must NOT hot-loop /pull when everything offered is
+# already in flight (that would hammer the orchestrator).
+
+
+async def test_producer_requests_free_queue_capacity(tmp_path):
+    r, _ = _make_receiver(tmp_path, concurrent_pulls=4)  # queue maxsize = 8
+    limits: list[int] = []
+
+    class _Rec:
+        async def pull(self, req: PullRequest) -> PullResponse:
+            limits.append(req.limit)
+            return PullResponse(items=[])
+
+    r.client = _Rec()  # type: ignore[assignment]
+    queue: asyncio.Queue[PullItem] = asyncio.Queue(maxsize=r.s.concurrent_pulls * 2)
+    task = asyncio.create_task(r._pull_producer(queue))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert limits and limits[0] == r.s.concurrent_pulls * 2  # empty queue → ask for full room
+
+
+async def test_producer_backs_off_when_only_inflight_offered(tmp_path):
+    """If /pull keeps re-offering an object we're already pulling, the producer
+    backs off (poll_interval) instead of hot-looping — and never re-queues it."""
+    r, _ = _make_receiver(tmp_path, concurrent_pulls=4)  # poll_interval=1
+    item = _item(1, b"x", port=1)  # url unused — nothing drains the queue here
+    calls = 0
+
+    class _Rec:
+        async def pull(self, req: PullRequest) -> PullResponse:
+            nonlocal calls
+            calls += 1
+            return PullResponse(items=[item])
+
+    r.client = _Rec()  # type: ignore[assignment]
+    queue: asyncio.Queue[PullItem] = asyncio.Queue(maxsize=r.s.concurrent_pulls * 2)
+    task = asyncio.create_task(r._pull_producer(queue))
+    await asyncio.sleep(0.15)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert calls <= 3  # claim once, then park on poll_interval — not hundreds
+    assert r._inflight == {item.object_id}  # claimed exactly once
+    assert queue.qsize() == 1  # queued once, never re-queued
+
+
 # ─── invariant 4: workers don't die on one bad object ─────────────────────
 
 

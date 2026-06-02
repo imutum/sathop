@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import PlainTextResponse, Response
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sathop.shared.protocol import (
@@ -29,7 +31,7 @@ from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, Receiver, Worker, session, utcnow
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
-from ._helpers import all_objects_acked, get_or_404, object_is_pullable
+from ._helpers import all_objects_acked, get_or_404, object_pull_claimable
 from ._transition import apply_transition
 from .one_shot import consume_one_shot_signal, record_version_flap, signal_one_shot
 
@@ -90,33 +92,69 @@ async def heartbeat(req: ReceiverHeartbeat, s: AsyncSession = Depends(session)) 
 
 @router.post("/pull", response_model=PullResponse)
 async def pull(req: PullRequest, s: AsyncSession = Depends(session)) -> PullResponse:
-    """Return objects this receiver should fetch. Excludes already-acked and other-receiver-bound objects."""
+    """Atomically soft-claim up to `limit` pullable objects for this receiver so
+    that N receivers fetch disjoint sets rather than all redundantly pulling the
+    same objects. Mirrors the worker lease (worker_leases.claim_pending_granules):
+    one `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED LIMIT n) RETURNING`
+    stamps pull_lease_by/expires_at. The claim is advisory — an expired lease is
+    re-claimable so no sweeper is needed — and `_record_pull_failure` clears it for
+    instant failover. Excludes already-acked, exhausted, and peer-claimed objects."""
     r = await s.get(Receiver, req.receiver_id)
     if r is None or not r.enabled:
         raise HTTPException(403, "receiver not registered or disabled")
 
-    stmt = (
-        select(GranuleObject, Granule, Batch)
+    now = utcnow()
+    expires = now + timedelta(seconds=settings.pull_lease_sec)
+    claimable = (
+        select(GranuleObject.id)
         .join(Granule, GranuleObject.granule_id == Granule.granule_id)
         .join(Batch, Granule.batch_id == Batch.batch_id)
-        .where(object_is_pullable())
-        .where((Batch.target_receiver_id == req.receiver_id) | (Batch.target_receiver_id.is_(None)))
+        .where(object_pull_claimable(now))
         .where(Granule.state == GranuleState.UPLOADED.value)
+        .where((Batch.target_receiver_id == req.receiver_id) | (Batch.target_receiver_id.is_(None)))
+        .order_by(GranuleObject.id)
         .limit(req.limit)
+        # Postgres: lock only the picked object rows and skip any a concurrent
+        # receiver's /pull already holds, so claims are disjoint. SQLite has no row
+        # locks — SQLAlchemy omits this and the single writer serialises claims.
+        .with_for_update(skip_locked=True, of=GranuleObject)
+        .scalar_subquery()
     )
-    rows = (await s.execute(stmt)).all()
+    rows = (
+        await s.execute(
+            update(GranuleObject)
+            .where(GranuleObject.id.in_(claimable))
+            .values(pull_lease_by=req.receiver_id, pull_lease_expires_at=expires)
+            .returning(
+                GranuleObject.id,
+                GranuleObject.granule_id,
+                GranuleObject.object_key,
+                GranuleObject.presigned_url,
+                GranuleObject.sha256,
+                GranuleObject.size,
+            )
+        )
+    ).all()
+    if not rows:
+        return PullResponse(items=[])
 
+    gids = {row.granule_id for row in rows}
+    batch_by_gid = {
+        g.granule_id: g.batch_id
+        for g in (await s.execute(select(Granule).where(Granule.granule_id.in_(gids)))).scalars().all()
+    }
+    await commit_and_publish(s)
     items = [
         PullItem(
-            granule_id=o.granule_id,
-            batch_id=g.batch_id,
-            object_id=o.id,
-            object_key=o.object_key,
-            presigned_url=o.presigned_url,
-            sha256=o.sha256,
-            size=o.size,
+            granule_id=row.granule_id,
+            batch_id=batch_by_gid.get(row.granule_id, ""),
+            object_id=row.id,
+            object_key=row.object_key,
+            presigned_url=row.presigned_url,
+            sha256=row.sha256,
+            size=row.size,
         )
-        for (o, g, _b) in rows
+        for row in rows
     ]
     return PullResponse(items=items)
 
@@ -128,6 +166,11 @@ async def _record_pull_failure(
     exhausted (>= max_pull_failures). Shared by /ack and /ack/batch."""
     count = (obj.failed_pulls or 0) + 1
     obj.failed_pulls = count
+    # Release the soft-claim so the object re-offers immediately (to this or any
+    # other receiver) rather than waiting out the lease. Once exhausted it leaves
+    # the pullable set anyway, so this never resurrects a dead object.
+    obj.pull_lease_by = None
+    obj.pull_lease_expires_at = None
     exhausted = count >= settings.max_pull_failures
     await log(
         s,

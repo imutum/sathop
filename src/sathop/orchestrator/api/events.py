@@ -52,7 +52,7 @@ async def recent_events(
 
 @router.get("/workers")
 async def list_workers(s: AsyncSession = Depends(session)) -> list[dict]:
-    rows = (await s.execute(select(Worker))).scalars().all()
+    rows = (await s.execute(select(Worker).order_by(Worker.worker_id))).scalars().all()
     result = []
     for w in rows:
         d = {
@@ -74,7 +74,7 @@ async def list_workers(s: AsyncSession = Depends(session)) -> list[dict]:
 
 @router.get("/receivers")
 async def list_receivers(s: AsyncSession = Depends(session)) -> list[dict]:
-    rows = (await s.execute(select(Receiver))).scalars().all()
+    rows = (await s.execute(select(Receiver).order_by(Receiver.receiver_id))).scalars().all()
     result = []
     for r in rows:
         d = {

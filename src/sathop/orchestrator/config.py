@@ -35,6 +35,11 @@ class Settings:
     # its objects polled forever by every receiver. Operator can still ack
     # success=true to retire an object early; no auto-recovery once exhausted.
     max_pull_failures: int = max(1, int(os.getenv("SATHOP_MAX_PULL_FAILURES", "5")))
+    # How long a /pull soft-claim pins an object to one receiver before it's
+    # re-offered to others. An active receiver re-extends its claims every pull
+    # cycle, so this only bounds how fast a *dead* receiver's objects fail over
+    # to peers; it must comfortably exceed the time to pull one object.
+    pull_lease_sec: int = max(1, int(os.getenv("SATHOP_PULL_LEASE_SEC", "600")))
     min_worker_version: str = os.getenv("SATHOP_MIN_WORKER_VERSION", "")
     # Release channel the version banner tracks: "stable" (newest promoted
     # release) or "edge" (newest including prereleases). Resolution is read-only —

@@ -236,25 +236,32 @@ class Receiver:
             if self._draining:
                 await asyncio.sleep(agent_lifecycle.DRAIN_POLL_INTERVAL_SEC)
                 continue
+            # /pull now soft-claims server-side what it returns, so we must request
+            # only as many as we can actually drain — over-claiming would pin objects
+            # this receiver can't process and starve peer receivers. `_inflight`
+            # tracks everything queued-or-in-progress, so free room = maxsize - it;
+            # asking for exactly that means every claimed item also queues without
+            # blocking (queue room ≥ free), leaving no claimed-but-unqueued orphans.
+            free = queue.maxsize - len(self._inflight)
+            if free <= 0:
+                await asyncio.sleep(agent_lifecycle.DRAIN_POLL_INTERVAL_SEC)
+                continue
             try:
-                resp = await self.client.pull(
-                    PullRequest(
-                        receiver_id=self.s.receiver_id,
-                        limit=self.s.concurrent_pulls * 2,
-                    )
-                )
+                resp = await self.client.pull(PullRequest(receiver_id=self.s.receiver_id, limit=free))
             except Exception as e:
                 log.warning("pull list failed: %s", e)
                 await asyncio.sleep(self.s.poll_interval)
                 continue
 
-            if not resp.items:
+            # `new` filters the rare re-offer of an item we're already pulling (our
+            # own claim expired mid-pull and we re-claimed it); without fresh work
+            # we back off rather than hot-loop hammering /pull.
+            new = [it for it in resp.items if it.object_id not in self._inflight]
+            if not new:
                 await asyncio.sleep(self.s.poll_interval)
                 continue
 
-            for item in resp.items:
-                if item.object_id in self._inflight:
-                    continue
+            for item in new:
                 self._inflight.add(item.object_id)
                 await queue.put(item)
 

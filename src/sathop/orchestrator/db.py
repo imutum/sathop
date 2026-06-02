@@ -238,6 +238,15 @@ class GranuleObject(Base):
     # Nullable for forward-compat: rows pre-dating this column read as NULL,
     # which we coalesce to 0 in the pull/ack handlers.
     failed_pulls: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    # Receiver pull soft-lease (A3): which receiver currently holds the claim on
+    # this object and when the claim expires. NULL = unclaimed. /pull atomically
+    # stamps these (UPDATE…RETURNING, mirroring the worker lease) so N receivers
+    # fetch disjoint object sets instead of all redundantly pulling the same ones.
+    # The claim is purely advisory — an expired claim is simply re-claimable by
+    # any receiver, so no sweeper is needed — and it's cleared on pull failure for
+    # immediate failover. Nullable for forward-compat: old rows read as NULL.
+    pull_lease_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    pull_lease_expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), nullable=True)
 
 
 # Partial index over only *pending* objects (not yet acked, not yet deleted).
