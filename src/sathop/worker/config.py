@@ -93,7 +93,10 @@ def load() -> Settings:
         storage_port=int(os.getenv("SATHOP_STORAGE_PORT", "9000")),
         progress_port=int(os.getenv("SATHOP_PROGRESS_PORT", "9002")),
         heartbeat_interval=int(os.getenv("SATHOP_HEARTBEAT", "30")),
-        lease_poll_interval=int(os.getenv("SATHOP_LEASE_POLL", "10")),
+        # Now only a re-check floor / empty-fleet poll cadence: the pipeline loop
+        # wakes on handler completion (Worker._slot_free), so a busy worker no longer
+        # sleeps this out between leasing freed slots. Was 10s.
+        lease_poll_interval=int(os.getenv("SATHOP_LEASE_POLL", "2")),
         download_concurrency=download_conc,
         process_concurrency=process_conc,
         upload_concurrency=upload_conc,

@@ -41,8 +41,8 @@ class WorkerRemoved(BaseException):
 # Empty-poll backoff caps at 3× lease_poll_interval (was 6×). A worker that gets
 # an empty lease while 100k+ granules are pending isn't truly idle — it just lost
 # a SKIP-LOCKED race to a sibling process or hit a transient orch CPU stall, so a
-# full 60s sit-out (6×10s) needlessly starved the fleet. 3× (~30s) still throttles
-# a genuinely-idle fleet off /lease without leaving work unclaimed for a minute.
+# 6× sit-out needlessly starved the fleet. 3× still throttles a genuinely-idle
+# fleet off /lease without leaving work unclaimed for long.
 LEASE_MAX_BACKOFF_FACTOR = 3
 DRAIN_WATCHDOG_TIMEOUT_SEC = 60
 EXIT_CODE_REMOVED = 42
@@ -68,6 +68,12 @@ class Worker:
         self._gc_event = asyncio.Event()
         self._draining = False
         self._handlers: dict[str, asyncio.Task[None]] = {}
+        # Set by each handler's done-callback so the pipeline loop wakes the instant
+        # a slot frees, instead of sleeping out a full lease_poll_interval with work
+        # pending. The loop clears it at the top of every iteration before recomputing
+        # free slots; paired with the pop-then-set order in _on_handler_done, that
+        # ordering makes a lost wakeup impossible.
+        self._slot_free = asyncio.Event()
         self._live_download = s.download_concurrency
         self._live_process = s.process_concurrency
         # Detail mode, pushed from the orchestrator heartbeat. Start verbose; the
@@ -131,7 +137,14 @@ class Worker:
         gid = item.granule_id
         task = asyncio.create_task(self._handler.handle(item))
         self._handlers[gid] = task
-        task.add_done_callback(lambda _task, _gid=gid: self._handlers.pop(_gid, None))
+        task.add_done_callback(lambda _task, _gid=gid: self._on_handler_done(_gid))
+
+    def _on_handler_done(self, gid: str) -> None:
+        # Pop before set: when the pipeline loop observes the wakeup it recomputes
+        # free slots from len(self._handlers), so this completion must already be
+        # removed — otherwise the loop could wait again on a slot that is free.
+        self._handlers.pop(gid, None)
+        self._slot_free.set()
 
     def _install_signal_handlers(self) -> None:
         agent_lifecycle.install_signal_handlers(self._start_drain)
@@ -345,10 +358,18 @@ class Worker:
 
     async def _pipeline_loop(self) -> None:
         while True:
+            self._slot_free.clear()
             ceiling = self._live_download + self._live_process
             free = ceiling - len(self._handlers)
             if free <= 0 or self._pause_lease or self._remote_pause or self._draining or self._reconfiguring:
-                await asyncio.sleep(self.s.lease_poll_interval)
+                # Slots full (or leasing gated): wait for a handler to free a slot
+                # rather than burning a fixed sleep. lease_poll_interval is now only
+                # the re-check floor for the gated cases (pause/drain/reconfig) that
+                # no slot-free signal covers.
+                try:
+                    await asyncio.wait_for(self._slot_free.wait(), timeout=self.s.lease_poll_interval)
+                except TimeoutError:
+                    pass
                 continue
             try:
                 resp = await self.client.lease(LeaseRequest(worker_id=self.s.worker_id, capacity=free))
