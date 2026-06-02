@@ -146,6 +146,15 @@ class Worker:
         self._handlers.pop(gid, None)
         self._slot_free.set()
 
+    def _active_granule_ids(self) -> list[str]:
+        # Union running handlers with granules whose terminal event is still buffered
+        # (enqueued or mid-flush) but not yet applied at the orchestrator. A handler is
+        # popped from _handlers the instant its coroutine returns — which, since event
+        # batching, happens *before* the UploadCompleted is flushed. Without the buffer
+        # set the granule would drop out of active_granule_ids during that gap and
+        # reclaim_inactive_leases could reclaim it (then it gets fully redone).
+        return list(set(self._handlers) | self._events.pending_granule_ids())
+
     def _install_signal_handlers(self) -> None:
         agent_lifecycle.install_signal_handlers(self._start_drain)
 
@@ -239,7 +248,7 @@ class Worker:
                     cpu_percent=psutil.cpu_percent(interval=None),
                     mem_percent=vm.percent,
                     paused=self._pause_lease or self._remote_pause,
-                    active_granule_ids=list(self._handlers.keys()),
+                    active_granule_ids=self._active_granule_ids(),
                     download_concurrency=self._live_download,
                     process_concurrency=self._live_process,
                     **stage_snapshot.heartbeat_fields(),

@@ -32,8 +32,25 @@ class EventBuffer(FlushBuffer[GranuleEvent]):
     def __init__(self, client, **kw) -> None:
         super().__init__(self._send, wake_on=_is_terminal, **kw)
         self._client = client
+        # granule_ids whose batch is mid-flight (sliced out of _q, POST not yet
+        # confirmed). Tracked so pending_granule_ids() has no gap during the POST.
+        self._inflight_gids: frozenset[str] = frozenset()
 
     async def _send(self, batch: list[GranuleEvent]) -> None:
-        resp = await self._client.emit_events_batch(WorkerEventBatch(events=batch))
+        self._inflight_gids = frozenset(e.granule_id for e in batch)
+        try:
+            resp = await self._client.emit_events_batch(WorkerEventBatch(events=batch))
+        finally:
+            # On failure FlushBuffer re-queues the batch into _q (sync, no await
+            # before the next loop turn), so clearing here leaves no uncovered window.
+            self._inflight_gids = frozenset()
         if resp.revoked_granule_ids:
             log.info("orch revoked %d granule(s) on event flush", len(resp.revoked_granule_ids))
+
+    def pending_granule_ids(self) -> set[str]:
+        """granule_ids whose transition events the worker still owes the orchestrator
+        (queued or mid-flush). The heartbeat unions these into active_granule_ids so
+        reclaim_inactive_leases never reclaims a granule whose terminal event has been
+        produced but not yet applied — reclaiming it would discard the finished
+        download/process/upload and force a full end-to-end redo."""
+        return {e.granule_id for e in self._q} | self._inflight_gids

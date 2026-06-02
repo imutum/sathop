@@ -144,3 +144,45 @@ async def test_loop_drains_whole_backlog_on_cancel():
     with pytest.raises(asyncio.CancelledError):
         await task
     assert c.batches == [["g0", "g1"], ["g2", "g3"], ["g4"]]
+
+
+# ─── pending_granule_ids: lease-reclaim protection ──────────────────────────
+
+
+async def test_pending_granule_ids_includes_queued():
+    """Enqueued-but-not-yet-flushed transition events keep their granule_ids in the
+    pending set so the heartbeat can shield them from lease reclaim."""
+    buf = EventBuffer(_FakeClient())
+    buf.enqueue(_dl("g1"))
+    buf.enqueue(_delete("g2"))
+    assert buf.pending_granule_ids() == {"g1", "g2"}
+
+
+async def test_pending_granule_ids_empty_after_successful_flush():
+    c = _FakeClient()
+    buf = EventBuffer(c)
+    buf.enqueue(_dl("g1"))
+    await buf._flush()
+    assert c.batches == [["g1"]]
+    assert buf.pending_granule_ids() == set()
+
+
+async def test_pending_granule_ids_covers_inflight_batch():
+    """During the flush POST the batch is sliced out of _q; _inflight_gids must keep
+    those granule_ids pending so there is no reclaim-exposure window mid-flush."""
+    gate = asyncio.Event()
+
+    class _BlockingClient(_FakeClient):
+        async def emit_events_batch(self, batch):
+            await gate.wait()
+            return await super().emit_events_batch(batch)
+
+    buf = EventBuffer(_BlockingClient())
+    buf.enqueue(_dl("g1"))
+    flush = asyncio.create_task(buf._flush())
+    await asyncio.sleep(0.02)  # let _flush slice _q and enter the blocked POST
+    assert buf._q == []  # sliced out of the queue
+    assert buf.pending_granule_ids() == {"g1"}  # still covered, via _inflight_gids
+    gate.set()
+    await flush
+    assert buf.pending_granule_ids() == set()

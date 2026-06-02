@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sathop.shared.protocol import LeaseItem, LeaseResponse
+from sathop.shared.state_machine import DownloadStarted
 from sathop.worker.config import Settings
 from sathop.worker.runtime import Worker
 
@@ -122,5 +123,23 @@ async def test_loop_wakes_on_handler_completion(tmp_path):
                 await loop
             except asyncio.CancelledError:
                 pass
+    finally:
+        await w.client.aclose()
+
+
+async def test_active_granule_ids_unions_handlers_and_buffered_events(tmp_path):
+    """The heartbeat's active_granule_ids must include granules whose terminal event
+    is still buffered (handler already popped from _handlers) — otherwise the
+    orchestrator could reclaim a finished-but-not-yet-reported granule and force a
+    full redo."""
+    w = Worker(_settings(tmp_path))
+    try:
+        finished = asyncio.create_task(asyncio.sleep(0))
+        await finished
+        w._handlers["h1"] = finished  # a still-tracked handler
+        # a granule whose handler has returned but whose event hasn't flushed yet
+        w._events.enqueue(DownloadStarted(granule_id="b1", worker_id="test-w"))
+
+        assert set(w._active_granule_ids()) == {"h1", "b1"}
     finally:
         await w.client.aclose()
