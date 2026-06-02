@@ -424,6 +424,7 @@ async def run_leader_tasks() -> None:
             try:
                 if conn is None:
                     conn = await asyncpg.connect(_dsn())
+                assert conn is not None  # connect() raises on failure; narrows for the calls below
                 if await conn.fetchval("SELECT pg_try_advisory_lock($1)", _LEADER_KEY):
                     _log.info("became background-task leader (pg advisory lock)")
                     try:

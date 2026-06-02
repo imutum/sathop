@@ -21,17 +21,25 @@ class GracefulAgentExit(Exception):
 
 
 async def run_agent(create_tasks: Callable[[asyncio.TaskGroup], None], *, log: logging.Logger) -> None:
+    # A `raise SystemExit` *inside* an `except*` handler is re-wrapped into a
+    # BaseExceptionGroup (PEP 654), which the runtime does not special-case — it
+    # prints a traceback and defeats the intended clean exit. So flag the fatal
+    # case in the handler and raise the bare SystemExit once, after the group
+    # handling, where it propagates as a clean exit code with no traceback.
+    fatal = False
     try:
         async with asyncio.TaskGroup() as tg:
             create_tasks(tg)
     except* AuthTokenInvalid:
         log.error("orchestrator rejected token (401) — exiting for container restart")
-        raise SystemExit(1) from None
+        fatal = True
     except* VersionTooOld as eg:
         log.error("version rejected (426) — %s", eg.exceptions[0])
-        raise SystemExit(1) from None
+        fatal = True
     except* GracefulAgentExit:
         pass
+    if fatal:
+        raise SystemExit(1)
 
 
 def install_signal_handlers(start_drain: Callable[[str], None]) -> None:

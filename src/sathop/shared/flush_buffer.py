@@ -62,10 +62,7 @@ class FlushBuffer(Generic[T]):
         the whole backlog so just-finished producers' last items still land."""
         try:
             while True:
-                try:
-                    await asyncio.wait_for(self._wake.wait(), timeout=self._interval)
-                except TimeoutError:
-                    pass
+                await self._wait_tick()
                 self._wake.clear()
                 await self._flush()
         except asyncio.CancelledError:
@@ -75,6 +72,21 @@ class FlushBuffer(Generic[T]):
                 if len(self._q) >= before:  # flush failed (re-queued) → orch down, stop
                     break
             raise
+
+    async def _wait_tick(self) -> None:
+        """Block until an early wake or the interval elapses, whichever comes first.
+
+        Uses asyncio.wait, not asyncio.wait_for: when the wake Event fires in the
+        same turn the task is cancelled (a terminal event enqueued during graceful
+        drain — the common case), wait_for can swallow the outer CancelledError
+        (CPython 3.11 race), skipping the drain-on-cancel above and hanging the loop
+        until the watchdog force-kills it (stranding the buffered terminal events).
+        asyncio.wait returns normally on timeout and propagates cancellation cleanly."""
+        waker = asyncio.ensure_future(self._wake.wait())
+        try:
+            await asyncio.wait({waker}, timeout=self._interval)
+        finally:
+            waker.cancel()
 
     async def _flush(self) -> None:
         if not self._q:

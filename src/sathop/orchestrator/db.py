@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from sqlalchemy import (
     JSON,
@@ -362,12 +363,15 @@ async def set_setting(s: AsyncSession, key: str, value: str) -> None:
         row.updated_at = utcnow()
 
 
-async def get_worker_detail(s: AsyncSession) -> str:
+async def get_worker_detail(s: AsyncSession) -> Literal["verbose", "fast"]:
     """Effective fleet reporting detail: the operator's UI override if set and
     valid, else the ``SATHOP_WORKER_DETAIL`` env default. This is what the
     heartbeat reply pushes to every worker."""
     v = await get_setting(s, WORKER_DETAIL_KEY)
-    return v if v in _WORKER_DETAIL_VALUES else settings.worker_detail
+    # Both branches are always one of _WORKER_DETAIL_VALUES (settings.worker_detail
+    # is env-normalised to verbose|fast), so the cast is sound.
+    detail = v if v in _WORKER_DETAIL_VALUES else settings.worker_detail
+    return cast(Literal["verbose", "fast"], detail)
 
 
 _engine = None
