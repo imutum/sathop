@@ -1,6 +1,6 @@
 [project]
 name = "sathop"
-version = "1.0.17"
+version = "1.0.18"
 description = "Remote-sensing data pipeline: accelerated distributed download + pluggable processing + pull-based sync"
 requires-python = ">=3.11"
 dependencies = [
