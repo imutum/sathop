@@ -35,7 +35,7 @@ const GROUP: Record<string, { num: string; dot: string; tip: string }> = {
   pending: { num: "text-muted-foreground",           dot: "bg-muted-foreground",        tip: "orchestrator 还没派给任何 worker 的数据粒" },
   active:  { num: "text-sky-600 dark:text-sky-400",  dot: "bg-sky-500 dark:bg-sky-400", tip: "已 lease 到待交付之间的所有状态（含待分发：已上传待 receiver 拉取）；不含已交付" },
   done:    { num: "text-success",                    dot: "bg-success",                 tip: "receiver 已确认（待清理）或已清理（已完成）——已交付" },
-  failed:  { num: "text-danger",                     dot: "bg-danger",                  tip: "待重试 + 已拉黑（达到重试上限）" },
+  failed:  { num: "text-danger",                     dot: "bg-danger",                  tip: "失败待重试 + 已停止（包含重试耗尽和主动取消）" },
 };
 
 const total = computed(() => pipelineTotals(props.counts).total);

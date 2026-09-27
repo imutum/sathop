@@ -251,6 +251,13 @@ class GranuleRow(BaseModel):
     objects_exhausted: int = 0
 
 
+class GranulePage(BaseModel):
+    items: list[GranuleRow]
+    total: int
+    # Cumulative delivered rows whose detail has expired under retention.
+    archived_delivered: int
+
+
 class LeaseRequest(BaseModel):
     worker_id: str
     capacity: int

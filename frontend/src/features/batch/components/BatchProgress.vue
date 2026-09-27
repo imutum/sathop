@@ -9,7 +9,7 @@ import DeliveryStats from "@/features/batch/components/DeliveryStats.vue";
 const props = defineProps<{ summary: BatchSummary }>();
 
 // ETA 仅实时：按最近窗口交付速率外推；无近窗交付即不显示（交付停滞信号）。
-const etaSeconds = computed(() => props.summary.eta_realtime);
+const etaSeconds = computed(() => props.summary.status === "paused" ? null : props.summary.eta_realtime);
 </script>
 
 <template>

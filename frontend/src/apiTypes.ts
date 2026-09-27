@@ -143,6 +143,12 @@ export type GranuleRow = {
   objects_exhausted: number;
 };
 
+export type GranulePage = {
+  items: GranuleRow[];
+  total: number;
+  archived_delivered: number;
+};
+
 export type Overview = {
   state_counts: Partial<Record<GranuleState, number>>;
   stuck_over_hours: number;

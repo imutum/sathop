@@ -24,7 +24,7 @@ withDefaults(
   <Card :class="$props.class">
     <CardHeader
       v-if="title || $slots.title || description || $slots.description || $slots.meta"
-      class="flex-row items-start justify-between space-y-0 gap-4"
+      class="flex-col items-stretch justify-between space-y-0 gap-4 sm:flex-row sm:items-start"
     >
       <div class="min-w-0 space-y-1.5">
         <CardTitle v-if="title || $slots.title">
@@ -34,7 +34,7 @@ withDefaults(
           <slot name="description">{{ description }}</slot>
         </CardDescription>
       </div>
-      <div v-if="$slots.meta" class="flex shrink-0 items-center gap-2">
+      <div v-if="$slots.meta" class="flex max-w-full flex-wrap items-center gap-2 sm:shrink-0">
         <slot name="meta" />
       </div>
     </CardHeader>

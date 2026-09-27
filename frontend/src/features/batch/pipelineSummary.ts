@@ -26,6 +26,7 @@ const ACTIVE: GranuleState[] = [
 // Done = delivered. Matches summary.ts (acked+deleted); "完成"=接收端确认.
 const DONE: GranuleState[] = ["acked", "deleted"];
 const FAILED: GranuleState[] = ["failed", "blacklisted"];
+const ALL_STATES: GranuleState[] = [...STATE_ORDER, ...FAILED];
 
 function countStates(counts: PipelineStateCounts, states: GranuleState[]): number {
   return states.reduce((sum, state) => sum + (counts[state] ?? 0), 0);
@@ -33,7 +34,7 @@ function countStates(counts: PipelineStateCounts, states: GranuleState[]): numbe
 
 export function pipelineTotals(counts: PipelineStateCounts): PipelineTotals {
   return {
-    total: countStates(counts, STATE_ORDER),
+    total: countStates(counts, ALL_STATES),
     pending: countStates(counts, PENDING),
     active: countStates(counts, ACTIVE),
     done: countStates(counts, DONE),
@@ -42,8 +43,8 @@ export function pipelineTotals(counts: PipelineStateCounts): PipelineTotals {
 }
 
 export function pipelineSegments(counts: PipelineStateCounts) {
-  const total = countStates(counts, STATE_ORDER);
-  return STATE_ORDER.filter((state) => (counts[state] ?? 0) > 0).map((state) => ({
+  const total = countStates(counts, ALL_STATES);
+  return ALL_STATES.filter((state) => (counts[state] ?? 0) > 0).map((state) => ({
     state,
     value: counts[state] ?? 0,
     pct: total > 0 ? ((counts[state] ?? 0) / total) * 100 : 0,
@@ -52,8 +53,8 @@ export function pipelineSegments(counts: PipelineStateCounts) {
 
 // The canonical pipeline hierarchy — the single 口径 shared by the overview
 // (aggregate) and a batch's progress (single batch). Three ordered big stages
-// (待分配 → 进行中 → 已交付) partition the delivery pipeline; 异常 is an
-// out-of-band fourth. Each big stage carries its small stages (the states that
+// (待分配 → 进行中 → 已交付), plus failed/stopped work, partition the full batch.
+// Each big stage carries its small stages (the states that
 // roll up into it) in processing order — ALWAYS, even at count 0, so positions
 // are stable. `待分配` is a leaf (it IS its one state), so it has no sub-rows.
 export type PipelineGroupKey = "pending" | "active" | "done" | "failed";
@@ -62,7 +63,7 @@ export type PipelineGroup = {
   key: PipelineGroupKey;
   label: string;
   total: number;
-  pct: number; // share of the pipeline grand total (待分配+进行中+已交付)
+  pct: number; // share of all submitted work, including failed/stopped work
   subs: { state: GranuleState; value: number }[];
 };
 
@@ -70,11 +71,11 @@ const GROUP_DEFS: { key: PipelineGroupKey; label: string; states: GranuleState[]
   { key: "pending", label: "待分配", states: PENDING, leaf: true },
   { key: "active", label: "进行中", states: ACTIVE },
   { key: "done", label: "已交付", states: DONE },
-  { key: "failed", label: "异常", states: FAILED },
+  { key: "failed", label: "失败 / 已停止", states: FAILED },
 ];
 
 export function pipelineGroups(counts: PipelineStateCounts): PipelineGroup[] {
-  const grand = countStates(counts, STATE_ORDER); // excludes 异常, so the 3 stages sum to 100%
+  const grand = countStates(counts, ALL_STATES);
   return GROUP_DEFS.map((g) => {
     const total = countStates(counts, g.states);
     return {
