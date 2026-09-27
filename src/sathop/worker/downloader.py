@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import httpx
 
 from sathop.shared.hashing import sha256_file
+from sathop.shared.http_range import parse_content_range, unsatisfied_range_size
 from sathop.shared.protocol import Credential
 
 log = logging.getLogger("sathop.worker.downloader")
@@ -163,7 +164,7 @@ class HttpDownloader:
         existing = tmp.stat().st_size if tmp.exists() else 0
 
         x_auth, extra_headers = _httpx_auth_and_headers(auth)
-        headers = dict(extra_headers)
+        headers = {**extra_headers, "Accept-Encoding": "identity"}
         if existing:
             headers["Range"] = f"bytes={existing}-"
 
@@ -173,25 +174,58 @@ class HttpDownloader:
         # orchestrator re-leases instead of holding the download semaphore.
         # `auth` rides on the request (not the shared client) so per-file
         # credentials don't leak across granules; None ⇒ no auth.
-        async with self._get_client().stream("GET", url, headers=headers, auth=x_auth) as r:
-            if r.status_code == 416:
-                tmp.replace(dest)
-                final_size = dest.stat().st_size
-                if progress_cb:
-                    await progress_cb(final_size, final_size)
-                return final_size
-            r.raise_for_status()
-            resumed = r.status_code == 206
-            body_len = _safe_int(r.headers.get("Content-Length"))
-            total = (existing + body_len) if (resumed and body_len is not None) else body_len
-            downloaded = existing
-            mode = "ab" if resumed else "wb"
-            with tmp.open(mode) as f:
-                async for chunk in r.aiter_bytes(_CHUNK):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_cb:
-                        await progress_cb(downloaded, total)
+        # A rejected stale partial gets one clean restart. A 416 alone does not
+        # prove completeness: only bytes */N with N == our on-disk size does.
+        total: int | None = None
+        for attempt in range(2):
+            async with self._get_client().stream("GET", url, headers=headers, auth=x_auth) as r:
+                if r.status_code == 416 and existing:
+                    remote_size = unsatisfied_range_size(r.headers.get("Content-Range", ""))
+                    if remote_size == existing:
+                        tmp.replace(dest)
+                        if progress_cb:
+                            await progress_cb(existing, existing)
+                        return existing
+                    if attempt == 0:
+                        existing = 0
+                        headers.pop("Range", None)
+                        continue
+                r.raise_for_status()
+                resumed = r.status_code == 206
+                encoded = r.headers.get("Content-Encoding", "identity").lower() != "identity"
+                if resumed:
+                    span = parse_content_range(r.headers.get("Content-Range", ""))
+                    if (
+                        span is None
+                        or span.start != existing
+                        or span.total is None
+                        or span.end != span.total - 1
+                        or encoded
+                    ):
+                        raise httpx.RemoteProtocolError(
+                            "invalid Content-Range for resumed download", request=r.request
+                        )
+                    total = span.total
+                else:
+                    if r.status_code != 200:
+                        raise httpx.RemoteProtocolError(
+                            "expected a complete download response", request=r.request
+                        )
+                    total = None if encoded else _safe_int(r.headers.get("Content-Length"))
+                downloaded = existing if resumed else 0
+                with tmp.open("ab" if resumed and existing else "wb") as f:
+                    async for chunk in r.aiter_bytes(_CHUNK):
+                        if total is not None and downloaded + len(chunk) > total:
+                            raise httpx.RemoteProtocolError(
+                                "download exceeds declared size", request=r.request
+                            )
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_cb:
+                            await progress_cb(downloaded, total)
+                if total is not None and downloaded != total:
+                    raise httpx.RemoteProtocolError("download shorter than declared size", request=r.request)
+                break
         tmp.replace(dest)
         final_size = dest.stat().st_size
         if progress_cb:

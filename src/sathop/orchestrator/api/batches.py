@@ -228,9 +228,16 @@ async def add_granules(batch_id: str, req: GranuleBulkAdd, s: AsyncSession = Dep
     batch = await get_or_404(s, Batch, batch_id, "batch not found")
     warnings = await _validate_granules_for_bundle(s, batch.bundle_ref, req.granules)
 
-    existing = set(
-        (await s.execute(select(Granule.granule_id).where(Granule.batch_id == batch_id))).scalars().all()
-    )
+    # Only probe incoming IDs through the primary-key index. Loading every ID
+    # in a million-granule batch to append a handful costs O(batch size) memory.
+    # Chunk to stay below SQLite/asyncpg parameter limits for large submissions.
+    incoming = [_compose_gid(batch_id, g.granule_id) for g in req.granules]
+    existing: set[str] = set()
+    for start in range(0, len(incoming), 500):
+        rows = await s.scalars(
+            select(Granule.granule_id).where(Granule.granule_id.in_(incoming[start : start + 500]))
+        )
+        existing.update(rows)
 
     added = 0
     skipped = 0
@@ -260,7 +267,7 @@ async def list_granules(
     if state:
         wanted = [x.strip() for x in state.split(",") if x.strip()]
         stmt = stmt.where(Granule.state.in_(wanted))
-    stmt = stmt.order_by(Granule.updated_at.desc()).limit(limit).offset(offset)
+    stmt = stmt.order_by(Granule.updated_at.desc(), Granule.granule_id).limit(limit).offset(offset)
     rows = (await s.execute(stmt)).scalars().all()
     return await granule_rows(s, list(rows))
 

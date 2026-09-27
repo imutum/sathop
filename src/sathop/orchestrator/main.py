@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from sathop import __version__
+from sathop.shared.safe_path import safe_join
 
 from . import db, pubsub
 from .api import router as api_router
@@ -82,19 +83,26 @@ async def health() -> dict:
     return {"status": "ok", "version": __version__, "web_sha": web_sha}
 
 
+async def spa_fallback(full_path: str) -> FileResponse:
+    # Don't swallow unrouted /api/* — clients must receive JSON, not the SPA.
+    if full_path.startswith("api/") or full_path == "api":
+        raise HTTPException(status_code=404, detail="Not Found")
+    # This route is public. Decode/resolve before serving any file so encoded
+    # parent segments, absolute paths and symlinks cannot escape the web root.
+    if "\\" in full_path or "\x00" in full_path:
+        raise HTTPException(status_code=404, detail="Not Found")
+    try:
+        target = safe_join(WEB_DIST, full_path)
+    except (ValueError, OSError, RuntimeError):
+        raise HTTPException(status_code=404, detail="Not Found") from None
+    if full_path and target.is_file():
+        return FileResponse(target)
+    return FileResponse(WEB_DIST / "index.html")
+
+
 if WEB_DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
-
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def spa_fallback(full_path: str) -> FileResponse:
-        # Don't swallow unrouted /api/* — let FastAPI return its native 404 JSON
-        # so API clients see a proper error envelope instead of HTML.
-        if full_path.startswith("api/") or full_path == "api":
-            raise HTTPException(status_code=404, detail="Not Found")
-        target = WEB_DIST / full_path
-        if full_path and target.is_file():
-            return FileResponse(target)
-        return FileResponse(WEB_DIST / "index.html")
+    app.get("/{full_path:path}", include_in_schema=False)(spa_fallback)
 
 
 def run() -> None:

@@ -13,22 +13,18 @@ import { useLiveStream } from "@/composables/useLiveStream";
 const { connected } = useLiveStream();
 const route = useRoute();
 
-// Once the stream has been up, a drop usually means the orchestrator is
-// restarting. After a short grace (to ignore brief network hiccups) show a
-// non-blocking overlay; it clears on reconnect — or the page hard-reloads
-// itself if the rebuilt UI differs (see useLiveStream).
+// Keep cached pages usable while the stream reconnects. A delayed inline
+// status avoids flashing on short hiccups and covers an initial connection failure.
 const showReconnecting = ref(false);
-let everConnected = false;
 let graceTimer: ReturnType<typeof setTimeout> | undefined;
 watch(connected, (v) => {
-  if (v) everConnected = true;
   clearTimeout(graceTimer);
-  if (!v && everConnected) {
+  if (!v) {
     graceTimer = setTimeout(() => (showReconnecting.value = true), 1500);
   } else {
     showReconnecting.value = false;
   }
-});
+}, { immediate: true });
 onBeforeUnmount(() => clearTimeout(graceTimer));
 
 type NavItem = { to: string; label: string; icon: IconName; end?: boolean };
@@ -128,7 +124,7 @@ const isDark = computed(() => effective.value === "dark");
           </Button>
         </div>
         <div class="flex items-center gap-2">
-          <HintTip :text="connected ? '后台事件流已连接，页面会自动刷新' : 'SSE 未连接，数据可能延迟，会在 60s 安全网内重试'">
+          <HintTip :text="connected ? '实时更新已连接，页面会自动刷新' : '正在恢复实时更新；页面仍会每分钟尝试刷新数据'">
             <Badge
               :variant="connected ? 'success' : 'outline'"
               role="status"
@@ -145,7 +141,7 @@ const isDark = computed(() => effective.value === "dark");
                 ]"
                 aria-hidden
               />
-              {{ connected ? "实时" : "离线" }}
+              {{ connected ? "实时" : "连接中" }}
             </Badge>
           </HintTip>
           <HintTip :text="isDark ? '切换到亮色模式' : '切换到暗色模式'">
@@ -163,7 +159,17 @@ const isDark = computed(() => effective.value === "dark");
         </div>
       </header>
 
-      <main id="main-content" class="flex-1 overflow-auto">
+      <div
+        v-if="showReconnecting"
+        class="flex shrink-0 items-center gap-2 border-b border-border bg-muted/50 px-4 py-2 text-sm text-muted-foreground md:px-6 lg:px-8"
+        role="status"
+        aria-live="polite"
+      >
+        <Icon name="refresh" :size="14" class="shrink-0 animate-spin" />
+        <span>实时更新暂时中断，正在重新连接。你可以继续查看已有数据，恢复后会自动刷新。</span>
+      </div>
+
+      <main id="main-content" tabindex="-1" class="flex-1 overflow-auto">
         <div class="mx-auto w-full max-w-[1480px] px-4 py-5 md:px-6 md:py-6 lg:px-8 lg:py-8">
           <RouterView v-slot="{ Component }">
             <Transition
@@ -180,24 +186,5 @@ const isDark = computed(() => effective.value === "dark");
       </main>
     </div>
 
-    <Transition
-      enter-active-class="transition-opacity duration-200"
-      leave-active-class="transition-opacity duration-150"
-      enter-from-class="opacity-0"
-      leave-to-class="opacity-0"
-    >
-      <div
-        v-if="showReconnecting"
-        class="fixed inset-0 z-50 grid place-items-center bg-background/70 backdrop-blur-sm"
-        role="status"
-        aria-live="polite"
-      >
-        <div class="flex flex-col items-center gap-3 rounded-xl border border-border bg-background px-7 py-6 shadow-pop">
-          <Icon name="refresh" :size="22" class="animate-spin text-muted-foreground" />
-          <div class="text-sm font-medium text-foreground">正在连接服务…</div>
-          <div class="text-2xs text-muted-foreground">服务可能正在重启，恢复后将自动刷新</div>
-        </div>
-      </div>
-    </Transition>
   </div>
 </template>

@@ -141,6 +141,20 @@ async def test_add_granules_same_short_id_other_batch_is_independent(client):
     assert r.json() == {"added": 1, "skipped": 0}
 
 
+async def test_large_append_skips_existing_across_lookup_chunks(client):
+    await _register_bundle()
+    assert _create_batch(client, "alpha", [f"g{i}" for i in range(600)]).status_code == 200
+    response = client.post(
+        "/api/batches/alpha/granules",
+        json={"granules": [_granule(f"g{i}") for i in range(100, 1200)]},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"added": 600, "skipped": 500}
+    async with orch_db._session_maker() as s:
+        ids = set((await s.scalars(select(Granule.granule_id))).all())
+    assert ids == {f"alpha:g{i}" for i in range(1200)}
+
+
 # ─── batch_id 缺省时 orchestrator 自动生成 ────────────────────────────────
 
 

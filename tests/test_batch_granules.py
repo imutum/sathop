@@ -122,3 +122,15 @@ async def test_list_empty_batch_returns_empty_array(client):
     r = client.get("/api/batches/b/granules")
     assert r.status_code == 200
     assert r.json() == []
+
+
+async def test_pagination_orders_equal_timestamps_by_id(client):
+    # Bulk imports give hundreds of rows the same timestamp. A total ordering
+    # is required to keep page boundaries stable on SQLite and Postgres.
+    await _seed([(f"g{i:03d}", GranuleState.PENDING.value, 0) for i in reversed(range(30))])
+    ids = []
+    for offset in (0, 10, 20):
+        response = client.get(f"/api/batches/b/granules?limit=10&offset={offset}")
+        assert response.status_code == 200
+        ids.extend(g["granule_id"] for g in response.json())
+    assert ids == [f"g{i:03d}" for i in range(30)]

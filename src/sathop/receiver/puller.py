@@ -8,11 +8,13 @@ import logging
 import secrets
 import time
 from collections import deque
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import httpx
 
 from sathop.shared.hashing import sha256_file
+from sathop.shared.http_range import parse_content_range
 
 log = logging.getLogger("sathop.receiver")
 
@@ -51,6 +53,10 @@ def tmp_for(dest: Path) -> Path:
 
 
 def byte_ranges(size: int, n: int) -> list[tuple[int, int]]:
+    if size < 0:
+        raise ValueError("size must be nonnegative")
+    if size == 0:
+        return []
     n = max(1, min(n, size))
     seg = size // n
     out: list[tuple[int, int]] = []
@@ -77,24 +83,43 @@ def is_transient_segment_error(e: BaseException) -> bool:
     return False
 
 
-async def stream_range(client: httpx.AsyncClient, url: str, pos: int, end: int, f) -> int:
-    async with client.stream("GET", url, headers={"Range": f"bytes={pos}-{end}"}) as r:
-        if r.status_code == 200:
-            raise SegmentNotSupportedError(f"server ignored Range {pos}-{end}, returned 200")
+async def stream_range(
+    client: httpx.AsyncClient, url: str, pos: int, end: int, *, expected_size: int | None = None
+) -> AsyncIterator[bytes]:
+    headers = {"Range": f"bytes={pos}-{end}", "Accept-Encoding": "identity"}
+    async with client.stream("GET", url, headers=headers) as r:
         r.raise_for_status()
+        span = parse_content_range(r.headers.get("Content-Range", ""))
+        if (
+            r.status_code != 206
+            or span is None
+            or span.start != pos
+            or span.end != end
+            or (expected_size is not None and span.total != expected_size)
+            or r.headers.get("Content-Encoding", "identity").lower() != "identity"
+        ):
+            raise SegmentNotSupportedError(f"invalid response for Range {pos}-{end}")
         async for chunk in r.aiter_bytes(CHUNK):
-            f.seek(pos)
-            f.write(chunk)
+            if pos + len(chunk) > end + 1:
+                raise SegmentNotSupportedError(f"response exceeds Range ending at {end}")
+            yield chunk
             pos += len(chunk)
-    return pos
 
 
-async def fetch_segment(client: httpx.AsyncClient, url: str, start: int, end: int, f) -> None:
+async def fetch_segment(
+    client: httpx.AsyncClient, url: str, start: int, end: int, f, *, expected_size: int | None = None
+) -> None:
     pos = start
     delay = SEGMENT_BACKOFF_BASE_SEC
     for attempt in range(SEGMENT_MAX_RETRIES + 1):
         try:
-            pos = await stream_range(client, url, pos, end, f)
+            async for chunk in stream_range(client, url, pos, end, expected_size=expected_size):
+                # Keep the committed offset here, outside the response iterator:
+                # a transport exception must not discard already-written progress.
+                # No await between seek/write: siblings share this file handle.
+                f.seek(pos)
+                f.write(chunk)
+                pos += len(chunk)
             if pos == end + 1:
                 return
             raise RuntimeError(f"segment {start}-{end} stream ended at {pos}, short by {end + 1 - pos}")
@@ -125,15 +150,31 @@ async def pull_segmented(
     expected_size: int,
     segments: int,
 ) -> tuple[str, int]:
+    ranges = byte_ranges(expected_size, segments)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = tmp_for(dest)
-    with tmp.open("wb") as alloc:
-        alloc.truncate(expected_size)
-    ranges = byte_ranges(expected_size, segments)
     try:
+        with tmp.open("wb") as alloc:
+            alloc.truncate(expected_size)
         with tmp.open("r+b", buffering=0) as f:
-            await asyncio.gather(*(fetch_segment(client, url, start, end, f) for start, end in ranges))
-        sha = await asyncio.to_thread(sha256_file, tmp)
+            tasks = [
+                asyncio.create_task(fetch_segment(client, url, start, end, f, expected_size=expected_size))
+                for start, end in ranges
+            ]
+            try:
+                await asyncio.gather(*tasks)
+            finally:
+                # gather does not cancel siblings on failure. Drain them BEFORE
+                # closing/removing the shared file, including on caller cancellation.
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+        hashing = asyncio.create_task(asyncio.to_thread(sha256_file, tmp))
+        try:
+            sha = await asyncio.shield(hashing)
+        except asyncio.CancelledError:
+            await hashing  # release the thread's file handle before Windows unlink
+            raise
         size = tmp.stat().st_size
         tmp.replace(dest)
     except BaseException:
