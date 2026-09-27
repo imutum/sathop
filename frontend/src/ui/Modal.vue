@@ -50,11 +50,11 @@ function onDismiss(e: Event) {
       @escape-key-down="onDismiss"
       @interact-outside="onDismiss"
     >
-      <header class="shrink-0 border-b border-border/70 px-6 py-5 pr-16">
+      <header class="shrink-0 border-b border-border/70 px-4 py-4 pr-14 sm:px-6 sm:py-5 sm:pr-16">
         <DialogTitle class="break-words text-lg leading-snug">{{ title }}</DialogTitle>
         <DialogDescription v-if="description" class="mt-2 text-sm leading-relaxed">{{ description }}</DialogDescription>
       </header>
-      <div class="min-h-0 overflow-y-auto overscroll-contain p-6 [&:has(.modal-actions)]:pb-0">
+      <div class="min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-6 [&:has(.modal-actions)]:pb-0">
         <slot :close="close" />
       </div>
     </DialogContent>

@@ -217,8 +217,8 @@ function onCreated() {
             title="没有符合条件的批次"
           />
           <template v-else>
-          <!-- Narrow: card list. min-w-[820px] table needs lg+ to feel right. -->
-          <ul class="divide-y divide-border/60 lg:hidden">
+          <!-- Use cards until the content area can comfortably fit all columns. -->
+          <ul class="divide-y divide-border/60 xl:hidden">
             <li v-for="row in visible" :key="row.batch.batch_id" class="space-y-3 p-4">
               <div class="flex items-start justify-between gap-3">
                 <RouterLink :to="`/batches/${row.batch.batch_id}`" class="min-w-0 flex-1">
@@ -301,14 +301,12 @@ function onCreated() {
               </div>
             </li>
           </ul>
-          <!-- lg+ : original table. -->
-          <div class="hidden lg:block">
-            <Table class="min-w-[960px]">
+          <div class="hidden xl:block">
+            <Table class="min-w-[820px]">
               <TableHeader class="bg-muted/50">
                 <TableRow>
                   <TableHead class="px-5">批次</TableHead>
-                  <TableHead>任务包</TableHead>
-                  <TableHead>目标接收端</TableHead>
+                  <TableHead>任务配置</TableHead>
                   <TableHead>进度</TableHead>
                   <TableHead>创建时间</TableHead>
                   <TableHead class="px-5 text-right">操作</TableHead>
@@ -328,24 +326,25 @@ function onCreated() {
                       </div>
                     </RouterLink>
                   </TableCell>
-                  <TableCell class="py-3.5 font-mono text-cell text-muted-foreground">
+                  <TableCell class="max-w-[240px] py-3.5 text-cell text-muted-foreground">
                     <RouterLink
                       v-if="row.bundleLink"
                       :to="{
                         path: '/bundles',
                         query: { name: row.bundleLink.name, version: row.bundleLink.version },
                       }"
-                      class="transition-colors hover:text-primary"
-                      title="在任务包页查看"
+                      class="block font-mono leading-relaxed transition-colors hover:text-primary [overflow-wrap:anywhere]"
+                      :title="row.batch.bundle_ref"
                     >
-                      {{ row.batch.bundle_ref }}
+                      {{ row.bundleLink.name }}
+                      <span class="mt-0.5 block text-2xs text-muted-foreground/80">v{{ row.bundleLink.version }}</span>
                     </RouterLink>
-                    <template v-else>{{ row.batch.bundle_ref }}</template>
+                    <span v-else class="break-all font-mono">{{ row.batch.bundle_ref }}</span>
+                    <div class="mt-2 text-2xs [overflow-wrap:anywhere]">
+                      {{ row.batch.target_receiver_id ? `接收端 · ${row.batch.target_receiver_id}` : "自动分配接收端" }}
+                    </div>
                   </TableCell>
-                  <TableCell class="py-3.5">
-                    <Badge tone="info">{{ row.batch.target_receiver_id ?? "自动分配" }}</Badge>
-                  </TableCell>
-                  <TableCell class="w-[280px] py-3.5">
+                  <TableCell class="w-[240px] min-w-[180px] py-3.5">
                     <BatchProgressCell
                       :done="row.done"
                       :total="row.total"
