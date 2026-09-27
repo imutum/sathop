@@ -228,7 +228,7 @@ async function applyTemplate(template: TaskTemplate) {
     <form @submit.prevent="onSubmit" @keydown="onKeydown" class="space-y-5 text-sm">
       <section class="space-y-5" aria-labelledby="batch-settings-title">
         <h3 id="batch-settings-title" class="flex items-center gap-3 font-semibold"><span class="grid h-7 w-7 place-items-center rounded-full bg-primary/10 font-mono text-xs text-primary" aria-hidden="true">01</span>任务设置</h3>
-        <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-[1.3fr_1.3fr_1fr]">
           <FormField v-slot="{ componentField }" name="name">
             <FormItem>
               <FormLabel>批次名称</FormLabel>
@@ -236,6 +236,27 @@ async function applyTemplate(template: TaskTemplate) {
                 <Input v-bind="componentField" placeholder="例如：九月地表温度交付" />
               </FormControl>
               <FormMessage />
+            </FormItem>
+          </FormField>
+          <FormField v-slot="{ componentField }" name="bundleSel">
+            <FormItem>
+              <FormLabel>任务包</FormLabel>
+              <FormControl>
+                <SelectInput v-bind="componentField" class="font-mono text-xs">
+                  <option value="">请选择任务包</option>
+                  <option
+                    v-for="b in bundles.data.value ?? []"
+                    :key="`${b.name}@${b.version}`"
+                    :value="`${b.name}@${b.version}`"
+                  >
+                    {{ b.name }}@{{ b.version }}{{ b.description ? ` — ${b.description}` : "" }}
+                  </option>
+                </SelectInput>
+              </FormControl>
+              <FormMessage />
+              <div v-if="bundles.isSuccess.value && bundles.data.value?.length === 0" class="text-2xs text-warning">
+                暂无任务包，请先前往“任务包”页上传。
+              </div>
             </FormItem>
           </FormField>
           <FormField v-slot="{ componentField }" name="targetReceiver">
@@ -257,28 +278,6 @@ async function applyTemplate(template: TaskTemplate) {
             </FormItem>
           </FormField>
         </div>
-
-        <FormField v-slot="{ componentField }" name="bundleSel">
-          <FormItem>
-            <FormLabel>任务包</FormLabel>
-            <FormControl>
-              <SelectInput v-bind="componentField" class="font-mono text-xs">
-                <option value="">请选择任务包</option>
-                <option
-                  v-for="b in bundles.data.value ?? []"
-                  :key="`${b.name}@${b.version}`"
-                  :value="`${b.name}@${b.version}`"
-                >
-                  {{ b.name }}@{{ b.version }}{{ b.description ? ` — ${b.description}` : "" }}
-                </option>
-              </SelectInput>
-            </FormControl>
-            <FormMessage />
-            <div v-if="bundles.isSuccess.value && bundles.data.value?.length === 0" class="text-2xs text-warning">
-              暂无任务包，请先前往“任务包”页上传。
-            </div>
-          </FormItem>
-        </FormField>
 
         <details
           v-if="bundleDetail.data.value && schema"
