@@ -201,7 +201,7 @@ export type BundleDetail = BundleSummary & {
     version: string;
     inputs?: { slots?: BundleSlotSpec[]; meta?: BundleMetaSpec[] } & Record<string, unknown>;
     execution: { entrypoint: string; timeout_sec?: number; env?: Record<string, string> };
-    outputs: { watch_dir: string; extensions?: string[]; object_key_template?: string };
+    outputs?: { watch_dir?: string; extensions?: string[]; object_key_template?: string };
     requirements?: { python?: string; pip?: string[]; apt?: string[]; credentials?: string[] };
     shared_files?: string[];
     [k: string]: unknown;

@@ -196,10 +196,10 @@ async function download() {
             {{ m.execution.timeout_sec ? `${m.execution.timeout_sec}s` : "默认" }}
           </Field>
           <Field label="输出目录">
-            <span class="font-mono">{{ m.outputs.watch_dir }}</span>
+            <span class="font-mono">{{ m.outputs?.watch_dir ?? "output" }}</span>
           </Field>
           <Field label="输出扩展名">
-            {{ m.outputs.extensions?.length ? m.outputs.extensions.join(", ") : "全部" }}
+            {{ m.outputs?.extensions?.length ? m.outputs.extensions.join(", ") : "全部" }}
           </Field>
         </div>
 
