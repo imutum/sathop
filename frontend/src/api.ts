@@ -17,6 +17,7 @@ import type {
   BundleSummary,
   EventRow,
   GranuleRow,
+  GranulePage,
   InFlightRow,
   OrchestratorInfo,
   Overview,
@@ -43,6 +44,7 @@ export type {
   Credential,
   EventRow,
   GranuleRow,
+  GranulePage,
   GranuleState,
   InFlightRow,
   OrchestratorInfo,
@@ -183,8 +185,25 @@ const batchApi = {
     const qs = new URLSearchParams({ granule_id: granuleId, limit: String(limit) });
     return getJson<EventRow[]>(`/api/events?${qs}`);
   },
-  retryFailed: (batchId: string) =>
-    postJson<{ reset: number }>(`/api/batches/${batchId}/retry-failed`),
+  granulePage: (batchId: string, state?: string, q = "", limit = 20, offset = 0) => {
+    const qs = new URLSearchParams({ limit: String(limit), offset: String(offset), q });
+    if (state) qs.set("state", state);
+    return getJson<GranulePage>(`/api/batches/${encodeURIComponent(batchId)}/granule-page?${qs}`);
+  },
+  downloadDeliveryReport: async (batchId: string): Promise<void> => {
+    const r = await fetch(`/api/batches/${encodeURIComponent(batchId)}/delivery-report`, { headers: authHeaders() });
+    if (!r.ok) throw await httpError(r);
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${batchId.replace(/[\\/:*?"<>|]/g, "_")}-delivery.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+  retryFailed: (batchId: string, includeBlacklisted = false) =>
+    postJson<{ reset: number }>(`/api/batches/${batchId}/retry-failed?include_blacklisted=${includeBlacklisted}`),
   resetExhaustedObjects: (batchId: string) =>
     postJson<{ reset: number }>(`/api/batches/${batchId}/reset-exhausted-objects`),
   cancelBatch: (batchId: string) =>

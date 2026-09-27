@@ -108,7 +108,7 @@ export function useBatchDetailMutations(batchId: Ref<string>) {
   });
 
   const retryAll = useMutation({
-    mutationFn: () => API.retryFailed(batchId.value),
+    mutationFn: (includeBlacklisted: boolean) => API.retryFailed(batchId.value, includeBlacklisted),
     onSuccess: (res) => {
       inv.detail();
       toast.success(`已重置 ${res.reset} 条失败数据粒为待处理`);

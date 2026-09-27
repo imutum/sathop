@@ -26,6 +26,12 @@ REPO_DIR="/app/repo"
 # install path — under the slots layout the editable src lives in slots/<ver>/,
 # so a path walk-up would otherwise land the stamp in the slot, not REPO_DIR.
 export SATHOP_REPO_DIR="$REPO_DIR"
+# The image's prewarmed cache is owned by root. Compose can run this entrypoint
+# as an arbitrary UID; use its writable repo volume instead of failing upgrades.
+if [ -n "${UV_CACHE_DIR:-}" ] && [ -d "$UV_CACHE_DIR" ] && [ ! -w "$UV_CACHE_DIR" ]; then
+  export UV_CACHE_DIR="$REPO_DIR/.uv-cache"
+  echo "[entrypoint] using writable dependency cache: $UV_CACHE_DIR" >&2
+fi
 SLOTS_DIR="$REPO_DIR/slots"
 COMMITTED_FILE="$REPO_DIR/committed"   # concrete version proven healthy (rollback target)
 INTENT_FILE="$REPO_DIR/intent"         # concrete version currently being brought up

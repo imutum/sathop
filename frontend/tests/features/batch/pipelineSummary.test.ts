@@ -17,13 +17,13 @@ const counts = {
 } as const;
 
 describe("pipelineTotals", () => {
-  it("partitions into the four buckets; grand total excludes 异常", () => {
+  it("partitions into the four buckets", () => {
     const t = pipelineTotals(counts);
     expect(t.pending).toBe(11648);
     expect(t.active).toBe(38 + 100 + 143 + 71); // 352
     expect(t.done).toBe(398 + 358735); // 359133
     expect(t.failed).toBe(0);
-    expect(t.total).toBe(11648 + 352 + 359133); // 异常 not summed in
+    expect(t.total).toBe(11648 + 352 + 359133);
   });
 });
 
@@ -49,7 +49,7 @@ describe("pipelineGroups", () => {
       "待分配",
       "进行中",
       "已交付",
-      "异常",
+      "失败 / 已停止",
     ]);
   });
 
@@ -79,10 +79,18 @@ describe("pipelineGroups", () => {
     expect(active.subs.find((s) => s.state === "downloaded")!.value).toBe(0);
   });
 
-  it("the three delivery stages' percentages sum to 100 (异常 is out-of-band)", () => {
-    const groups = pipelineGroups(counts);
-    const delivery = groups.filter((g) => g.key !== "failed");
-    expect(delivery.reduce((sum, g) => sum + g.pct, 0)).toBeCloseTo(100, 5);
+  it("all four groups sum to 100 even when stopped work outnumbers deliveries", () => {
+    const mixed = { deleted: 468, failed: 2, blacklisted: 20000 };
+    const groups = pipelineGroups(mixed);
+    expect(pipelineTotals(mixed).total).toBe(20470);
+    expect(groups.every(g => g.pct >= 0 && g.pct <= 100)).toBe(true);
+    expect(groups.reduce((sum, g) => sum + g.pct, 0)).toBeCloseTo(100, 5);
+    expect(pipelineSegments(mixed).reduce((sum, s) => sum + s.pct, 0)).toBeCloseTo(100, 5);
+  });
+
+  it("a fully stopped batch still has a meaningful total and distribution", () => {
+    expect(pipelineTotals({ blacklisted: 4209 }).total).toBe(4209);
+    expect(pipelineSegments({ blacklisted: 4209 })).toEqual([{ state: "blacklisted", value: 4209, pct: 100 }]);
   });
 
   it("all zero in, all zero out (no divide-by-zero)", () => {

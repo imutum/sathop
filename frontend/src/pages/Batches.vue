@@ -288,13 +288,13 @@ function onCreated() {
                 <RowActions>
                   <template #primary>
                     <Button
-                      v-if="r.errors > 0"
+                      v-if="(r.b.counts.failed ?? 0) > 0"
                       size="sm"
                       :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
                       pending-label="重试中…"
                       @click="retry.mutate(r.b.batch_id)"
                     >
-                      重试失败 ({{ r.errors }})
+                      重试失败 ({{ r.b.counts.failed }})
                     </Button>
                     <Button
                       v-if="r.inFlight > 0"
@@ -385,13 +385,13 @@ function onCreated() {
                     <RowActions align="end">
                       <template #primary>
                         <Button
-                          v-if="r.errors > 0"
+                          v-if="(r.b.counts.failed ?? 0) > 0"
                           size="sm"
                           :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
                           pending-label="重试中…"
                           @click="retry.mutate(r.b.batch_id)"
                         >
-                          重试失败 ({{ r.errors }})
+                          重试失败 ({{ r.b.counts.failed }})
                         </Button>
                         <Button
                           v-if="r.inFlight > 0"

@@ -7,6 +7,7 @@ import secrets
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,7 @@ from sathop.shared.protocol import (
     BatchSummary,
     GranuleBulkAdd,
     GranuleCreate,
+    GranulePage,
     GranuleRow,
 )
 from sathop.shared.state_machine import (
@@ -52,6 +54,7 @@ from .batch_readmodels import (
     summary,
     summary_just_created,
 )
+from .batch_reports import delivery_report, retained_delivery_count
 from .progress import evict_granule, evict_granules
 
 router = APIRouter(prefix="/batches", tags=["batches"], dependencies=[Depends(require_token)])
@@ -272,6 +275,42 @@ async def list_granules(
     return await granule_rows(s, list(rows))
 
 
+@router.get("/{batch_id}/granule-page", response_model=GranulePage)
+async def granule_page(
+    batch_id: str,
+    state: GranuleState | None = None,
+    q: str = Query("", max_length=200),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    s: AsyncSession = Depends(session),
+) -> GranulePage:
+    b = await get_or_404(s, Batch, batch_id, "batch not found")
+    conditions = [Granule.batch_id == batch_id]
+    if state is not None:
+        conditions.append(Granule.state == state.value)
+    if q.strip():
+        conditions.append(Granule.granule_id.icontains(q.strip(), autoescape=True))
+    total = await s.scalar(select(func.count()).select_from(Granule).where(*conditions)) or 0
+    rows = await s.scalars(
+        select(Granule)
+        .where(*conditions)
+        .order_by(Granule.updated_at.desc(), Granule.granule_id)
+        .limit(limit)
+        .offset(offset)
+    )
+    return GranulePage(
+        items=await granule_rows(s, list(rows)),
+        total=total,
+        archived_delivered=max(0, (b.delivered_count or 0) - await retained_delivery_count(s, batch_id)),
+    )
+
+
+@router.get("/{batch_id}/delivery-report")
+async def export_delivery_report(batch_id: str, s: AsyncSession = Depends(session)) -> StreamingResponse:
+    b = await get_or_404(s, Batch, batch_id, "batch not found")
+    return await delivery_report(s, b)
+
+
 @router.post("/{batch_id}/reset-exhausted-objects")
 async def reset_exhausted_objects(batch_id: str, s: AsyncSession = Depends(session)) -> dict:
     """Zero `failed_pulls` on all of this batch's still-pending objects that
@@ -294,13 +333,17 @@ async def reset_exhausted_objects(batch_id: str, s: AsyncSession = Depends(sessi
 
 
 @router.post("/{batch_id}/retry-failed")
-async def retry_failed(batch_id: str, s: AsyncSession = Depends(session)) -> dict:
+async def retry_failed(
+    batch_id: str,
+    include_blacklisted: bool = Query(True, description="Include stopped/cancelled work (legacy default)"),
+    s: AsyncSession = Depends(session),
+) -> dict:
+    await get_or_404(s, Batch, batch_id, "batch not found")
     now = utcnow()
-    stmt = (
-        select(Granule)
-        .where(Granule.batch_id == batch_id)
-        .where(Granule.state.in_([GranuleState.FAILED.value, GranuleState.BLACKLISTED.value]))
-    )
+    states = [GranuleState.FAILED.value]
+    if include_blacklisted:
+        states.append(GranuleState.BLACKLISTED.value)
+    stmt = select(Granule).where(Granule.batch_id == batch_id).where(Granule.state.in_(states))
     rows = (await s.execute(stmt)).scalars().all()
     for granule in rows:
         await apply_transition(

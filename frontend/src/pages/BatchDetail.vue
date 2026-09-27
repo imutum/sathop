@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { refDebounced } from "@vueuse/core";
 import { useQuery } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
-import { API, IN_FLIGHT_STATES, type GranuleRow, type GranuleState } from "@/api";
+import { API, IN_FLIGHT_STATES, STATE_ORDER, type GranuleRow, type GranuleState } from "@/api";
 import { fmtAge, stateLabel } from "@/i18n";
 import { requestConfirm } from "@/composables/useConfirm";
+import { useToast } from "@/composables/useToast";
 import { K } from "@/queryKeys";
 import { useBatchDetailMutations } from "@/features/batch/useBatchMutations";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -19,28 +21,18 @@ import CopyButton from "@/components/CopyButton.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import RowActions from "@/components/RowActions.vue";
 import Segmented from "@/components/Segmented.vue";
+import TextInput from "@/ui/TextInput.vue";
+import BatchOperations from "@/features/batch/components/BatchOperations.vue";
+import { operationStatus } from "@/features/batch/operationStatus";
 import BatchEventLog from "@/features/batch/components/BatchEventLog.vue";
 import BatchGranuleTable from "@/features/batch/components/BatchGranuleTable.vue";
 import BatchProgress from "@/features/batch/components/BatchProgress.vue";
 import BatchTimingCard from "@/features/batch/components/BatchTimingCard.vue";
-import { errorTotal, inFlightTotal, isBatchClosed, totalCount } from "@/features/batch/summary";
+import { inFlightTotal, isBatchClosed, totalCount } from "@/features/batch/summary";
 import { stripBatchPrefix } from "@/lib/utils";
 import { Icon } from "@/components/Icon";
 
-// Filter chips 直接派生自 i18n.GRANULE_STATE_ZH，避免命名漂移。下载完/处理完/上传完
-// 这 3 个中间状态 (downloaded/processed/uploaded) 在 UI 上对操作意义不大（很短暂），
-// 故只保留 worker 视角下"驻留时间长 + 用户关心的" 8 个。
-const FILTER_STATES: GranuleState[] = [
-  "pending",
-  "queued",
-  "downloading",
-  "processing",
-  "uploaded",
-  "acked",
-  "deleted",
-  "failed",
-  "blacklisted",
-];
+const FILTER_STATES: GranuleState[] = [...STATE_ORDER, "failed", "blacklisted"];
 const STATE_FILTERS: { value: GranuleState | "all"; label: string }[] = [
   { value: "all", label: "全部" },
   ...FILTER_STATES.map((s) => ({ value: s, label: stateLabel(s) })),
@@ -55,6 +47,8 @@ const LOG_LEVEL_OPTIONS = [
 ];
 
 const route = useRoute();
+const toast = useToast();
+const downloadingReport = ref(false);
 
 const batchId = computed(() => (route.params.batchId as string) ?? "");
 const { cancel, retry, retryAll, cancelAll, resetExhausted, deleteBatch, setPaused } =
@@ -66,15 +60,18 @@ const highlight = computed(() => (route.query.granule as string | undefined) ?? 
 const tab = ref<string>(route.query.granule ? "granules" : "progress");
 
 const filter = ref<GranuleState | "all">("all");
-const PAGE_SIZE = 10;
+const search = ref(typeof route.query.granule === "string" ? route.query.granule : "");
+const searchTerm = refDebounced(search, 250);
+const PAGE_SIZE = 20;
 const page = ref(0);
 const logLevel = ref<"all" | "warn" | "error">("all");
 const expanded = ref<string | null>(null);
 const rowRefs = ref<Record<string, HTMLElement | null>>({});
 let lastScrolled: string | null = null;
 
-function setRowRef(id: string, el: Element | null) {
-  rowRefs.value[id] = el as HTMLElement | null;
+function setRowRef(id: string, el: Element | { $el?: Element } | null) {
+  const node = el && "$el" in el ? el.$el : el;
+  rowRefs.value[id] = node instanceof HTMLElement ? node : null;
 }
 
 const batch = useQuery({
@@ -83,7 +80,18 @@ const batch = useQuery({
   enabled: computed(() => !!batchId.value),
 });
 
-watch(filter, () => { page.value = 0; });
+watch([filter, searchTerm], () => { page.value = 0; expanded.value = null; });
+watch(batchId, () => {
+  page.value = 0;
+  filter.value = "all";
+  search.value = highlight.value ?? "";
+  expanded.value = null;
+  lastScrolled = null;
+  tab.value = highlight.value ? "granules" : "progress";
+});
+watch(highlight, (id) => {
+  if (id) { search.value = id; filter.value = "all"; tab.value = "granules"; }
+});
 
 // Detail-tab queries are gated on the active tab: nothing fetches until you
 // open the tab (TanStack `enabled`). The default 进度 tab reads only the
@@ -94,11 +102,12 @@ const onGranules = computed(() => !!batchId.value && tab.value === "granules");
 const onEvents = computed(() => !!batchId.value && tab.value === "events");
 
 const granules = useQuery({
-  queryKey: computed(() => [...K.granules, batchId.value, filter.value, page.value]),
+  queryKey: computed(() => [...K.granules, batchId.value, filter.value, searchTerm.value, page.value]),
   queryFn: () =>
-    API.granules(
+    API.granulePage(
       batchId.value,
       filter.value === "all" ? undefined : filter.value,
+      searchTerm.value,
       PAGE_SIZE,
       page.value * PAGE_SIZE,
     ),
@@ -120,15 +129,15 @@ const latestProgress = useQuery({
 
 
 const b = computed(() => batch.data.value);
-const rows = computed(() => granules.data.value ?? []);
+const rows = computed(() => granules.data.value?.items ?? []);
 const batchEvents = computed(() => events.data.value ?? []);
 const progressByGranule = computed(() => latestProgress.data.value ?? {});
-const filteredTotal = computed(() => {
-  if (!b.value) return 0;
-  if (filter.value === "all") return totalCount(b.value.counts);
-  return b.value.counts[filter.value as GranuleState] ?? 0;
-});
+const filteredTotal = computed(() => granules.data.value?.total ?? 0);
+const archivedDelivered = computed(() => granules.data.value?.archived_delivered ?? 0);
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredTotal.value / PAGE_SIZE)));
+watch(() => granules.data.value, (data) => {
+  if (data && page.value >= totalPages.value) page.value = totalPages.value - 1;
+});
 const hasPrev = computed(() => page.value > 0);
 const hasNext = computed(() => page.value < totalPages.value - 1);
 
@@ -138,7 +147,8 @@ const paused = computed(() => b.value?.status === "paused");
 // offers 恢复 so it can never get stuck paused.
 const closed = computed(() => (b.value ? isBatchClosed(b.value) : true));
 
-const failedCount = computed(() => (b.value ? errorTotal(b.value) : 0));
+const failedCount = computed(() => b.value?.counts.failed ?? 0);
+const stoppedCount = computed(() => b.value?.counts.blacklisted ?? 0);
 // Server-authoritative; for batches with >200 granules the per-row sum from
 // the granules query would underreport.
 const exhaustedCount = computed(() => b.value?.objects_exhausted ?? 0);
@@ -182,6 +192,41 @@ watch([highlight, rows], () => {
 
 function toggleRow(id: string) {
   expanded.value = expanded.value === id ? null : id;
+}
+
+function inspectState(state: GranuleState) {
+  search.value = "";
+  filter.value = state;
+  page.value = 0;
+  tab.value = "granules";
+}
+
+async function downloadReport() {
+  downloadingReport.value = true;
+  try {
+    await API.downloadDeliveryReport(batchId.value);
+    toast.success("交付报告已导出，包含累计数量和仍保留的产物清单");
+  } catch (e) {
+    toast.error(`导出失败：${(e as Error).message}`);
+  } finally { downloadingReport.value = false; }
+}
+
+async function confirmRetryStopped() {
+  const ok = await requestConfirm({
+    title: "重新处理已停止的数据粒？",
+    description: `将重新处理 ${stoppedCount.value} 条已停止和 ${failedCount.value} 条失败数据粒。已停止中可能包含主动取消的任务，这会重新下载和处理它们。请先在数据粒列表核对范围。`,
+    confirmText: "重新处理", tone: "danger",
+  });
+  if (ok) retryAll.mutate(true);
+}
+
+async function confirmResetExhausted() {
+  const ok = await requestConfirm({
+    title: "恢复产物交付？",
+    description: `将重新尝试拉取 ${exhaustedCount.value} 个产物。请先确认接收端在线、磁盘空间充足，并已修复源产物或网络问题。`,
+    confirmText: "恢复交付",
+  });
+  if (ok) resetExhausted.mutate();
 }
 
 async function confirmCancel(g: GranuleRow) {
@@ -244,6 +289,10 @@ async function confirmDelete() {
           <template v-if="b" #actions>
             <RowActions align="end">
               <template #primary>
+                <Button size="sm" variant="outline" :pending="downloadingReport" pending-label="导出中…" @click="downloadReport">
+                  <Icon name="download" :size="13" />
+                  导出交付报告
+                </Button>
                 <Button
                   v-if="paused"
                   size="sm"
@@ -271,12 +320,15 @@ async function confirmDelete() {
                   size="sm"
                   :pending="retryAll.isPending.value"
                   pending-label="重试中…"
-                  @click="retryAll.mutate()"
+                  @click="retryAll.mutate(false)"
                 >
                   重试失败 ({{ failedCount }})
                 </Button>
               </template>
               <!-- 批次级的整体动作。逐粒取消/重试在「数据粒」页签的行内（原子层）。 -->
+              <DropdownMenuItem v-if="stoppedCount > 0" :disabled="retryAll.isPending.value" @select="confirmRetryStopped">
+                重新处理已停止数据粒…
+              </DropdownMenuItem>
               <DropdownMenuItem
                 v-if="inflightCount > 0"
                 :disabled="cancelAll.isPending.value"
@@ -290,9 +342,9 @@ async function confirmDelete() {
                 v-if="exhaustedCount > 0"
                 :disabled="resetExhausted.isPending.value"
                 title="清零所有已放弃产物的拉取失败计数 — 下次 receiver poll 重新派发"
-                @select="resetExhausted.mutate()"
+                @select="confirmResetExhausted"
               >
-                重置已放弃产物 ({{ exhaustedCount }})
+                恢复产物交付 ({{ exhaustedCount }})
               </DropdownMenuItem>
               <DropdownMenuSeparator v-if="inflightCount > 0 || exhaustedCount > 0" />
               <DropdownMenuItem
@@ -339,7 +391,7 @@ async function confirmDelete() {
       <span class="inline-flex items-center gap-1.5">
         状态
         <Badge v-if="paused" tone="warn">已暂停</Badge>
-        <span v-else class="text-foreground">运行中</span>
+        <span v-else class="text-foreground">{{ operationStatus(b).label }}</span>
       </span>
     </div>
 
@@ -353,6 +405,7 @@ async function confirmDelete() {
 
       <!-- 进度：默认页签。只读常驻的 batch 摘要——各阶段实时 WIP（卡点定位）+ 交付吞吐/ETA。 -->
       <TabsContent value="progress">
+        <BatchOperations class="mb-4" :summary="b" :restoring="resetExhausted.isPending.value" @inspect="inspectState" @restore="confirmResetExhausted" />
         <Card>
           <div class="p-5 sm:p-6">
             <BatchProgress :summary="b" />
@@ -364,13 +417,32 @@ async function confirmDelete() {
       <TabsContent value="granules">
         <CardSection
           title="数据粒"
-          description="按状态筛选 · 点击行展开阶段计时 / 进度时间线 / 该粒事件"
+          description="搜索 ID、筛选状态后核对任务 · 点击行展开详细进度与错误"
           :padded="false"
         >
           <template #meta>
             <Segmented v-model="filter" size="sm" :options="stateOptions" />
           </template>
+          <div class="space-y-3 border-b border-border/60 px-5 py-4">
+            <div class="flex items-center gap-2">
+              <TextInput v-model="search" class="w-full sm:max-w-sm" maxlength="200" placeholder="搜索数据粒 ID" aria-label="搜索数据粒 ID">
+                <template #leftIcon><Icon name="search" :size="13" /></template>
+              </TextInput>
+              <Button v-if="search" size="sm" variant="ghost" @click="search = ''">清除</Button>
+            </div>
+            <p class="text-xs text-muted-foreground">状态数量为累计统计，下方仅分页显示仍保留的明细。<span v-if="archivedDelivered">已有 {{ archivedDelivered.toLocaleString() }} 条已交付明细按保留策略清理，仅保留累计数量。</span></p>
+          </div>
+          <div v-if="granules.isPending.value" class="space-y-3 p-5" aria-label="正在加载数据粒">
+            <Skeleton v-for="n in 3" :key="n" class="h-12 w-full" />
+          </div>
+          <Alert v-else-if="granules.error.value" variant="destructive" class="m-5">
+            <AlertDescription class="flex items-center justify-between gap-3">
+              <span>加载数据粒失败：{{ granules.error.value.message }}</span>
+              <Button size="sm" variant="outline" @click="granules.refetch()">重试</Button>
+            </AlertDescription>
+          </Alert>
           <BatchGranuleTable
+            v-else
             :rows="rows"
             :batch-id="batchId"
             :highlight="highlight"
@@ -378,24 +450,24 @@ async function confirmDelete() {
             :latest-progress="progressByGranule"
             :cancellable="CANCELLABLE"
             :retryable="RETRYABLE"
-            :cancelling-id="cancel.variables.value"
-            :retrying-id="retry.variables.value"
+            :cancelling-id="cancel.isPending.value ? cancel.variables.value : undefined"
+            :retrying-id="retry.isPending.value ? retry.variables.value : undefined"
             @row-ref="setRowRef"
             @toggle="toggleRow"
             @cancel="confirmCancel"
             @retry="(id) => retry.mutate(id)"
           />
           <div
-            v-if="totalPages > 1"
-            class="flex items-center justify-between border-t border-border/60 px-5 py-3 text-cell"
+            v-if="granules.data.value && !granules.error.value"
+            class="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-5 py-3 text-cell"
           >
             <span class="tabular-nums text-muted-foreground">
-              {{ page * PAGE_SIZE + 1 }}–{{ Math.min((page + 1) * PAGE_SIZE, filteredTotal) }} / {{ filteredTotal }}
+              {{ filteredTotal ? page * PAGE_SIZE + 1 : 0 }}–{{ Math.min((page + 1) * PAGE_SIZE, filteredTotal) }} / {{ filteredTotal }} 条明细
             </span>
             <div class="flex items-center gap-2">
-              <Button size="sm" variant="outline" :disabled="!hasPrev" @click="page--">上一页</Button>
+              <Button size="sm" variant="outline" :disabled="!hasPrev || granules.isFetching.value" @click="page--">上一页</Button>
               <span class="tabular-nums text-muted-foreground">{{ page + 1 }} / {{ totalPages }}</span>
-              <Button size="sm" variant="outline" :disabled="!hasNext" @click="page++">下一页</Button>
+              <Button size="sm" variant="outline" :disabled="!hasNext || granules.isFetching.value" @click="page++">下一页</Button>
             </div>
           </div>
         </CardSection>
@@ -407,7 +479,14 @@ async function confirmDelete() {
             <Badge variant="info" class="tabular-nums">{{ eventCountLabel }}</Badge>
             <Segmented v-model="logLevel" size="sm" :options="LOG_LEVEL_OPTIONS" />
           </template>
-          <BatchEventLog :events="batchEvents" :batch-id="batchId" />
+          <div v-if="events.isPending.value" class="p-5"><Skeleton class="h-24 w-full" /></div>
+          <Alert v-else-if="events.error.value" variant="destructive" class="m-5">
+            <AlertDescription class="flex items-center justify-between gap-3">
+              <span>加载日志失败：{{ events.error.value.message }}</span>
+              <Button size="sm" variant="outline" @click="events.refetch()">重试</Button>
+            </AlertDescription>
+          </Alert>
+          <BatchEventLog v-else :events="batchEvents" :batch-id="batchId" />
         </CardSection>
       </TabsContent>
 
@@ -415,7 +494,7 @@ async function confirmDelete() {
         <BatchTimingCard
           :batch-id="batchId"
           :remaining="remainingToDeliver"
-          :eta-realtime="b?.eta_realtime ?? null"
+          :eta-realtime="paused ? null : b?.eta_realtime ?? null"
         />
       </TabsContent>
     </Tabs>
