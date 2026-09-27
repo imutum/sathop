@@ -41,7 +41,6 @@ async def client(tmp_path, patch_settings, request):
         for i in (1, 2):
             s.add(
                 db.GranuleObject(
-                    id=i,
                     granule_id="b:g",
                     worker_id="w",
                     object_key=f"=result_{i}%.tif",
