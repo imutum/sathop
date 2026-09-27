@@ -196,6 +196,7 @@ async def health_sampler(c: httpx.AsyncClient, st: Stats, stop: asyncio.Event) -
             st.health.append((time.monotonic() - t0) * 1000)
         except Exception:
             st.health.append(99_999.0)
+            st.errors += 1
         await asyncio.sleep(0.2)
 
 
@@ -212,6 +213,11 @@ def pct(xs: list[float], p: float) -> float:
         return 0.0
     s = sorted(xs)
     return s[min(len(s) - 1, int(len(s) * p))]
+
+
+async def check_response(response: httpx.Response) -> None:
+    """HTTP failures must count as errors, not successful simulated events."""
+    response.raise_for_status()
 
 
 async def main() -> None:
@@ -258,7 +264,13 @@ async def main() -> None:
     st = Stats()
     stop = asyncio.Event()
 
-    async with httpx.AsyncClient(base_url=a.orch, headers=headers, timeout=30.0, limits=limits) as c:
+    async with httpx.AsyncClient(
+        base_url=a.orch,
+        headers=headers,
+        timeout=30.0,
+        limits=limits,
+        event_hooks={"response": [check_response]},
+    ) as c:
         d0 = await delivered(c)
         t0 = time.monotonic()
         tasks = [
@@ -288,7 +300,8 @@ async def main() -> None:
                 break
 
         stop.set()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        st.errors += sum(isinstance(result, BaseException) for result in results)
         elapsed = time.monotonic() - t0
         final = await delivered(c)
 

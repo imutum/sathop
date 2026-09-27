@@ -157,7 +157,7 @@ jobs:
           uv run python scripts/loadtest_orch.py \
             --pg "$SATHOP_DATABASE_URL" --orch http://127.0.0.1:8000 \
             --granules 3000 --workers 12 --receivers 3 --duration 60 --batch \
-            --max-health-p95-ms 3000 --max-health-max-ms 10000 --max-errors 100 --min-delivered 300
+            --max-health-p95-ms 3000 --max-health-max-ms 10000 --max-errors 0 --min-delivered 300
       - name: Orchestrator log tail
         if: always()
         run: tail -n 80 orch.log || true
