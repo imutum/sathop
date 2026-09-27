@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db import Batch, Granule, GranuleObject, get_session_maker, utcnow
+from ..db import Batch, DeliveryRecord, Granule, GranuleObject, get_session_maker, utcnow
 from .batch_readmodels import summary
 
 _CHUNK_SIZE = 500
@@ -67,6 +67,20 @@ async def delivery_report(s: AsyncSession, batch: Batch) -> StreamingResponse:
         )
         or 0
     )
+    ledger_upper = (
+        await s.scalar(select(func.max(DeliveryRecord.id)).where(DeliveryRecord.batch_id == batch.batch_id))
+        or 0
+    )
+    recorded = (
+        select(DeliveryRecord.id)
+        .where(
+            DeliveryRecord.id <= ledger_upper,
+            DeliveryRecord.source_object_id == GranuleObject.id,
+            DeliveryRecord.uploaded_at == GranuleObject.uploaded_at,
+            DeliveryRecord.granule_id == GranuleObject.granule_id,
+        )
+        .exists()
+    )
     header: list[list[object]] = [
         ["SatHop 批次交付报告"],
         ["生成时间（UTC）", utcnow().isoformat()],
@@ -79,7 +93,10 @@ async def delivery_report(s: AsyncSession, batch: Batch) -> StreamingResponse:
         ["累计已交付", snapshot.counts.get("acked", 0) + snapshot.counts.get("deleted", 0)],
         ["拉取重试耗尽产物", snapshot.objects_exhausted],
         ["历史已清理明细（数据粒）", archived],
-        ["范围说明", "下方仅含仍保留的产物明细。已清理历史只保留累计数量；运行中的状态可能在导出期间变化。"],
+        [
+            "范围说明",
+            "包含长期交付台账和仍保留的其他产物。升级前已清理的明细无法恢复；运行中的状态可能在导出期间变化。",
+        ],
         ["验收说明", "已交付表示接收端已确认接收，请结合接收端实际文件验收。"],
         [],
         ["数据粒状态", "数量"],
@@ -109,7 +126,10 @@ async def delivery_report(s: AsyncSession, batch: Batch) -> StreamingResponse:
                         )
                         .join(Granule)
                         .where(
-                            Granule.batch_id == batch_id, GranuleObject.id > after, GranuleObject.id <= upper
+                            Granule.batch_id == batch_id,
+                            GranuleObject.id > after,
+                            GranuleObject.id <= upper,
+                            ~recorded,
                         )
                         .order_by(GranuleObject.id)
                         .limit(_CHUNK_SIZE)
@@ -132,6 +152,39 @@ async def delivery_report(s: AsyncSession, batch: Batch) -> StreamingResponse:
                 ]
             )
             after = records[-1][0]
+
+        after = 0
+        while after < ledger_upper:
+            async with get_session_maker()() as read:
+                receipts = (
+                    await read.scalars(
+                        select(DeliveryRecord)
+                        .where(
+                            DeliveryRecord.batch_id == batch_id,
+                            DeliveryRecord.id > after,
+                            DeliveryRecord.id <= ledger_upper,
+                        )
+                        .order_by(DeliveryRecord.id)
+                        .limit(_CHUNK_SIZE)
+                    )
+                ).all()
+            if not receipts:
+                break
+            yield _csv(
+                [
+                    [
+                        r.granule_id,
+                        r.object_key,
+                        r.size,
+                        r.sha256,
+                        "已交付",
+                        r.receiver_id,
+                        r.delivered_at.isoformat(),
+                    ]
+                    for r in receipts
+                ]
+            )
+            after = receipts[-1].id
 
     return StreamingResponse(
         chunks(),

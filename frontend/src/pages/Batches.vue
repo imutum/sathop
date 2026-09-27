@@ -135,8 +135,8 @@ async function confirmDelete(b: BatchSummary) {
     title: `永久删除批次 "${b.name}"？`,
     description:
       t === 0
-        ? "将清除该批次的全部 orchestrator 记录。此操作不可恢复。"
-        : `将删除 ${t} 条数据粒，并清除该批次的全部 orchestrator 记录\n` +
+        ? "将清除该批次的运行记录。已确认的交付台账继续保留。此操作不可恢复。"
+        : `将删除 ${t} 条数据粒，并清除运行记录。已确认的交付台账继续保留。\n` +
           `（数据粒、产物、进度、阶段计时、事件）。此操作不可恢复。`,
     confirmText: "永久删除",
     tone: "danger",

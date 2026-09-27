@@ -4,6 +4,7 @@ from . import (
     admin,
     batches,
     bundles,
+    deliveries,
     events,
     metrics,
     progress,
@@ -11,6 +12,7 @@ from . import (
     rollout,
     shared,
     stream,
+    templates,
     timing,
     workers,
 )
@@ -29,5 +31,7 @@ for mod in [
     bundles,
     shared,
     timing,
+    deliveries,
+    templates,
 ]:
     router.include_router(mod.router)

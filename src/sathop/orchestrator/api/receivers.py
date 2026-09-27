@@ -29,6 +29,7 @@ from sathop.shared.state_machine import (
 from .. import db, telemetry
 from ..config import require_token, settings
 from ..db import Batch, Granule, GranuleObject, Receiver, Worker, session, utcnow
+from ..delivery_ledger import archive_confirmed
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
 from ._helpers import all_objects_acked, get_or_404, object_pull_claimable
@@ -164,6 +165,8 @@ async def _record_pull_failure(
 ) -> bool:
     """Bump the object's failed-pull counter and log it; return whether it's now
     exhausted (>= max_pull_failures). Shared by /ack and /ack/batch."""
+    if obj.acked_at is not None:
+        return False
     count = (obj.failed_pulls or 0) + 1
     obj.failed_pulls = count
     # Release the soft-claim so the object re-offers immediately (to this or any
@@ -196,6 +199,8 @@ async def _log_sha_mismatch(s: AsyncSession, receiver_id: str, obj: GranuleObjec
 
 
 async def _mark_acked(s: AsyncSession, receiver_id: str, obj: GranuleObject, bid: str | None, now) -> None:
+    if obj.acked_at is not None:
+        return
     obj.acked_at = now
     obj.acked_by = receiver_id
     await log(s, receiver_id, f"acked {obj.object_key}", granule_id=obj.granule_id, batch_id=bid)
@@ -203,7 +208,9 @@ async def _mark_acked(s: AsyncSession, receiver_id: str, obj: GranuleObject, bid
 
 @router.post("/ack")
 async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
-    obj = await get_or_404(s, GranuleObject, req.object_id, "object not found")
+    obj = await s.scalar(select(GranuleObject).where(GranuleObject.id == req.object_id).with_for_update())
+    if obj is None:
+        raise HTTPException(404, "object not found")
     g = await s.get(Granule, obj.granule_id)
     bid = g.batch_id if g else None
 
@@ -220,6 +227,7 @@ async def ack(req: AckReport, s: AsyncSession = Depends(session)) -> dict:
     await _mark_acked(s, req.receiver_id, obj, bid, now)
     # Flush so the just-set acked_at is visible to the aggregate count below.
     await s.flush()
+    await archive_confirmed(s, object_ids=[obj.id])
     all_acked = await s.scalar(select(all_objects_acked()).where(GranuleObject.granule_id == obj.granule_id))
     if g is not None and all_acked:
         await apply_transition(s, g, ObjectAcked(granule_id=g.granule_id), now=now, on_conflict="skip")
@@ -253,7 +261,18 @@ async def ack_batch(req: AckBatch, s: AsyncSession = Depends(session)) -> AckBat
     if not req.acks:
         return AckBatchResponse()
     oids = list({a.object_id for a in req.acks})
-    objs = (await s.execute(select(GranuleObject).where(GranuleObject.id.in_(oids)))).scalars().all()
+    objs = (
+        (
+            await s.execute(
+                select(GranuleObject)
+                .where(GranuleObject.id.in_(oids))
+                .order_by(GranuleObject.id)
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
     by_id = {o.id: o for o in objs}
     gids = list({o.granule_id for o in objs})
     g_by_id = {
@@ -274,6 +293,7 @@ async def ack_batch(req: AckBatch, s: AsyncSession = Depends(session)) -> AckBat
     # touched granule whose objects are now all acked (batched all_objects_acked).
     if acked_granules:
         await s.flush()
+        await archive_confirmed(s, object_ids=oids)
         done = (
             (
                 await s.execute(

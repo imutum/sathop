@@ -20,6 +20,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import Granule, GranuleObject, GranuleStageTiming
+from .delivery_ledger import archive_confirmed
 
 # Children before parent. The reaper exists so this tuple is the *only* place
 # the granule-child topology is spelled out.
@@ -43,6 +44,7 @@ async def reap_granules(s: AsyncSession, granule_ids: Collection[str]) -> dict[s
         return counts
     for start in range(0, len(ids), _ID_CHUNK):
         chunk = ids[start : start + _ID_CHUNK]
+        await archive_confirmed(s, granule_ids=chunk)
         for table, key in _CHILD_TABLES:
             r = await s.execute(delete(table).where(table.granule_id.in_(chunk)))
             counts[key] += getattr(r, "rowcount", 0) or 0

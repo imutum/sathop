@@ -457,7 +457,7 @@ async def delete_batch(
     s: AsyncSession = Depends(session),
 ) -> dict:
     """Hard-delete a batch and every row that references it (granules,
-    objects, stage timings, scoped events).
+    objects, stage timings, scoped events). Durable delivery receipts remain.
 
     Refuses by default if any granule is mid-flight on a worker — cancel the
     batch first so the worker drops the lease cleanly, or pass `?force=true`
