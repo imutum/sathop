@@ -324,15 +324,16 @@ def _serve_with_failure_injection(
 
 
 async def test_segmented_retries_only_missing_bytes_after_transient_failure(tmp_path):
-    """Segment 0's first request hangs up after 100 bytes, second succeeds.
-    The retry must Range-request only the bytes we didn't get yet (not
-    re-download the 100 we already have), AND the final file must be
-    byte-perfect — proving the resumed write hit the right offset."""
-    payload = bytes(range(256)) * 4  # 1024 bytes of varied content
-    # 4 segments → starts at 0, 256, 512, 768. Fail on segment-0's first req,
-    # after the first 100 of its 256 bytes.
+    """A real transport interruption resumes after the last committed chunk.
+
+    The former 100-byte fixture never filled httpx's 256 KiB chunk buffer,
+    so it passed even when the entire segment was downloaded again.
+    """
+    segment_size = recv_mod.CHUNK * 4
+    payload = bytes(range(256)) * (segment_size * 4 // 256)
+    committed = recv_mod.CHUNK
     srv, port, state = _serve_with_failure_injection(
-        payload, fail_first_request_for_start=0, fail_after_bytes=100
+        payload, fail_first_request_for_start=0, fail_after_bytes=committed + 100
     )
     r, _ = _make_receiver(tmp_path)
     try:
@@ -344,18 +345,14 @@ async def test_segmented_retries_only_missing_bytes_after_transient_failure(tmp_
             expected_size=len(payload),
             segments=4,
         )
-        # File correctness: bytes-aware resume must land the second-attempt
-        # bytes at offset 100, not offset 0 (which would clobber what we
-        # already wrote and shift the rest).
         assert dest.read_bytes() == payload
         assert size == len(payload)
         assert sha == hashlib.sha256(payload).hexdigest()
-        # Retry actually happened — segment-0's start saw 2 requests total.
-        assert state["request_counts"][0] == 2
+        assert state["request_counts"][0] == 1
+        assert state["request_counts"][committed] == 1
         # Other segments untouched by retry — exactly 1 request each.
-        assert state["request_counts"][256] == 1
-        assert state["request_counts"][512] == 1
-        assert state["request_counts"][768] == 1
+        for i in range(1, 4):
+            assert state["request_counts"][i * segment_size] == 1
     finally:
         srv.shutdown()
         await r.aclose()

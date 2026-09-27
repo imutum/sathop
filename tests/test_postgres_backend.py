@@ -21,7 +21,7 @@ from datetime import timedelta
 import pytest
 
 from sathop.orchestrator import db as orch_db
-from sathop.orchestrator import event_store
+from sathop.orchestrator import event_store, pubsub
 from sathop.orchestrator.api.worker_leases import claim_pending_granules
 from sathop.orchestrator.db import Base, Batch, Granule, utcnow
 from sathop.orchestrator.pubsub import commit_and_publish, log_event
@@ -130,3 +130,30 @@ async def test_concurrent_lease_claims_disjoint(pg):
     assert set(a).isdisjoint(set(b))  # FOR UPDATE SKIP LOCKED → no granule claimed twice
     assert len(a) + len(b) <= 100  # never over-claim past what's pending
     assert len(a) + len(b) >= 60  # together they drain a healthy chunk
+
+
+async def test_batched_notify_reaches_listener(pg, monkeypatch):
+    monkeypatch.setattr(pubsub, "_notify_q", asyncio.Queue(maxsize=4096))
+    with pubsub.subscribe() as queue:
+        listener = asyncio.create_task(pubsub.run_listener())
+        sender = asyncio.create_task(pubsub.run_notify_sender())
+        try:
+            # Listener's initial scope refresh proves LISTEN is installed.
+            await asyncio.wait_for(queue.get(), timeout=5)
+            expected = [dict(scope="progress", granule_id=f"g{i}") for i in range(3)]
+            for event in expected:
+                pubsub.publish(event)
+
+            async def receive():
+                seen = []
+                while len(seen) < len(expected):
+                    event = await queue.get()
+                    if "granule_id" in event:
+                        seen.append(event)
+                return seen
+
+            assert await asyncio.wait_for(receive(), timeout=5) == expected
+        finally:
+            listener.cancel()
+            sender.cancel()
+            await asyncio.gather(listener, sender, return_exceptions=True)

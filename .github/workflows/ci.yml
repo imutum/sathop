@@ -135,6 +135,10 @@ jobs:
             uv.lock
       - name: Sync orchestrator deps
         run: uv sync --extra orchestrator
+      - name: Postgres regression tests
+        run: uv run pytest tests/test_postgres_backend.py -q
+        env:
+          SATHOP_TEST_PG_URL: postgresql+asyncpg://sathop:sathop@localhost:5432/sathop
       - name: Boot multi-process orchestrator + pipeline load test + /api/health gate
         run: |
           set -e
@@ -176,4 +180,8 @@ jobs:
 
       - name: Typecheck + build
         run: npm run build
+        working-directory: frontend
+
+      - name: Frontend regression tests
+        run: npm test
         working-directory: frontend

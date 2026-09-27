@@ -27,6 +27,7 @@ _CHANNEL = "sathop_pubsub"
 # thread) enqueues without blocking; run_notify_sender() drains it on a dedicated
 # connection. Bounded so a stalled sender sheds load instead of growing unbounded.
 _notify_q: asyncio.Queue[str] = asyncio.Queue(maxsize=4096)
+_NOTIFY_BATCH_MAX = 256
 
 
 def _dsn() -> str:
@@ -134,40 +135,54 @@ def publish(event: dict) -> None:
 
 
 async def run_notify_sender() -> None:
-    """Drain the outbound queue, emitting one NOTIFY per nudge on a dedicated
-    asyncpg connection. Spawned in lifespan in Postgres mode."""
+    """Send bounded batches in one round trip, collapsing identical nudges.
+
+    Distinct payloads (including progress IDs) are preserved. Under a burst,
+    hundreds of repeated cache invalidations need only one DB call.
+    """
     import asyncpg
 
     conn = None
     delay = 1.0
-    while not _shutdown_requested:
-        payload: str | None = None
-        try:
-            if conn is None:
-                conn = await asyncpg.connect(_dsn())
-                delay = 1.0  # reconnected — reset backoff
-            payload = await asyncio.wait_for(_notify_q.get(), timeout=1.0)
-            await conn.execute("SELECT pg_notify($1, $2)", _CHANNEL, payload)
-            payload = None  # sent — don't requeue on a later error
-        except TimeoutError:
-            continue  # idle tick — re-check shutdown flag
-        except asyncio.CancelledError:
-            break
-        except Exception:
-            log.exception("notify sender error; reconnecting in %.0fs", delay)
-            if conn is not None:
-                await conn.close()
-            conn = None
-            # Don't lose a nudge already pulled off the queue — best-effort requeue.
-            if payload is not None:
+    try:
+        while not _shutdown_requested:
+            payloads: dict[str, None] = {}
+            try:
+                if conn is None:
+                    conn = await asyncpg.connect(_dsn())
                 try:
-                    _notify_q.put_nowait(payload)
-                except asyncio.QueueFull:
-                    pass
-            await asyncio.sleep(delay)
-            delay = min(30.0, delay * 2)  # capped backoff so an outage isn't a connect storm
-    if conn is not None:
-        await conn.close()
+                    first = await asyncio.wait_for(_notify_q.get(), timeout=1.0)
+                except TimeoutError:
+                    continue  # idle tick only; DB timeouts below must reconnect
+                payloads[first] = None
+                for _ in range(_NOTIFY_BATCH_MAX - 1):
+                    try:
+                        payloads[_notify_q.get_nowait()] = None
+                    except asyncio.QueueEmpty:
+                        break
+                await conn.execute(
+                    "SELECT pg_notify($1, payload) FROM unnest($2::text[]) AS t(payload)",
+                    _CHANNEL,
+                    list(payloads),
+                )
+                delay = 1.0  # reset only after a successful send
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("notify sender error; reconnecting in %.0fs", delay)
+                if conn is not None:
+                    await conn.close()
+                conn = None
+                for payload in payloads:
+                    try:
+                        _notify_q.put_nowait(payload)
+                    except asyncio.QueueFull:
+                        break
+                await asyncio.sleep(delay)
+                delay = min(30.0, delay * 2)
+    finally:
+        if conn is not None:
+            await conn.close()
 
 
 async def run_listener() -> None:
@@ -184,24 +199,34 @@ async def run_listener() -> None:
 
     conn = None
     delay = 1.0
-    while not _shutdown_requested:
-        try:
-            if conn is None:
-                conn = await asyncpg.connect(_dsn())
-                await conn.add_listener(_CHANNEL, _on_notify)
-                delay = 1.0  # reconnected — reset backoff
-            await asyncio.sleep(1.0)  # asyncpg dispatches notifications in the background
-        except asyncio.CancelledError:
-            break
-        except Exception:
-            log.exception("pubsub listener error; reconnecting in %.0fs", delay)
-            if conn is not None:
-                await conn.close()
-            conn = None
-            await asyncio.sleep(delay)
-            delay = min(30.0, delay * 2)  # capped backoff so an outage isn't a connect storm
-    if conn is not None:
-        await conn.close()
+    try:
+        while not _shutdown_requested:
+            try:
+                if conn is None:
+                    conn = await asyncpg.connect(_dsn())
+                    await conn.add_listener(_CHANNEL, _on_notify)
+                    # LISTEN has no replay. Refresh every scope after reconnect,
+                    # even if no further changes occur to wake a stale browser.
+                    for scope in Scope:
+                        _local_publish({"scope": scope.value})
+                    delay = 1.0
+                await asyncio.sleep(1.0)
+                # asyncpg reports socket loss on the connection, not by raising
+                # in our sleep. Without this check a dead listener sleeps forever.
+                if conn.is_closed():
+                    raise ConnectionError("pubsub LISTEN connection closed")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("pubsub listener error; reconnecting in %.0fs", delay)
+                if conn is not None:
+                    await conn.close()
+                conn = None
+                await asyncio.sleep(delay)
+                delay = min(30.0, delay * 2)
+    finally:
+        if conn is not None:
+            await conn.close()
 
 
 @contextmanager

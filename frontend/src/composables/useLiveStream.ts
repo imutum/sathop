@@ -13,6 +13,8 @@ export function useLiveStream() {
   const qc = useQueryClient();
   const connected = ref(false);
   const reconnect = ref(0);
+  let failures = 0;
+  let needsResync = false;
 
   // The UI build seen on first connect. After an orchestrator restart, the SSE
   // reconnect observes a changed version (or web_sha, for a same-version
@@ -56,7 +58,8 @@ export function useLiveStream() {
           const k = key.join(",");
           if (!seen.has(k)) {
             seen.add(k);
-            qc.invalidateQueries({ queryKey: [...key] });
+            // Let a slow request finish instead of aborting it every two seconds.
+            void qc.invalidateQueries({ queryKey: [...key] }, { cancelRefetch: false });
           }
         }
       }
@@ -64,14 +67,23 @@ export function useLiveStream() {
     }
 
     es.onopen = () => {
+      if (healthCtrl.signal.aborted) return;
       connected.value = true;
+      failures = 0;
+      if (needsResync) {
+        // SSE nudges are not replayed. A quiet cluster may emit nothing after
+        // reconnect, so refresh missed changes without waiting for the 60s poll.
+        needsResync = false;
+        void qc.invalidateQueries();
+      }
       void reloadIfStale(healthCtrl.signal);
     };
 
     es.onmessage = (e) => {
+      if (healthCtrl.signal.aborted) return;
       try {
         const evt = JSON.parse(e.data) as { scope?: Scope };
-        if (evt.scope && evt.scope in SCOPE_KEYS) {
+        if (evt.scope && Object.prototype.hasOwnProperty.call(SCOPE_KEYS, evt.scope)) {
           pending.add(evt.scope);
           if (!flushTimer) {
             const elapsed = Date.now() - lastFlush;
@@ -85,11 +97,16 @@ export function useLiveStream() {
     };
 
     es.onerror = () => {
+      if (healthCtrl.signal.aborted || reconnectTimer) return;
       connected.value = false;
+      needsResync = true;
       es.close();
+      // Spread reconnects across tabs during an outage; cap at 30 seconds.
+      const base = 3000 * 2 ** Math.min(failures++, 4);
+      const delay = Math.min(30_000, base * (0.8 + Math.random() * 0.4));
       reconnectTimer = setTimeout(() => {
         reconnect.value++;
-      }, 3000);
+      }, delay);
     };
 
     onCleanup(() => {
