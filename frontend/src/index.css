@@ -92,7 +92,7 @@
     color: hsl(var(--foreground));
   }
 
-  :where(button, a, input, select, textarea, [role="button"]):focus-visible {
+  :where(button, a, input, select, textarea, summary, [role="button"]):focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.55);
     border-radius: 0.5rem;

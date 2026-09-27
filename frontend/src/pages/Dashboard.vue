@@ -72,7 +72,11 @@ const showOnboarding = computed(
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="总览" description="任务进度、交付情况与节点状态" />
+    <PageHeader title="总览" description="任务进度、交付情况与节点状态">
+      <template #actions>
+        <Button as-child variant="outline"><RouterLink to="/batches">查看批次 <Icon name="arrowRight" :size="14" /></RouterLink></Button>
+      </template>
+    </PageHeader>
 
     <Alert v-if="overview.error.value && overview.data.value === undefined" variant="destructive">
       <AlertDescription class="flex items-center justify-between gap-3">
@@ -83,8 +87,8 @@ const showOnboarding = computed(
 
     <OnboardingCard v-if="showOnboarding" :status="onboardStatus" />
 
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <CardSection title="处理进度" description="各阶段的数据粒数量" class="lg:col-span-2">
+    <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+      <CardSection title="处理进度" description="从任务分配到确认交付" class="lg:col-span-2">
         <div v-if="overview.isPending.value" class="space-y-4 py-4" role="status" aria-label="正在加载处理进度">
           <Skeleton class="h-6 w-36" />
           <Skeleton class="h-16 w-full" />
@@ -95,7 +99,7 @@ const showOnboarding = computed(
           <EmptyState title="暂无任务数据" description="创建批次后，可在此查看处理进度。" illustration="signal" />
         </div>
         <template v-else>
-          <PipelineHealth :counts="counts" />
+          <PipelineHealth :counts="counts" overview />
           <DeliveryStats
             class="mt-5"
             :throughput-per-min="throughputPerMin"

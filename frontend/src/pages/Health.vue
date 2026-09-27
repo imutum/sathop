@@ -66,173 +66,175 @@ function fmtHours(h: number): string {
       <AlertDescription>部分信息刷新失败，以下保留上次结果，请稍后刷新。</AlertDescription>
     </Alert>
 
-    <CardSection
-      title="正在处理"
-      description="最近 50 条活动数据粒"
-      :padded="false"
-    >
-      <template #meta>
-        <Badge v-if="active.length > 0" variant="info" class="tabular-nums">{{ active.length }} 条</Badge>
-        <Badge v-else-if="inflight.isSuccess.value" variant="outline" class="text-muted-foreground">空闲</Badge>
-      </template>
-      <QueryState :query="inflight">
+    <div class="grid gap-5" :class="active.length === 0 && stuckTotal === 0 ? 'xl:grid-cols-2' : ''">
+      <CardSection
+        title="正在处理"
+        description="最近 50 条活动数据粒"
+        :padded="false"
+      >
+        <template #meta>
+          <Badge v-if="active.length > 0" variant="info" class="tabular-nums">{{ active.length }} 条</Badge>
+          <Badge v-else-if="inflight.isSuccess.value" variant="outline" class="text-muted-foreground">空闲</Badge>
+        </template>
+        <QueryState :query="inflight">
+          <template #loading>
+            <p role="status" class="p-5 text-sm text-muted-foreground">正在加载处理明细…</p>
+          </template>
+          <template #error="{ retry }">
+            <Alert variant="destructive">
+              <AlertDescription class="flex items-center justify-between gap-3">
+                <span>处理明细加载失败</span>
+                <Button size="sm" variant="outline" @click="retry">重试</Button>
+              </AlertDescription>
+            </Alert>
+          </template>
+          <template #empty>
+            <EmptyState
+              title="当前没有正在处理的数据粒"
+              compact
+              description="任务开始处理后，可在此查看明细。"
+              illustration="signal"
+            />
+          </template>
+          <template #default>
+            <Table>
+              <TableHeader class="bg-muted/40">
+                <TableRow>
+                  <TableHead class="px-5">数据粒</TableHead>
+                  <TableHead>批次</TableHead>
+                  <TableHead>当前阶段</TableHead>
+                  <TableHead>工作节点</TableHead>
+                  <TableHead class="px-5">更新</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow
+                  v-for="g in active"
+                  :key="g.granule_id"
+                  role="button"
+                  tabindex="0"
+                  class="cursor-pointer focus:outline-none focus-visible:bg-muted/50"
+                  @click="gotoGranule(g.batch_id, g.granule_id)"
+                  @keydown.enter="gotoGranule(g.batch_id, g.granule_id)"
+                  @keydown.space.prevent="gotoGranule(g.batch_id, g.granule_id)"
+                >
+                  <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
+                  <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">{{ g.batch_id }}</TableCell>
+                  <TableCell class="py-2.5">
+                    <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
+                  </TableCell>
+                  <TableCell class="py-2.5 font-mono text-cell text-muted-foreground" @click.stop>
+                    <WorkerRef :worker-id="g.leased_by" />
+                  </TableCell>
+                  <TableCell class="px-5 py-2.5 text-cell text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </template>
+        </QueryState>
+      </CardSection>
+
+      <QueryState :query="overview">
         <template #loading>
-          <p role="status" class="p-5 text-sm text-muted-foreground">正在加载处理明细…</p>
+          <p role="status" class="py-5 text-sm text-muted-foreground">正在加载诊断信息…</p>
         </template>
         <template #error="{ retry }">
           <Alert variant="destructive">
             <AlertDescription class="flex items-center justify-between gap-3">
-              <span>处理明细加载失败</span>
+              <span>诊断信息加载失败，暂时无法确认超时情况</span>
               <Button size="sm" variant="outline" @click="retry">重试</Button>
             </AlertDescription>
           </Alert>
         </template>
-        <template #empty>
-          <EmptyState
-            title="当前没有正在处理的数据粒"
-            compact
-            description="任务开始处理后，可在此查看明细。"
-            illustration="signal"
-          />
-        </template>
         <template #default>
-          <Table>
-            <TableHeader class="bg-muted/40">
-              <TableRow>
-                <TableHead class="px-5">数据粒</TableHead>
-                <TableHead>批次</TableHead>
-                <TableHead>当前阶段</TableHead>
-                <TableHead>工作节点</TableHead>
-                <TableHead class="px-5">更新</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow
-                v-for="g in active"
-                :key="g.granule_id"
-                role="button"
-                tabindex="0"
-                class="cursor-pointer focus:outline-none focus-visible:bg-muted/50"
-                @click="gotoGranule(g.batch_id, g.granule_id)"
-                @keydown.enter="gotoGranule(g.batch_id, g.granule_id)"
-                @keydown.space.prevent="gotoGranule(g.batch_id, g.granule_id)"
-              >
-                <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
-                <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">{{ g.batch_id }}</TableCell>
-                <TableCell class="py-2.5">
-                  <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
-                </TableCell>
-                <TableCell class="py-2.5 font-mono text-cell text-muted-foreground" @click.stop>
-                  <WorkerRef :worker-id="g.leased_by" />
-                </TableCell>
-                <TableCell class="px-5 py-2.5 text-cell text-muted-foreground">{{ fmtAge(g.updated_at) }}</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+          <CardSection
+            title="进度超时"
+            :description="`超过 ${stuckHours} 小时未推进，按滞留时间排序`"
+            :padded="false"
+            :class="stuckTotal > 0 ? 'border-warning/40' : ''"
+          >
+            <template #meta>
+              <HintTip text="请结合节点状态、下载进度与事件日志排查原因。">
+                <Badge v-if="stuckTotal > 0" variant="warning" class="tabular-nums">{{ stuckRows.length }} / {{ stuckTotal }}</Badge>
+                <Badge v-else variant="outline" class="text-muted-foreground">无</Badge>
+              </HintTip>
+            </template>
+            <EmptyState
+              v-if="stuckTotal === 0"
+              :title="`没有超过 ${stuckHours} 小时未推进的数据粒`"
+              compact
+              description="当前未发现超过设定阈值的活动数据粒。"
+              illustration="signal"
+            />
+            <QueryState v-else :query="stuckList">
+              <template #loading>
+                <p role="status" class="p-5 text-sm text-muted-foreground">正在加载超时明细…</p>
+              </template>
+              <template #error="{ retry }">
+                <Alert variant="destructive">
+                  <AlertDescription class="flex items-center justify-between gap-3">
+                    <span>超时明细加载失败</span>
+                    <Button size="sm" variant="outline" @click="retry">重试</Button>
+                  </AlertDescription>
+                </Alert>
+              </template>
+              <template #empty>
+                <EmptyState title="暂无超时明细" description="汇总与明细可能存在短暂更新间隔，请稍后查看。" />
+              </template>
+              <template #default>
+                <Table>
+                  <TableHeader class="bg-muted/40">
+                    <TableRow>
+                      <TableHead class="px-5">数据粒</TableHead>
+                      <TableHead>批次</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead>领取方</TableHead>
+                      <TableHead>滞留</TableHead>
+                      <TableHead class="px-5">错误</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow
+                      v-for="g in stuckRows"
+                      :key="g.granule_id"
+                      role="button"
+                      tabindex="0"
+                      class="cursor-pointer focus:outline-none focus-visible:bg-muted/50"
+                      @click="gotoGranule(g.batch_id, g.granule_id)"
+                      @keydown.enter="gotoGranule(g.batch_id, g.granule_id)"
+                      @keydown.space.prevent="gotoGranule(g.batch_id, g.granule_id)"
+                    >
+                      <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
+                      <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">{{ g.batch_id }}</TableCell>
+                      <TableCell class="py-2.5">
+                        <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
+                      </TableCell>
+                      <TableCell class="py-2.5 font-mono text-cell text-muted-foreground" @click.stop>
+                        <WorkerRef :worker-id="g.leased_by" />
+                      </TableCell>
+                      <TableCell class="py-2.5 text-cell text-warning tabular-nums">
+                        {{ fmtHours(g.age_hours) }}
+                      </TableCell>
+                      <TableCell class="max-w-[320px] truncate px-5 py-2.5 font-mono text-cell text-danger">
+                        {{ g.error ?? "—" }}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </template>
+            </QueryState>
+          </CardSection>
+          <CardSection title="最近事件" description="最新 10 条" :padded="false" class="col-span-full">
+            <template #meta>
+              <Button as-child variant="ghost" size="xs" class="text-muted-foreground hover:text-foreground">
+                <RouterLink to="/events">查看全部</RouterLink>
+              </Button>
+            </template>
+            <EmptyState v-if="lastEvents.length === 0" title="暂无事件" illustration="inbox" />
+            <EventTimeline v-else :events="lastEvents" />
+          </CardSection>
         </template>
       </QueryState>
-    </CardSection>
-
-    <QueryState :query="overview">
-      <template #loading>
-        <p role="status" class="py-5 text-sm text-muted-foreground">正在加载诊断信息…</p>
-      </template>
-      <template #error="{ retry }">
-        <Alert variant="destructive">
-          <AlertDescription class="flex items-center justify-between gap-3">
-            <span>诊断信息加载失败，暂时无法确认超时情况</span>
-            <Button size="sm" variant="outline" @click="retry">重试</Button>
-          </AlertDescription>
-        </Alert>
-      </template>
-      <template #default>
-        <CardSection
-          title="进度超时"
-          :description="`超过 ${stuckHours} 小时未推进，按滞留时间排序`"
-          :padded="false"
-          :class="stuckTotal > 0 ? 'border-warning/40' : ''"
-        >
-          <template #meta>
-            <HintTip text="请结合节点状态、下载进度与事件日志排查原因。">
-              <Badge v-if="stuckTotal > 0" variant="warning" class="tabular-nums">{{ stuckRows.length }} / {{ stuckTotal }}</Badge>
-              <Badge v-else variant="outline" class="text-muted-foreground">无</Badge>
-            </HintTip>
-          </template>
-          <EmptyState
-            v-if="stuckTotal === 0"
-            :title="`没有超过 ${stuckHours} 小时未推进的数据粒`"
-            compact
-            description="当前未发现超过设定阈值的活动数据粒。"
-            illustration="signal"
-          />
-          <QueryState v-else :query="stuckList">
-            <template #loading>
-              <p role="status" class="p-5 text-sm text-muted-foreground">正在加载超时明细…</p>
-            </template>
-            <template #error="{ retry }">
-              <Alert variant="destructive">
-                <AlertDescription class="flex items-center justify-between gap-3">
-                  <span>超时明细加载失败</span>
-                  <Button size="sm" variant="outline" @click="retry">重试</Button>
-                </AlertDescription>
-              </Alert>
-            </template>
-            <template #empty>
-              <EmptyState title="暂无超时明细" description="汇总与明细可能存在短暂更新间隔，请稍后查看。" />
-            </template>
-            <template #default>
-              <Table>
-                <TableHeader class="bg-muted/40">
-                  <TableRow>
-                    <TableHead class="px-5">数据粒</TableHead>
-                    <TableHead>批次</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>领取方</TableHead>
-                    <TableHead>滞留</TableHead>
-                    <TableHead class="px-5">错误</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow
-                    v-for="g in stuckRows"
-                    :key="g.granule_id"
-                    role="button"
-                    tabindex="0"
-                    class="cursor-pointer focus:outline-none focus-visible:bg-muted/50"
-                    @click="gotoGranule(g.batch_id, g.granule_id)"
-                    @keydown.enter="gotoGranule(g.batch_id, g.granule_id)"
-                    @keydown.space.prevent="gotoGranule(g.batch_id, g.granule_id)"
-                  >
-                    <TableCell class="px-5 py-2.5 font-mono text-cell">{{ g.granule_id }}</TableCell>
-                    <TableCell class="py-2.5 font-mono text-cell text-muted-foreground">{{ g.batch_id }}</TableCell>
-                    <TableCell class="py-2.5">
-                      <Badge :tone="g.state" dot>{{ stateLabel(g.state) }}</Badge>
-                    </TableCell>
-                    <TableCell class="py-2.5 font-mono text-cell text-muted-foreground" @click.stop>
-                      <WorkerRef :worker-id="g.leased_by" />
-                    </TableCell>
-                    <TableCell class="py-2.5 text-cell text-warning tabular-nums">
-                      {{ fmtHours(g.age_hours) }}
-                    </TableCell>
-                    <TableCell class="max-w-[320px] truncate px-5 py-2.5 font-mono text-cell text-danger">
-                      {{ g.error ?? "—" }}
-                    </TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
-            </template>
-          </QueryState>
-        </CardSection>
-        <CardSection title="最近事件" description="最新 10 条" :padded="false">
-          <template #meta>
-            <Button as-child variant="ghost" size="xs" class="text-muted-foreground hover:text-foreground">
-              <RouterLink to="/events">查看全部</RouterLink>
-            </Button>
-          </template>
-          <EmptyState v-if="lastEvents.length === 0" title="暂无事件" illustration="inbox" />
-          <EventTimeline v-else :events="lastEvents" />
-        </CardSection>
-      </template>
-    </QueryState>
+    </div>
   </div>
 </template>

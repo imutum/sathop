@@ -107,15 +107,15 @@ async function download() {
     </div>
     <Alert v-if="error" variant="destructive"><AlertDescription>{{ error }}</AlertDescription></Alert>
 
-    <BundleSection title="输入槽位 · slots" :count="slots.length">
+    <BundleSection title="数据输入" :count="slots.length">
       <div v-if="slots.length === 0" class="text-xs text-muted-foreground">未声明</div>
       <table v-else class="w-full font-mono text-cell">
         <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
-            <th class="py-1.5 pr-3 text-left font-normal">name</th>
-            <th class="py-1.5 pr-3 text-left font-normal">product</th>
-            <th class="py-1.5 pr-3 text-left font-normal">filename_pattern</th>
-            <th class="py-1.5 text-left font-normal">credential</th>
+            <th class="py-1.5 pr-3 text-left font-sans font-normal">名称</th>
+            <th class="py-1.5 pr-3 text-left font-sans font-normal">产品</th>
+            <th class="py-1.5 pr-3 text-left font-sans font-normal">文件名规则</th>
+            <th class="py-1.5 text-left font-sans font-normal">凭证</th>
           </tr>
         </thead>
         <tbody>
@@ -129,12 +129,12 @@ async function download() {
       </table>
     </BundleSection>
 
-    <BundleSection v-if="metaFields.length > 0" title="元字段 · meta" :count="metaFields.length">
+    <BundleSection v-if="metaFields.length > 0" title="元数据字段" :count="metaFields.length">
       <table class="w-full font-mono text-cell">
         <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
-            <th class="py-1.5 pr-3 text-left font-normal">name</th>
-            <th class="py-1.5 text-left font-normal">pattern</th>
+            <th class="py-1.5 pr-3 text-left font-sans font-normal">名称</th>
+            <th class="py-1.5 text-left font-sans font-normal">匹配规则</th>
           </tr>
         </thead>
         <tbody>
@@ -148,7 +148,7 @@ async function download() {
 
     <BundleSection
       v-if="sharedFiles.length > 0"
-      title="所需共享文件 · shared_files"
+      title="所需共享文件"
       :count="sharedFiles.length"
     >
       <div class="flex flex-wrap gap-1.5">

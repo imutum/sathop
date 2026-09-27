@@ -8,6 +8,8 @@ import { fmtBytes } from "@/lib/format";
 import { useToast } from "@/composables/useToast";
 import PageHeader from "@/components/PageHeader.vue";
 import CopyButton from "@/components/CopyButton.vue";
+import EmptyState from "@/components/EmptyState.vue";
+import { Icon } from "@/components/Icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -23,6 +25,7 @@ const end = ref("");
 const search = refDebounced(q, 250);
 const offset = ref(0);
 const exporting = ref(false);
+const filterCount = computed(() => [batch.value, start.value, end.value].filter(Boolean).length);
 const rangeError = computed(() =>
   start.value && end.value && start.value > end.value ? "开始日期不能晚于结束日期" : "",
 );
@@ -85,12 +88,21 @@ function reset() {
         <Button :disabled="!canExport" :pending="exporting" @click="exportReport">导出筛选结果</Button>
       </template>
     </PageHeader>
-    <Card class="space-y-4 p-5">
-      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label class="space-y-1 text-xs text-muted-foreground">
-          搜索
-          <Input v-model="q" aria-label="搜索交付记录" maxlength="200" placeholder="批次、文件路径、接收端" />
-        </label>
+    <Card class="p-4 sm:p-5">
+      <div class="flex items-center gap-3">
+        <div class="relative min-w-0 flex-1">
+          <Icon name="search" :size="16" class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input v-model="q" aria-label="搜索交付记录" maxlength="200" placeholder="搜索批次、文件或接收端" class="pl-9" />
+        </div>
+        <Button v-if="q || filterCount" size="sm" variant="ghost" @click="reset">清空筛选</Button>
+      </div>
+      <details class="group mt-3">
+        <summary class="flex w-fit cursor-pointer list-none items-center gap-2 rounded text-xs text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <Icon name="chevronDown" :size="14" class="transition-transform group-open:rotate-180" />
+          筛选条件
+          <span v-if="filterCount" class="rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">{{ filterCount }} 项生效</span>
+        </summary>
+      <div class="mt-4 grid gap-3 sm:grid-cols-3">
         <label class="space-y-1 text-xs text-muted-foreground">
           批次 ID
           <Input v-model="batch" aria-label="筛选批次 ID" maxlength="200" placeholder="留空查看全部批次" />
@@ -104,18 +116,16 @@ function reset() {
           <Input v-model="end" aria-label="结束日期" type="date" />
         </label>
       </div>
-      <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>日期按当前设备时区筛选。只记录接收端确认成功的文件。</span>
-        <Button size="sm" variant="ghost" @click="reset">清空筛选</Button>
-      </div>
-      <p v-if="rangeError" role="alert" class="text-sm text-destructive">{{ rangeError }}</p>
+      <p class="mt-3 text-xs text-muted-foreground">日期按当前设备时区筛选，结束日期包含当天。</p>
+      </details>
+      <p v-if="rangeError" role="alert" class="mt-3 text-sm text-destructive">{{ rangeError }}</p>
     </Card>
-    <div v-if="data && !rangeError" class="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <Card v-for="stat in stats" :key="stat.label" class="p-5">
+    <Card v-if="data && !rangeError" class="grid grid-cols-2 overflow-hidden md:grid-cols-4">
+      <div v-for="(stat, index) in stats" :key="stat.label" class="px-5 py-4 sm:px-6 sm:py-5" :class="[index % 2 ? 'border-l' : '', index > 1 ? 'border-t md:border-t-0 md:border-l' : '']">
         <div class="text-xs text-muted-foreground">{{ stat.label }}</div>
-        <div class="mt-3 text-2xl font-semibold tracking-tight tabular-nums">{{ stat.value }}</div>
-      </Card>
-    </div>
+        <div class="mt-2 text-2xl font-semibold tracking-tight tabular-nums" :class="index === 0 ? 'text-primary' : ''">{{ stat.value }}</div>
+      </div>
+    </Card>
     <p v-if="query.error.value" role="alert" class="text-sm text-destructive">
       加载失败：{{ query.error.value.message }} <button class="underline" @click="query.refetch()">重试</button>
     </p>
@@ -123,11 +133,30 @@ function reset() {
       正在读取交付记录…
     </p>
     <Card v-else-if="data && !rangeError" class="overflow-hidden">
-      <div v-if="!data.total" class="space-y-2 px-4 py-14 text-center">
-        <p class="font-medium">没有符合条件的交付记录</p>
-        <p class="text-sm text-muted-foreground">调整筛选条件，或等待接收端完成首次交付确认。</p>
+      <EmptyState v-if="!data.total" title="没有符合条件的交付记录" description="调整筛选条件，或等待接收端完成首次交付确认。" illustration="inbox" />
+      <template v-else>
+      <div class="divide-y md:hidden">
+        <article v-for="receipt in data.items" :key="receipt.id" class="space-y-3 p-5">
+          <div class="flex items-start justify-between gap-3">
+            <RouterLink v-if="receipt.batch_exists" :to="`/batches/${encodeURIComponent(receipt.batch_id)}`" class="break-all text-sm font-medium text-primary hover:underline">{{ receipt.batch_name }}</RouterLink>
+            <span v-else class="break-all text-sm font-medium">{{ receipt.batch_name }} <span class="text-xs text-muted-foreground">（批次已删除）</span></span>
+            <span class="shrink-0 text-xs tabular-nums text-muted-foreground">{{ fmtBytes(receipt.size) }}</span>
+          </div>
+          <p class="break-all text-sm">{{ receipt.object_key }}</p>
+          <dl class="space-y-1.5 text-xs text-muted-foreground">
+            <div class="flex gap-3"><dt class="w-12 shrink-0">数据粒</dt><dd class="min-w-0 break-all font-mono">{{ receipt.granule_id }}</dd></div>
+            <div class="flex gap-3"><dt class="w-12 shrink-0">任务包</dt><dd class="min-w-0 break-all">{{ receipt.bundle_ref }}</dd></div>
+            <div class="flex gap-3"><dt class="w-12 shrink-0">接收端</dt><dd class="min-w-0 break-all">{{ receipt.receiver_id || '未记录' }}</dd></div>
+          </dl>
+          <details class="text-xs text-muted-foreground">
+            <summary class="w-fit cursor-pointer">文件校验值</summary>
+            <div class="mt-2 flex items-start gap-1"><code class="min-w-0 break-all">{{ receipt.sha256 }}</code><CopyButton :value="receipt.sha256" title="复制 SHA-256" /></div>
+          </details>
+          <p class="border-t border-dashed pt-3 text-xs text-muted-foreground">确认于 {{ new Date(receipt.delivered_at).toLocaleString() }}</p>
+        </article>
       </div>
-      <Table v-else>
+      <div class="hidden md:block">
+      <Table>
         <TableHeader>
           <TableRow>
             <TableHead>批次 / 数据粒</TableHead>
@@ -169,6 +198,8 @@ function reset() {
           </TableRow>
         </TableBody>
       </Table>
+      </div>
+      </template>
       <div v-if="data.total" class="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
         <span>第 {{ offset + 1 }}–{{ pageEnd }} 条，共 {{ data.total }} 条</span>
         <div class="flex gap-2">

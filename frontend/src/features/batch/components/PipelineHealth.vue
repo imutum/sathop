@@ -10,7 +10,7 @@ import { pipelineGroups, pipelineSegments, pipelineTotals } from "@/features/bat
 // processing order. The big-stage number is the sum; the small stages are its
 // breakdown (parent→child, intentionally both shown), so nothing is duplicated
 // — 待分配 is a leaf, present only as its card.
-const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
+const props = defineProps<{ counts: Partial<Record<GranuleState, number>>; overview?: boolean }>();
 
 // Stage colors stay local because they are presentation-only, not pipeline
 // semantics. Each literal hue carries a `dark:` shift one shade lighter so
@@ -38,7 +38,9 @@ const GROUP: Record<string, { dot: string; tip: string }> = {
   failed:  { dot: "bg-danger", tip: "等待重试或已停止的数据粒；已停止包括重试耗尽和主动取消" },
 };
 
-const total = computed(() => pipelineTotals(props.counts).total);
+const totals = computed(() => pipelineTotals(props.counts));
+const total = computed(() => totals.value.total);
+const deliveredPct = computed(() => total.value ? (totals.value.done / total.value) * 100 : 0);
 const groups = computed(() => pipelineGroups(props.counts));
 const detailedGroups = computed(() => groups.value.filter((group) => group.subs.length));
 const segments = computed(() =>
@@ -54,7 +56,7 @@ function pct(n: number): string {
 <template>
   <div class="space-y-5">
     <!-- 顶部：阶段分布条形图（全处理顺序，仅非零段） -->
-    <div>
+    <div v-if="!overview">
       <div class="mb-2 flex items-center justify-between text-xs">
         <span class="text-muted-foreground">阶段分布</span>
         <span class="tabular-nums text-muted-foreground">
@@ -74,11 +76,24 @@ function pct(n: number): string {
     </div>
 
     <!-- Keep totals visible; expand the detailed stages when needed. -->
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div :class="overview ? 'grid items-center gap-6 sm:grid-cols-[156px_minmax(0,1fr)]' : ''">
+      <div v-if="overview" class="relative mx-auto grid h-[156px] w-[156px] place-items-center">
+        <svg viewBox="0 0 160 160" class="absolute inset-0 h-full w-full -rotate-90" role="img" :aria-label="`交付比例 ${pct(totals.done)}，${totals.done} / ${total} 个数据粒`">
+          <circle cx="80" cy="80" r="70" fill="none" stroke="currentColor" stroke-width="7" class="text-primary/10" />
+          <circle v-if="deliveredPct > 0" cx="80" cy="80" r="70" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" pathLength="100" :stroke-dasharray="`${deliveredPct} 100`" class="text-primary" />
+          <circle cx="80" cy="80" r="58" fill="none" stroke="currentColor" stroke-width="0.5" class="text-primary/15" />
+        </svg>
+        <div class="text-center">
+          <div class="text-[34px] font-semibold leading-none tracking-tight tabular-nums">{{ pct(totals.done) }}</div>
+          <div class="mt-2 text-xs text-muted-foreground">交付比例</div>
+          <div class="mt-1 text-[11px] text-muted-foreground">共 {{ total.toLocaleString() }} 个数据粒</div>
+        </div>
+      </div>
+    <div :class="overview ? 'grid grid-cols-2 gap-x-5 gap-y-6' : 'grid grid-cols-2 gap-3 sm:grid-cols-4'">
       <div
         v-for="g in groups"
         :key="g.key"
-        class="rounded-xl bg-muted/55 px-4 py-4"
+        :class="overview ? 'border-l border-border/70 pl-4' : 'rounded-xl bg-muted/55 px-4 py-4'"
       >
         <div class="flex items-center gap-1.5 text-xs text-muted-foreground" :title="GROUP[g.key].tip">
           <span :class="['h-1.5 w-1.5 rounded-full', GROUP[g.key].dot]" aria-hidden />
@@ -92,7 +107,8 @@ function pct(n: number): string {
         </div>
       </div>
     </div>
-    <details class="rounded-xl border border-border/70 px-4 py-3">
+    </div>
+    <details class="border-t border-border/70 pt-4">
       <summary class="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">阶段明细</summary>
       <div class="mt-4 grid gap-5 sm:grid-cols-3">
         <div v-for="g in detailedGroups" :key="g.key" class="space-y-2">

@@ -226,94 +226,101 @@ async function applyTemplate(template: TaskTemplate) {
       @apply="applyTemplate"
     />
     <form @submit.prevent="onSubmit" @keydown="onKeydown" class="space-y-5 text-sm">
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <FormField v-slot="{ componentField }" name="name">
+      <section class="space-y-5" aria-labelledby="batch-settings-title">
+        <h3 id="batch-settings-title" class="flex items-center gap-3 font-semibold"><span class="grid h-7 w-7 place-items-center rounded-full bg-primary/10 font-mono text-xs text-primary" aria-hidden="true">01</span>任务设置</h3>
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <FormField v-slot="{ componentField }" name="name">
+            <FormItem>
+              <FormLabel>批次名称</FormLabel>
+              <FormControl>
+                <Input v-bind="componentField" placeholder="例如：九月地表温度交付" />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </FormField>
+          <FormField v-slot="{ componentField }" name="targetReceiver">
+            <FormItem>
+              <FormLabel>目标接收端</FormLabel>
+              <FormControl>
+                <SelectInput v-bind="componentField">
+                  <option value="">自动分配接收端</option>
+                  <option
+                    v-for="r in receivers.data.value ?? []"
+                    :key="r.receiver_id"
+                    :value="r.receiver_id"
+                  >
+                    {{ r.receiver_id }}
+                  </option>
+                </SelectInput>
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          </FormField>
+        </div>
+
+        <FormField v-slot="{ componentField }" name="bundleSel">
           <FormItem>
-            <FormLabel>批次名称</FormLabel>
+            <FormLabel>任务包</FormLabel>
             <FormControl>
-              <Input v-bind="componentField" placeholder="MOD09A1 2024 第 1 天" />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        </FormField>
-        <FormField v-slot="{ componentField }" name="targetReceiver">
-          <FormItem>
-            <FormLabel>目标接收端</FormLabel>
-            <FormControl>
-              <SelectInput v-bind="componentField">
-                <option value="">自动分配接收端</option>
+              <SelectInput v-bind="componentField" class="font-mono text-xs">
+                <option value="">请选择任务包</option>
                 <option
-                  v-for="r in receivers.data.value ?? []"
-                  :key="r.receiver_id"
-                  :value="r.receiver_id"
+                  v-for="b in bundles.data.value ?? []"
+                  :key="`${b.name}@${b.version}`"
+                  :value="`${b.name}@${b.version}`"
                 >
-                  {{ r.receiver_id }}
+                  {{ b.name }}@{{ b.version }}{{ b.description ? ` — ${b.description}` : "" }}
                 </option>
               </SelectInput>
             </FormControl>
             <FormMessage />
+            <div v-if="bundles.isSuccess.value && bundles.data.value?.length === 0" class="text-2xs text-warning">
+              暂无任务包，请先前往“任务包”页上传。
+            </div>
           </FormItem>
         </FormField>
-      </div>
 
-      <FormField v-slot="{ componentField }" name="bundleSel">
-        <FormItem>
-          <FormLabel>任务包</FormLabel>
-          <FormControl>
-            <SelectInput v-bind="componentField" class="font-mono text-xs">
-              <option value="">请选择任务包</option>
-              <option
-                v-for="b in bundles.data.value ?? []"
-                :key="`${b.name}@${b.version}`"
-                :value="`${b.name}@${b.version}`"
-              >
-                {{ b.name }}@{{ b.version }}{{ b.description ? ` — ${b.description}` : "" }}
-              </option>
-            </SelectInput>
-          </FormControl>
-          <FormMessage />
-          <div v-if="(bundles.data.value ?? []).length === 0" class="text-2xs text-warning">
-            暂无任务包，请先前往“任务包”页上传。
+        <details
+          v-if="bundleDetail.data.value && schema"
+          class="text-xs text-muted-foreground"
+        >
+          <summary class="w-fit cursor-pointer">任务包运行信息</summary>
+          <div class="mt-2">
+            入口：
+            <span class="font-mono text-foreground">
+              {{ bundleDetail.data.value.manifest.execution.entrypoint }}
+            </span>
           </div>
-        </FormItem>
-      </FormField>
+          <div class="mt-0.5">
+            依赖：{{ bundleDetail.data.value.manifest.requirements?.pip?.length ?? 0 }} 个 pip
+            <template v-if="bundleDetail.data.value.manifest.requirements?.apt?.length">
+              · {{ bundleDetail.data.value.manifest.requirements.apt.length }} 个 apt
+            </template>
+          </div>
+        </details>
 
-      <div
-        v-if="bundleDetail.data.value && schema"
-        class="rounded-lg border border-border bg-muted/40 px-3 py-2 text-2xs text-muted-foreground"
-      >
-        <div>
-          入口：
-          <span class="font-mono text-foreground">
-            {{ bundleDetail.data.value.manifest.execution.entrypoint }}
-          </span>
-        </div>
-        <div class="mt-0.5">
-          依赖：{{ bundleDetail.data.value.manifest.requirements?.pip?.length ?? 0 }} 个 pip
-          <template v-if="bundleDetail.data.value.manifest.requirements?.apt?.length">
-            · {{ bundleDetail.data.value.manifest.requirements.apt.length }} 个 apt
-          </template>
-        </div>
-      </div>
+        <CreateBatchCredentials
+          v-if="requiredCreds.length > 0"
+          :names="requiredCreds"
+          :drafts="creds"
+          :remember="remember"
+          @change="onCredChange"
+          @remember-change="onRememberChange"
+          @forget="onForget"
+        />
 
-      <CreateBatchCredentials
-        v-if="requiredCreds.length > 0"
-        :names="requiredCreds"
-        :drafts="creds"
-        :remember="remember"
-        @change="onCredChange"
-        @remember-change="onRememberChange"
-        @forget="onForget"
-      />
-
-      <CreateBatchGranuleTable
-        v-if="schema"
-        :schema="schema"
-        :rows="rows"
-        :errors="rowErrors"
-        @update:rows="(r) => (rows = r)"
-        @open-csv="showCsv = true"
-      />
+      </section>
+      <section class="space-y-4 border-t pt-5" aria-labelledby="batch-inputs-title">
+        <h3 id="batch-inputs-title" class="flex items-center gap-3 font-semibold"><span class="grid h-7 w-7 place-items-center rounded-full bg-primary/10 font-mono text-xs text-primary" aria-hidden="true">02</span>输入数据</h3>
+        <CreateBatchGranuleTable v-if="schema"
+          :schema="schema"
+          :rows="rows"
+          :errors="rowErrors"
+          @update:rows="(r) => (rows = r)"
+          @open-csv="showCsv = true"
+        />
+        <p v-else class="rounded-xl bg-muted/40 px-4 py-5 text-xs text-muted-foreground">选择任务包后，可填写数据链接或导入 CSV。</p>
+      </section>
 
       <details class="rounded-lg border border-border bg-muted/40 px-3 py-2.5">
         <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">

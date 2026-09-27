@@ -154,93 +154,104 @@ async function confirmRestart() {
       </AlertDescription>
     </Alert>
 
-    <CardSection
-      title="系统信息"
-      description="当前运行配置"
-    >
-      <div v-if="info.data.value" class="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2">
-        <Field label="调度服务版本">{{ info.data.value.version }}</Field>
-        <Field label="Python 版本">{{ info.data.value.python_version }}</Field>
-        <Field label="运行平台" mono>{{ info.data.value.platform }}</Field>
-        <Field label="开发模式">{{ info.data.value.dev_mode ? "开启" : "关闭" }}</Field>
-        <Field label="数据库路径" mono>{{ info.data.value.db_path }}</Field>
-        <Field label="事件保留">
-          {{ info.data.value.retain_events_days === 0 ? "永久保留" : `${info.data.value.retain_events_days} 天` }}
-        </Field>
-        <Field label="已完成数据粒保留">
-          {{ info.data.value.retain_deleted_days === 0 ? "永久保留" : `${info.data.value.retain_deleted_days} 天` }}
-        </Field>
-        <Field label="保留扫描周期">
-          {{ info.data.value.retention_sweep_sec === 0 ? "已禁用" : `${info.data.value.retention_sweep_sec} 秒` }}
-        </Field>
-        <Field label="单节点任务上限" hint="SATHOP_MAX_INFLIGHT_PER_WORKER">
-          {{
-            info.data.value.max_inflight_per_worker === 0
-              ? "不限（仍受磁盘空间限制）"
-              : `${info.data.value.max_inflight_per_worker} 条`
-          }}
-        </Field>
-        <Field label="自动重试上限" hint="SATHOP_MAX_RETRIES">
-          失败 {{ info.data.value.max_retries }} 次后停止自动重试
-        </Field>
-        <Field label="产物拉取重试上限" hint="SATHOP_MAX_PULL_FAILURES">
-          单个产物拉取失败 {{ info.data.value.max_pull_failures }} 次后停止交付，可在批次详情页恢复
-        </Field>
-        <Field label="进度超时阈值">
-          数据粒超过 {{ info.data.value.stuck_age_hours }} 小时未推进时，计入超时统计
-        </Field>
-      </div>
-      <div v-else class="py-6 text-sm text-muted-foreground">加载中…</div>
-    </CardSection>
-
-    <CardSection
-      title="进度上报"
-      description="设置所有工作节点的上报方式，下次心跳生效，无需重启"
-    >
-      <div class="space-y-4">
-        <div class="flex flex-wrap items-center gap-3">
-          <Segmented
-            v-model="detail"
-            :options="[
-              { value: 'verbose', label: '详细' },
-              { value: 'fast', label: '精简' },
-            ]"
-            aria-label="进度上报方式"
-          />
-          <span
-            v-if="detailBusy"
-            class="flex items-center gap-1.5 text-2xs text-muted-foreground"
-          >
-            <Icon name="refresh" :size="12" class="animate-spin" />
-            应用中…
-          </span>
+    <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+      <CardSection
+        title="系统信息"
+        description="当前运行配置"
+      >
+        <div v-if="info.data.value" class="grid grid-cols-1 gap-x-8 gap-y-6 sm:grid-cols-2">
+          <Field label="调度服务版本">{{ info.data.value.version }}</Field>
+          <Field label="Python 版本">{{ info.data.value.python_version }}</Field>
+          <Field label="运行平台" mono>{{ info.data.value.platform }}</Field>
+          <Field label="开发模式">{{ info.data.value.dev_mode ? "开启" : "关闭" }}</Field>
+          <Field label="数据库路径" mono>{{ info.data.value.db_path }}</Field>
+          <Field label="事件保留">
+            {{ info.data.value.retain_events_days === 0 ? "永久保留" : `${info.data.value.retain_events_days} 天` }}
+          </Field>
+          <Field label="已完成数据粒保留">
+            {{ info.data.value.retain_deleted_days === 0 ? "永久保留" : `${info.data.value.retain_deleted_days} 天` }}
+          </Field>
+          <Field label="保留扫描周期">
+            {{ info.data.value.retention_sweep_sec === 0 ? "已禁用" : `${info.data.value.retention_sweep_sec} 秒` }}
+          </Field>
+          <Field label="单节点任务上限" hint="SATHOP_MAX_INFLIGHT_PER_WORKER">
+            {{
+              info.data.value.max_inflight_per_worker === 0
+                ? "不限（仍受磁盘空间限制）"
+                : `${info.data.value.max_inflight_per_worker} 条`
+            }}
+          </Field>
+          <Field label="自动重试上限" hint="SATHOP_MAX_RETRIES">
+            失败 {{ info.data.value.max_retries }} 次后停止自动重试
+          </Field>
+          <Field label="产物拉取重试上限" hint="SATHOP_MAX_PULL_FAILURES">
+            单个产物拉取失败 {{ info.data.value.max_pull_failures }} 次后停止交付，可在批次详情页恢复
+          </Field>
+          <Field label="进度超时阈值">
+            数据粒超过 {{ info.data.value.stuck_age_hours }} 小时未推进时，计入超时统计
+          </Field>
         </div>
-        <dl class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div
-            class="rounded-lg border p-3 transition-colors"
-            :class="detail === 'verbose' ? 'border-foreground/20 bg-muted/40' : 'border-border'"
-          >
-            <dt class="text-xs font-medium text-foreground">
-              详细上报
-            </dt>
-            <dd class="mt-1 text-2xs leading-relaxed text-muted-foreground">
-              上报各阶段状态和实时进度，便于跟踪任务与排查问题。
-            </dd>
+        <div v-else class="py-6 text-sm text-muted-foreground">加载中…</div>
+      </CardSection>
+
+      <div class="space-y-5">
+        <CardSection
+          title="进度上报"
+          description="设置所有工作节点的上报方式，下次心跳生效，无需重启"
+        >
+          <div class="space-y-4">
+            <div class="flex flex-wrap items-center gap-3">
+              <Segmented
+                v-model="detail"
+                :options="[
+                  { value: 'verbose', label: '详细' },
+                  { value: 'fast', label: '精简' },
+                ]"
+                aria-label="进度上报方式"
+              />
+              <span
+                v-if="detailBusy"
+                class="flex items-center gap-1.5 text-2xs text-muted-foreground"
+              >
+                <Icon name="refresh" :size="12" class="animate-spin" />
+                应用中…
+              </span>
+            </div>
+            <dl class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <div
+                class="rounded-lg border p-3 transition-colors"
+                :class="detail === 'verbose' ? 'border-foreground/20 bg-muted/40' : 'border-border'"
+              >
+                <dt class="text-xs font-medium text-foreground">
+                  详细上报
+                </dt>
+                <dd class="mt-1 text-2xs leading-relaxed text-muted-foreground">
+                  上报各阶段状态和实时进度，便于跟踪任务与排查问题。
+                </dd>
+              </div>
+              <div
+                class="rounded-lg border p-3 transition-colors"
+                :class="detail === 'fast' ? 'border-foreground/20 bg-muted/40' : 'border-border'"
+              >
+                <dt class="text-xs font-medium text-foreground">
+                  精简上报
+                </dt>
+                <dd class="mt-1 text-2xs leading-relaxed text-muted-foreground">
+                  仅上报最终状态与阶段耗时，减少写入开销。控制台不再显示各阶段的实时进度。
+                </dd>
+              </div>
+            </dl>
           </div>
-          <div
-            class="rounded-lg border p-3 transition-colors"
-            :class="detail === 'fast' ? 'border-foreground/20 bg-muted/40' : 'border-border'"
-          >
-            <dt class="text-xs font-medium text-foreground">
-              精简上报
-            </dt>
-            <dd class="mt-1 text-2xs leading-relaxed text-muted-foreground">
-              仅上报最终状态与阶段耗时，减少写入开销。控制台不再显示各阶段的实时进度。
-            </dd>
-          </div>
-        </dl>
+        </CardSection>
+
+        <CardSection title="凭证说明">
+          <p class="text-sm leading-relaxed text-muted-foreground">
+            在“新建批次”中填写任务包所需的凭证。凭证随批次保存，并随任务提供给工作节点。
+            更新凭证请创建新批次。
+          </p>
+        </CardSection>
       </div>
-    </CardSection>
+    </div>
 
     <CardSection
       title="节点分阶段升级"
@@ -249,11 +260,5 @@ async function confirmRestart() {
       <RolloutPanel />
     </CardSection>
 
-    <CardSection title="凭证说明">
-      <p class="text-sm leading-relaxed text-muted-foreground">
-        在“新建批次”中填写任务包所需的凭证。凭证随批次保存，并随任务提供给工作节点。
-        更新凭证请创建新批次。
-      </p>
-    </CardSection>
   </div>
 </template>

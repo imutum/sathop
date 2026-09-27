@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { watchEffect } from "vue";
+import { useRoute } from "vue-router";
 import ConfirmDialog from "@/ui/ConfirmDialog.vue";
 import Login from "@/pages/Login.vue";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -8,6 +10,11 @@ import { useAuthGate } from "@/composables/useAuthGate";
 import "@/composables/useTheme";
 
 const { ready } = useAuthGate();
+const route = useRoute();
+watchEffect(() => {
+  const title = ready.value ? route.meta.title : "登录";
+  document.title = `${title ? `${title} · ` : ""}SatHop · 数据服务控制台`;
+});
 </script>
 
 <template>

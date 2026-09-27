@@ -75,14 +75,14 @@ function onCheckboxMousedown(e: MouseEvent) {
     @click="emit('open')"
   >
     <TableCell class="w-8" @click.stop @mousedown="onCheckboxMousedown">
-      <Checkbox :model-value="selected" @update:model-value="emit('toggle', shiftPressed)" />
+      <Checkbox :model-value="selected" :aria-label="`选择节点 ${worker.worker_id}`" @update:model-value="emit('toggle', shiftPressed)" />
     </TableCell>
     <TableCell class="w-6">
       <Badge :tone="status.tone" dot :title="status.label" class="size-1.5 border-0 bg-transparent p-0" />
     </TableCell>
     <TableCell class="font-mono text-xs">
       <span class="flex items-center gap-1.5">
-        <span class="truncate">{{ worker.worker_id }}</span>
+        <button type="button" class="truncate text-left hover:text-primary hover:underline" :aria-label="`查看节点 ${worker.worker_id}`" @click.stop="emit('open')">{{ worker.worker_id }}</button>
         <HintTip
           v-if="worker.operator_paused"
           text="已暂停接收新任务，当前任务继续执行"
@@ -176,13 +176,13 @@ function onCheckboxMousedown(e: MouseEvent) {
     @click="emit('open')"
   >
     <TableCell class="w-8" @click.stop @mousedown="onCheckboxMousedown">
-      <Checkbox :model-value="selected" @update:model-value="emit('toggle', shiftPressed)" />
+      <Checkbox :model-value="selected" :aria-label="`选择节点 ${worker.worker_id}`" @update:model-value="emit('toggle', shiftPressed)" />
     </TableCell>
     <TableCell class="w-16">
       <Badge tone="error" class="px-1.5 py-0 text-mini">已移除</Badge>
     </TableCell>
     <TableCell class="font-mono text-xs">
-      <span class="truncate">{{ worker.worker_id }}</span>
+      <button type="button" class="truncate text-left hover:text-primary hover:underline" :aria-label="`查看节点 ${worker.worker_id}`" @click.stop="emit('open')">{{ worker.worker_id }}</button>
     </TableCell>
     <TableCell class="whitespace-nowrap text-2xs text-muted-foreground">{{ lastSeenLabel }}</TableCell>
     <TableCell class="w-8 text-right" @click.stop>
