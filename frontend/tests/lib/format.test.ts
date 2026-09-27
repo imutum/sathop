@@ -60,10 +60,10 @@ describe("lib/format/nodeStatusBadge", () => {
       label: "在线",
     });
   });
-  it("returns 待机 between 60 s and 5 min", () => {
+  it("returns 心跳延迟 between 60 s and 5 min", () => {
     expect(nodeStatusBadge(true, "2026-05-02T11:58:00Z")).toEqual({
       tone: "warn",
-      label: "待机",
+      label: "心跳延迟",
     });
   });
   it("returns 离线 beyond 5 min", () => {

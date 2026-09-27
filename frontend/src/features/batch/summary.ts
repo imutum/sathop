@@ -29,3 +29,16 @@ export function isBatchClosed(batch: Pick<BatchSummary, "counts">): boolean {
   const total = totalCount(batch.counts);
   return total > 0 && completedTotal(batch) === total && errorTotal(batch) === 0;
 }
+
+/** Shared progress values for dashboard cards and batch rows. */
+export function batchProgress(batch: Pick<BatchSummary, "counts">) {
+  const total = totalCount(batch.counts);
+  const done = completedTotal(batch);
+  return {
+    total,
+    done,
+    errors: errorTotal(batch),
+    inFlight: inFlightTotal(batch),
+    pct: total > 0 ? Math.round((done / total) * 100) : 0,
+  };
+}

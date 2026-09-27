@@ -10,8 +10,8 @@ const router = useRouter();
 <template>
   <div class="flex h-[60vh] items-center justify-center">
     <Card class="w-full max-w-md p-8 text-center">
-      <div class="text-6xl font-semibold text-muted-foreground/40">404</div>
-      <div class="mt-3 text-sm font-medium">页面不存在</div>
+      <div class="text-6xl font-semibold tracking-tight text-primary/40">404</div>
+      <h1 class="mt-4 text-xl font-semibold">页面不存在</h1>
       <div class="mt-2 break-all rounded-lg border border-border bg-muted px-3 py-2 font-mono text-2xs text-muted-foreground">
         {{ route.fullPath }}
       </div>

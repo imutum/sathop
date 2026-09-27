@@ -3,7 +3,7 @@ import { computed } from "vue";
 import { useNow } from "@vueuse/core";
 import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
-import { API, type BatchSummary } from "@/api";
+import { API } from "@/api";
 import { K } from "@/queryKeys";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -17,13 +17,7 @@ import PipelineHealth from "@/features/batch/components/PipelineHealth.vue";
 import DeliveryStats from "@/features/batch/components/DeliveryStats.vue";
 import BatchProgressCell from "@/features/batch/components/BatchProgressCell.vue";
 import { pipelineSegments } from "@/features/batch/pipelineSummary";
-import {
-  completedTotal,
-  errorTotal,
-  inFlightTotal,
-  isBatchClosed,
-  totalCount,
-} from "@/features/batch/summary";
+import { batchProgress, isBatchClosed } from "@/features/batch/summary";
 import NodeStat from "@/features/nodes/components/NodeStat.vue";
 import OnboardingCard from "@/components/onboarding/OnboardingCard.vue";
 import { Icon } from "@/components/Icon";
@@ -55,31 +49,10 @@ const hasChartData = computed(() => pipelineSegments(counts.value).length > 0);
 const throughputPerMin = computed(() => overview.data.value?.throughput_per_min ?? null);
 const etaRealtime = computed(() => overview.data.value?.eta_realtime ?? null);
 
-// 活跃批次 = 未关闭（仍有在途或失败）。决策层焦点："此刻在跑哪些批次、进度如何"。
-// 进度条复用便宜的 counts 计数（BatchProgressCell），点击进详情。
-type ActiveBatchRow = {
-  b: BatchSummary;
-  total: number;
-  done: number;
-  errors: number;
-  inFlight: number;
-  pct: number;
-};
-const activeBatches = computed<ActiveBatchRow[]>(() =>
+const activeBatches = computed(() =>
   (batches.data.value ?? [])
     .filter((b) => !isBatchClosed(b))
-    .map((b) => {
-      const total = totalCount(b.counts);
-      const d = completedTotal(b);
-      return {
-        b,
-        total,
-        done: d,
-        errors: errorTotal(b),
-        inFlight: inFlightTotal(b),
-        pct: total > 0 ? Math.round((d / total) * 100) : 0,
-      };
-    }),
+    .map((batch) => ({ batch, ...batchProgress(batch) })),
 );
 
 // Onboarding checklist reflects real cluster state, shown until all three done.
@@ -99,7 +72,11 @@ const showOnboarding = computed(
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="总览" description="管线健康一览 · 后台事件流实时推送" />
+    <PageHeader title="总览" description="任务进度、交付情况与节点状态">
+      <template #actions>
+        <Button as-child variant="outline"><RouterLink to="/batches">查看批次 <Icon name="arrowRight" :size="14" /></RouterLink></Button>
+      </template>
+    </PageHeader>
 
     <Alert v-if="overview.error.value && overview.data.value === undefined" variant="destructive">
       <AlertDescription class="flex items-center justify-between gap-3">
@@ -110,19 +87,19 @@ const showOnboarding = computed(
 
     <OnboardingCard v-if="showOnboarding" :status="onboardStatus" />
 
-    <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <CardSection title="管道健康" description="各阶段当前驻留的数据粒分布" class="lg:col-span-2">
-        <div v-if="overview.isPending.value" class="space-y-4 py-4" role="status" aria-label="正在加载管道状态">
+    <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+      <CardSection title="处理进度" description="从任务分配到确认交付" class="lg:col-span-2">
+        <div v-if="overview.isPending.value" class="space-y-4 py-4" role="status" aria-label="正在加载处理进度">
           <Skeleton class="h-6 w-36" />
           <Skeleton class="h-16 w-full" />
           <Skeleton class="h-6 w-2/3" />
         </div>
-        <p v-else-if="overview.data.value === undefined" class="py-12 text-center text-sm text-muted-foreground">管道状态暂不可用，请重试。</p>
+        <p v-else-if="overview.data.value === undefined" class="py-12 text-center text-sm text-muted-foreground">处理进度暂不可用，请重试。</p>
         <div v-else-if="!hasChartData" class="flex h-44 items-center justify-center">
-          <EmptyState title="暂无数据粒" description="管线空闲，等待新批次注入" illustration="signal" />
+          <EmptyState title="暂无任务数据" description="创建批次后，可在此查看处理进度。" illustration="signal" />
         </div>
         <template v-else>
-          <PipelineHealth :counts="counts" />
+          <PipelineHealth :counts="counts" overview />
           <DeliveryStats
             class="mt-5"
             :throughput-per-min="throughputPerMin"
@@ -131,7 +108,7 @@ const showOnboarding = computed(
         </template>
       </CardSection>
 
-      <CardSection title="节点" description="集群健康度">
+      <CardSection title="节点状态" description="工作节点与接收端的在线情况">
         <div class="space-y-3">
           <Skeleton v-if="workers.isPending.value" class="h-24 w-full" role="status" aria-label="正在加载工作节点" />
           <Alert v-else-if="workers.data.value === undefined" variant="destructive">
@@ -145,7 +122,7 @@ const showOnboarding = computed(
             label="工作节点"
             :value="activeWorkers"
             :total="workers.data.value?.length ?? 0"
-            tooltip="点击查看节点详情；'在线' = 心跳在 2 分钟内"
+            tooltip="最近 2 分钟内收到心跳的工作节点"
             @click="router.push('/workers')"
           >
             <template #icon><Icon name="workers" :size="18" /></template>
@@ -162,7 +139,7 @@ const showOnboarding = computed(
             label="接收端"
             :value="activeReceivers"
             :total="receivers.data.value?.length ?? 0"
-            tooltip="点击查看接收端详情；'在线' = 心跳在 2 分钟内"
+            tooltip="最近 2 分钟内收到心跳的接收端"
             @click="router.push('/receivers')"
           >
             <template #icon><Icon name="receivers" :size="18" /></template>
@@ -171,7 +148,7 @@ const showOnboarding = computed(
       </CardSection>
     </div>
 
-    <CardSection title="活跃批次" :description="batches.data.value ? `${activeBatches.length} 个未结束 · 点击进入详情` : '批次执行进度与异常'">
+    <CardSection title="未完成批次" :description="batches.data.value ? `${activeBatches.length} 个批次尚未完成` : '批次执行进度与异常'">
       <div v-if="batches.isPending.value" class="grid grid-cols-1 gap-3 xl:grid-cols-2" role="status" aria-label="正在加载批次">
         <Skeleton v-for="i in 2" :key="i" class="h-28 w-full" />
       </div>
@@ -183,46 +160,46 @@ const showOnboarding = computed(
       </Alert>
       <EmptyState
         v-else-if="activeBatches.length === 0"
-        title="当前没有未结束的批次"
-        description="新建批次后会出现在这里；已完成的批次见批次页"
+        title="暂无未完成批次"
+        description="可创建新批次，或前往批次列表查看历史记录。"
         illustration="signal"
       >
         <template #action>
           <Button variant="default" @click="router.push('/batches')">
             <Icon name="plus" :size="13" />
-            新建任务
+            新建批次
           </Button>
         </template>
       </EmptyState>
       <div v-else class="grid grid-cols-1 gap-3 xl:grid-cols-2">
         <RouterLink
-          v-for="r in activeBatches"
-          :key="r.b.batch_id"
-          :to="`/batches/${r.b.batch_id}`"
+          v-for="row in activeBatches"
+          :key="row.batch.batch_id"
+          :to="`/batches/${row.batch.batch_id}`"
           class="block rounded-xl border border-border bg-card p-4 shadow-soft transition hover:border-primary/40 hover:shadow-pop"
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
-              <div class="truncate font-medium text-foreground">{{ r.b.name }}</div>
+              <div class="truncate font-medium text-foreground">{{ row.batch.name }}</div>
               <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground" @click.stop.prevent>
-                {{ r.b.batch_id }}
-                <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
+                {{ row.batch.batch_id }}
+                <CopyButton :value="row.batch.batch_id" title="复制批次 ID" />
               </div>
             </div>
             <div class="flex shrink-0 flex-wrap justify-end gap-1.5">
-              <Badge v-if="r.b.status === 'paused'" tone="warn">已暂停</Badge>
-              <Badge tone="info">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
+              <Badge v-if="row.batch.status === 'paused'" tone="warn">已暂停</Badge>
+              <Badge tone="info">{{ row.batch.target_receiver_id ?? "自动分配" }}</Badge>
             </div>
           </div>
           <BatchProgressCell
             class="mt-3"
-            :done="r.done"
-            :total="r.total"
-            :pct="r.pct"
-            :eta-realtime="r.b.status === 'paused' ? null : r.b.eta_realtime ?? null"
-            :in-flight="r.inFlight"
-            :errors="r.errors"
-            :exhausted="r.b.objects_exhausted"
+            :done="row.done"
+            :total="row.total"
+            :pct="row.pct"
+            :eta-realtime="row.batch.status === 'paused' ? null : row.batch.eta_realtime ?? null"
+            :in-flight="row.inFlight"
+            :errors="row.errors"
+            :exhausted="row.batch.objects_exhausted"
           />
         </RouterLink>
       </div>

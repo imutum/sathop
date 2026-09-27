@@ -38,7 +38,7 @@ defineSlots<{
 <template>
   <div
     :class="[
-      'flex flex-wrap items-center gap-1.5',
+      'flex items-center gap-1.5',
       align === 'end' ? 'justify-end' : 'justify-start',
     ]"
   >

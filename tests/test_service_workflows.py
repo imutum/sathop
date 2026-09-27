@@ -12,7 +12,8 @@ from sqlalchemy import delete, func, select
 from test_receiver_pipeline import _serve_static
 
 from sathop.orchestrator import db
-from sathop.orchestrator.delivery_ledger import archive_confirmed
+from sathop.orchestrator.api.deliveries import export_deliveries
+from sathop.orchestrator.delivery_ledger import archive_confirmed, iter_receipt_chunks
 from sathop.orchestrator.main import app
 from sathop.orchestrator.reaping import reap_granules
 from sathop.receiver.ack_buffer import AckBuffer
@@ -59,6 +60,46 @@ async def client(tmp_path, patch_settings, request):
 
 def ack_body(i=1, **overrides):
     return {"object_id": i, "receiver_id": "r", "sha256": str(i) * 64, "success": True, **overrides}
+
+
+async def test_receipt_export_bounds_and_releases_connections_between_chunks(client):
+    # Enough receipts to cross the default 500-row export boundary.
+    async with db.get_session_maker()() as s:
+        for index in range(503):
+            s.add(
+                db.DeliveryRecord(
+                    identity=f"{index:064x}",
+                    source_object_id=index,
+                    uploaded_at=db.utcnow(),
+                    batch_id="b" if index % 2 else "other",
+                    batch_name="客户",
+                    bundle_ref="orch:x@1",
+                    granule_id=f"b:g{index}",
+                    object_key=f"file-{index}.tif",
+                    sha256="a" * 64,
+                    size=index,
+                    receiver_id="r",
+                    delivered_at=db.utcnow(),
+                )
+            )
+        await s.commit()
+        upper = await s.scalar(select(func.max(db.DeliveryRecord.id)))
+        response = await export_deliveries(conditions=[], s=s)
+
+    # A successful ACK after the export starts must not extend that export.
+    assert (await client.post("/api/receivers/ack", json=ack_body())).status_code == 200
+    text = "".join([chunk async for chunk in response.body_iterator])
+    rows = list(csv.reader(io.StringIO(text.lstrip("\ufeff"))))
+    assert [row[4] for row in rows[3:]] == [f"file-{index}.tif" for index in range(503)]
+
+    exported = []
+    async for receipts in iter_receipt_chunks(
+        db.DeliveryRecord.batch_id == "b", upper_id=upper, chunk_size=100
+    ):
+        assert len(receipts) <= 100
+        assert db._engine.pool.checkedout() == 0
+        exported.extend(receipt.object_key for receipt in receipts)
+    assert exported == [f"file-{index}.tif" for index in range(1, 503, 2)]
 
 
 async def test_ack_receipt_is_immutable_and_failure_cannot_undo_it(client):

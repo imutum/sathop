@@ -99,7 +99,7 @@ const collapsibleOpen = ref(false);
           <Badge tone="queued" dot>已分配</Badge>
           <Badge tone="downloading" dot>下载中</Badge>
           <Badge tone="processing" dot>处理中</Badge>
-          <Badge tone="uploaded" dot>待分发</Badge>
+          <Badge tone="uploaded" dot>待交付</Badge>
           <Badge tone="acked" dot>已确认</Badge>
           <Badge tone="failed" dot>待重试</Badge>
         </div>

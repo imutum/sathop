@@ -81,7 +81,7 @@ function onUploaded(d: BundleDetail) {
   <div class="space-y-6">
     <PageHeader
       title="任务包"
-      description="用户脚本注册表 · 批次通过 orch:<name>@<version> 引用"
+      description="管理处理脚本及版本，供批次执行使用"
     >
       <template #actions>
         <Button variant="default" @click="showUpload = true" title="上传含 manifest.yaml + 入口脚本的 ZIP 包">
@@ -91,7 +91,7 @@ function onUploaded(d: BundleDetail) {
       </template>
     </PageHeader>
 
-    <div class="grid gap-6 xl:grid-cols-[minmax(480px,2fr)_minmax(0,3fr)]">
+    <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       <Card>
         <QueryState :query="list">
           <template #loading>
@@ -111,18 +111,18 @@ function onUploaded(d: BundleDetail) {
           </template>
           <template #empty>
             <EmptyState
-              title="还没有任务包"
+              title="暂无任务包"
               illustration="inbox"
             >
               <template #description>
                 <div class="space-y-2 text-left">
-                  <p>用户脚本以 ZIP 形式上传，批次通过 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">orch:&lt;name&gt;@&lt;version&gt;</code> 引用。</p>
+                  <p>将处理脚本打包为 ZIP 上传，批次通过 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">orch:&lt;name&gt;@&lt;version&gt;</code> 引用。</p>
                   <p>ZIP 结构示例：</p>
                   <pre class="rounded bg-muted px-3 py-2 text-mini font-mono text-foreground/80">my-bundle/
 ├── manifest.yaml      # 版本、入口、依赖、输入/输出
 ├── entrypoint.py      # 处理脚本
 └── requirements.txt   # 可选 pip 依赖</pre>
-                  <p>本地用 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">sathop-upload-bundle</code> 命令上传更方便（自带 manifest 校验）。</p>
+                  <p>本地用 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">sathop-upload-bundle</code> 命令上传并校验任务包配置。</p>
                 </div>
               </template>
             </EmptyState>
@@ -206,7 +206,7 @@ function onUploaded(d: BundleDetail) {
           <EmptyState
             v-if="!selected"
             title="未选择任务包"
-            description="选择左侧任意任务包查看清单 / 文件浏览。"
+            description="选择任务包，查看配置与文件。"
             illustration="inbox"
           />
           <div v-else-if="detail.isLoading.value" class="py-8 text-center text-sm text-muted-foreground">

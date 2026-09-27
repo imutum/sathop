@@ -18,11 +18,11 @@ export function useNow() {
   return now;
 }
 
-// 11 阶段 + 已拉黑（重试上限）。命名跟 worker 视角一致，按 4 大阶段（管道口径）分组：
+// 11 阶段 + 已停止（重试上限）。命名跟 worker 视角一致，按 4 大阶段（管道口径）分组：
 //   待分配                                              大阶段「待分配」(orchestrator 还没派出去)
-//   待下载→下载中→待处理→处理中→待上传→上传中→待分发      大阶段「进行中」(worker 持有；待分发=已上传到 worker 存储、待 receiver 拉取，仍未交付)
+//   待下载→下载中→待处理→处理中→待上传→上传中→待交付      大阶段「进行中」(worker 持有；待交付=已上传到 worker 存储、待 receiver 拉取，仍未交付)
 //   待清理 → 已完成                                      大阶段「已交付」(receiver 已确认 / 已清理)
-//   待重试 / 已拉黑                                       大阶段「异常」(失败分支)
+//   待重试 / 已停止                                       大阶段「异常」(失败分支)
 export const GRANULE_STATE_ZH: Record<GranuleState, string> = {
   pending: "待分配",
   queued: "待下载",
@@ -31,11 +31,11 @@ export const GRANULE_STATE_ZH: Record<GranuleState, string> = {
   processing: "处理中",
   processed: "待上传",
   uploading: "上传中",
-  uploaded: "待分发",
+  uploaded: "待交付",
   acked: "待清理",
   deleted: "已完成",
   failed: "待重试",
-  blacklisted: "已拉黑",
+  blacklisted: "已停止",
 };
 
 export const EVENT_LEVEL_ZH: Record<string, string> = {
@@ -50,11 +50,11 @@ export const PLATFORM_ZH: Record<string, string> = {
 };
 
 export const TIMING_STAGE_ZH: Record<TimingStage, string> = {
-  download_wait: "等下载",
+  download_wait: "等待下载",
   download: "下载",
-  process_wait: "等处理",
+  process_wait: "等待处理",
   process: "处理",
-  upload_wait: "等上传",
+  upload_wait: "等待上传",
   upload: "上传",
   deliver: "交付",
 };

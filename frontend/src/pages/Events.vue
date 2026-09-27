@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { useQuery } from "@tanstack/vue-query";
 import { useRoute, useRouter } from "vue-router";
-import { API, type EventRow } from "@/api";
-import { K } from "@/queryKeys";
+import { useEventFeed } from "@/features/events/useEventFeed";
 import { fmtAge, levelLabel } from "@/i18n";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -33,17 +31,18 @@ const LEVEL_FILTERS: { value: Level; label: string }[] = [
 const route = useRoute();
 const router = useRouter();
 
-const initLevel = (route.query.level as Level | undefined) ?? "all";
-const filter = ref<Level>(
-  (["all", "warn", "error"] as Level[]).includes(initLevel) ? initLevel : "all",
-);
-const search = ref((route.query.q as string | undefined) ?? "");
-const batchFilter = ref((route.query.batch as string | undefined) ?? "");
-const sourceFilter = ref((route.query.source as string | undefined) ?? "");
-const rows = ref<EventRow[]>([]);
+function routeFilter(key: string): string {
+  const value = route.query[key];
+  return typeof value === "string" ? value : "";
+}
+
+const initialLevel = routeFilter("level");
+const filter = ref<Level>(initialLevel === "warn" || initialLevel === "error" ? initialLevel : "all");
+const search = ref(routeFilter("q"));
+const batchFilter = ref(routeFilter("batch"));
+const sourceFilter = ref(routeFilter("source"));
 const expanded = ref<Set<number>>(new Set());
-const loadingOlder = ref(false);
-const hasMoreOlder = ref(true);
+const { query: q, rows, loadingOlder, hasMoreOlder, olderError, loadOlder } = useEventFeed(sourceFilter);
 
 // 实时 / 历史 视图（持久化）。实时模式把最新事件放到底部并跟随滚动。
 const MODE_OPTIONS: { value: "history" | "live"; label: string }[] = [
@@ -78,43 +77,9 @@ watch([filter, search, batchFilter, sourceFilter], ([f, s, b, src]) => {
 });
 
 watch(sourceFilter, () => {
-  rows.value = [];
-  hasMoreOlder.value = true;
+  expanded.value = new Set();
+  newCount.value = 0;
 });
-
-const q = useQuery({
-  queryKey: computed(() => [...K.events, { source: sourceFilter.value }]),
-  queryFn: () => API.events(rows.value[0]?.id ?? 0, 200, undefined, sourceFilter.value || undefined),
-});
-
-watch(
-  () => q.data.value,
-  (data) => {
-    if (!data || data.length === 0) return;
-    const seen = new Set(rows.value.map((r) => r.id));
-    const fresh = data.filter((r) => !seen.has(r.id));
-    if (fresh.length === 0) return;
-    rows.value = [...fresh, ...rows.value].slice(0, 500);
-  },
-);
-
-async function loadOlder() {
-  const oldest = rows.value[rows.value.length - 1]?.id;
-  if (oldest === undefined || loadingOlder.value) return;
-  loadingOlder.value = true;
-  try {
-    const older = await API.events(0, 200, oldest, sourceFilter.value || undefined);
-    if (older.length === 0) {
-      hasMoreOlder.value = false;
-      return;
-    }
-    const seen = new Set(rows.value.map((r) => r.id));
-    rows.value = [...rows.value, ...older.filter((r) => !seen.has(r.id))];
-    if (older.length < 200) hasMoreOlder.value = false;
-  } finally {
-    loadingOlder.value = false;
-  }
-}
 
 const batches = computed(() => {
   const s = new Set<string>();
@@ -143,18 +108,23 @@ const hasActiveFilters = computed(
 // 实时模式按时间正序（最新在底部）；历史模式维持 newest-first。
 const displayRows = computed(() => (live.value ? [...visible.value].reverse() : visible.value));
 
-// 新事件 prepend 到 rows。实时模式下：用户在底部则跟随，否则累计"N 条新"提示。
-// （实时模式隐藏"加载更早"，所以 rows 增长仅来自新事件 prepend。）
+// Count visible new IDs even when the bounded recent window stays at 500 rows.
 watch(
-  () => rows.value.length,
-  (len, prev) => {
-    if (!live.value) return;
-    const added = len - (prev ?? len);
-    if (added <= 0) return;
+  [sourceFilter, () => rows.value[0]?.id],
+  ([source, newest], [previousSource, previous]) => {
+    if (!live.value || newest === undefined) return;
+    if (source !== previousSource || previous === undefined) {
+      void nextTick(scrollToBottom);
+      return;
+    }
+    if (newest <= previous) return;
+    const added = visible.value.filter((event) => event.id > previous).length;
+    if (added === 0) return;
     if (atBottom()) void nextTick(scrollToBottom);
     else newCount.value += added;
   },
 );
+watch([filter, search, batchFilter], () => { newCount.value = 0; });
 watch(mode, (m) => {
   if (m === "live") void nextTick(scrollToBottom);
 });
@@ -194,7 +164,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
   <div class="space-y-6">
     <PageHeader
       title="事件日志"
-      description="所有 Orchestrator / Worker / Receiver 上报事件的合并视图"
+      description="查询调度服务、工作节点与接收端的运行事件"
     >
       <template #actions>
         <Badge variant="info" class="tabular-nums">
@@ -209,7 +179,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
         <div class="min-w-[260px] flex-1">
           <TextInput
             v-model="search"
-            placeholder="搜索：message / source / granule_id / batch_id"
+            placeholder="搜索已加载事件：内容、来源或 ID"
             aria-label="搜索事件"
           >
             <template #leftIcon>
@@ -219,10 +189,10 @@ function highlight(text: string, n: string): HighlightSeg[] {
         </div>
         <SelectInput
           v-model="batchFilter"
-          aria-label="按批次过滤"
+          aria-label="按批次筛选"
           class="h-8 w-full rounded-lg border border-border bg-background px-2.5 text-xs text-foreground outline-none transition-colors hover:border-primary/40 focus:border-primary sm:w-48"
         >
-          <option value="">所有批次</option>
+          <option value="">全部批次</option>
           <option v-for="b in batches" :key="b" :value="b">{{ b }}</option>
         </SelectInput>
         <Segmented v-model="filter" :options="LEVEL_FILTERS" />
@@ -232,13 +202,13 @@ function highlight(text: string, n: string): HighlightSeg[] {
           variant="outline"
           class="border-primary/40 bg-primary/10 text-primary"
         >
-          <span class="opacity-70">源</span>
+          <span class="opacity-70">来源</span>
           <span class="font-mono">{{ sourceFilter }}</span>
           <button
             type="button"
             @click="sourceFilter = ''"
             class="-mr-1 grid h-4 w-4 place-items-center rounded text-primary/70 transition-colors hover:bg-primary/15 hover:text-primary"
-            aria-label="移除源过滤"
+            aria-label="清除来源筛选"
           >
             <Icon name="x" :size="10" :stroke-width="2.4" />
           </button>
@@ -249,22 +219,22 @@ function highlight(text: string, n: string): HighlightSeg[] {
               type="button"
               variant="outline"
               size="icon-sm"
-              title="事件等级与展开规则说明"
-              aria-label="事件等级与展开规则说明"
+              title="事件级别说明"
+              aria-label="事件级别说明"
             >
               <Icon name="help" :size="14" />
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" class="w-72 text-cell">
-            <div class="mb-2 text-mini font-medium tracking-label text-muted-foreground">等级图例</div>
+            <div class="mb-2 text-mini font-medium tracking-label text-muted-foreground">事件级别</div>
             <ul class="space-y-1.5 text-muted-foreground">
               <li class="flex items-center gap-2">
                 <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/70" aria-hidden />
-                <span><span class="text-foreground">信息</span> · 例行状态推进</span>
+                <span><span class="text-foreground">信息</span> · 常规运行记录</span>
               </li>
               <li class="flex items-center gap-2">
                 <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden />
-                <span><span class="text-foreground">警告</span> · 值得关注但未失败</span>
+                <span><span class="text-foreground">警告</span> · 需要关注的运行情况</span>
               </li>
               <li class="flex items-center gap-2">
                 <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-danger" aria-hidden />
@@ -288,6 +258,12 @@ function highlight(text: string, n: string): HighlightSeg[] {
         </Button>
       </div>
 
+      <p class="px-5 py-2 text-xs text-muted-foreground">
+        搜索、批次和级别筛选仅作用于已加载记录。实时刷新保留最近 500 条，可加载更早事件继续查询。
+      </p>
+      <Alert v-if="q.error.value && rows.length" variant="destructive">
+        <AlertDescription>事件刷新失败，当前显示上次读取的记录。</AlertDescription>
+      </Alert>
       <div ref="scrollEl" class="relative max-h-[70vh] overflow-auto font-mono">
         <QueryState :query="q" :is-empty="() => rows.length === 0">
           <template #loading>
@@ -311,7 +287,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
           <template #default>
             <EmptyState
               v-if="visible.length === 0"
-              title="当前筛选条件下没有匹配"
+              title="已加载记录中没有匹配事件"
             />
             <ul v-else class="divide-y divide-border/50">
               <li
@@ -355,6 +331,9 @@ function highlight(text: string, n: string): HighlightSeg[] {
                 </template>
               </li>
             </ul>
+            <Alert v-if="olderError" variant="destructive" class="mx-5 my-3 w-auto">
+              <AlertDescription>更早事件加载失败，请重试。{{ olderError }}</AlertDescription>
+            </Alert>
             <div
               v-if="rows.length > 0 && !live"
               class="flex items-center justify-center border-t border-border/60 px-5 py-3"
@@ -370,7 +349,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
               >
                 加载更早事件
               </Button>
-              <span v-else class="text-2xs text-muted-foreground">已加载到最早事件</span>
+              <span v-else class="text-2xs text-muted-foreground">暂无更早事件</span>
             </div>
           </template>
         </QueryState>

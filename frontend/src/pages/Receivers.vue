@@ -20,7 +20,7 @@ const showOnboard = ref(false);
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="接收端" description="拉取 Worker 已上传产物的下游消费者">
+    <PageHeader title="接收端" description="管理交付目标，查看文件接收状态">
       <template #actions>
         <Button variant="default" class="gap-1.5" @click="showOnboard = true">
           <Icon name="plus" :size="13" />
@@ -48,7 +48,7 @@ const showOnboard = ref(false);
           <CardContent class="pt-6">
             <EmptyState
               title="暂无已注册的接收端"
-              description="点下方按钮生成接入命令，复制到目标机器执行即可。"
+              description="生成接入命令后，在目标机器执行。"
               illustration="inbox"
             >
               <template #action>

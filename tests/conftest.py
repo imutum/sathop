@@ -55,10 +55,10 @@ def _clear_in_memory_stores():
     clear_progress()
     reset_shutdown()  # module-global flag must not leak a "shutting down" state
     reset_coalesce()  # cancel pending nudge-window timers so they don't cross tests
-    reset_overview_cache()  # 1s TTL cache must not leak a stale overview across tests
-    reset_metrics_cache()  # same 1s TTL cache, on the metrics scrape path
-    reset_batches_cache()  # 1s TTL cache on the batch-list aggregate
-    reset_latest_cache()  # 5min latest-release cache must not leak across tests
+    reset_overview_cache()
+    reset_metrics_cache()
+    reset_batches_cache()
+    reset_latest_cache()
     yield
     clear_events()
     clear_telemetry()

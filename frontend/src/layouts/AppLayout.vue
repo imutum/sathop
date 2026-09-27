@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Icon, type IconName } from "@/components/Icon";
 import HintTip from "@/components/HintTip.vue";
 import SidebarContent from "@/layouts/SidebarContent.vue";
@@ -73,7 +73,7 @@ const isDark = computed(() => effective.value === "dark");
 </script>
 
 <template>
-  <div class="flex h-full bg-background text-foreground">
+  <div class="flex h-dvh overflow-hidden bg-background text-foreground">
     <a
       href="#main-content"
       class="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-background focus:px-3 focus:py-1.5 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-pop"
@@ -83,7 +83,7 @@ const isDark = computed(() => effective.value === "dark");
     <aside
       :class="[
         collapsed ? 'w-[72px]' : 'w-60',
-        'relative hidden shrink-0 flex-col border-r border-border bg-background transition-[width] duration-200 ease-out md:flex',
+        'relative hidden shrink-0 flex-col border-r border-border/70 bg-sidebar transition-[width] duration-200 ease-out md:flex',
       ]"
       aria-label="主导航"
     >
@@ -101,14 +101,15 @@ const isDark = computed(() => effective.value === "dark");
     </aside>
 
     <Sheet v-model:open="mobileOpen">
-      <SheetContent side="left" class="w-72 max-w-[80vw] gap-0 p-0">
+      <SheetContent side="left" :aria-describedby="undefined" class="w-72 max-w-[85vw] gap-0 bg-sidebar p-0">
+        <SheetTitle class="sr-only">主导航</SheetTitle>
         <SidebarContent :nav="NAV" />
       </SheetContent>
     </Sheet>
 
     <div class="flex min-w-0 flex-1 flex-col">
-      <header class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-border bg-background/85 px-4 backdrop-blur-md md:px-6 lg:px-8">
-        <div class="flex items-center gap-3">
+      <header class="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border/60 bg-background/90 px-4 backdrop-blur-md md:px-6 lg:px-8">
+        <div class="flex min-w-0 items-center gap-3">
           <Button
             type="button"
             variant="outline"
@@ -123,6 +124,11 @@ const isDark = computed(() => effective.value === "dark");
               <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </Button>
+          <nav aria-label="当前位置" class="flex min-w-0 items-center gap-2 text-xs">
+            <span class="hidden text-muted-foreground sm:inline">工作空间</span>
+            <Icon name="chevronRight" :size="12" class="hidden text-muted-foreground/60 sm:block" />
+            <span class="truncate font-medium text-foreground">{{ route.meta.title }}</span>
+          </nav>
         </div>
         <div class="flex items-center gap-2">
           <HintTip :text="connected ? '实时更新已连接，页面会自动刷新' : '正在恢复实时更新；页面仍会每分钟尝试刷新数据'">
@@ -138,11 +144,11 @@ const isDark = computed(() => effective.value === "dark");
               <span
                 :class="[
                   'h-1.5 w-1.5 rounded-full',
-                  connected ? 'bg-success animate-pulse-soft' : 'bg-muted-foreground',
+                  connected ? 'bg-success' : 'bg-muted-foreground',
                 ]"
                 aria-hidden
               />
-              {{ connected ? "实时" : "连接中" }}
+              {{ connected ? "实时同步" : "连接中" }}
             </Badge>
           </HintTip>
           <HintTip :text="isDark ? '切换到亮色模式' : '切换到暗色模式'">
@@ -171,7 +177,7 @@ const isDark = computed(() => effective.value === "dark");
       </div>
 
       <main id="main-content" tabindex="-1" class="flex-1 overflow-auto">
-        <div class="mx-auto w-full max-w-[1480px] px-4 py-5 md:px-6 md:py-6 lg:px-8 lg:py-8">
+        <div class="mx-auto w-full max-w-[1480px] px-4 py-6 md:px-6 md:py-8 lg:px-8 lg:py-9">
           <RouterView v-slot="{ Component }">
             <Transition
               mode="out-in"

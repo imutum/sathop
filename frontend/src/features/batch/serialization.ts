@@ -18,14 +18,20 @@ export function rowToGranule(row: Row, slots: SlotSpec[]) {
   return { granule_id: row.granule_id, inputs, meta: row.meta };
 }
 
-export function parseExecutionEnv(text: string | undefined): Record<string, string> {
+export function parseExecutionEnv(
+  text: string | undefined,
+  { strict = false }: { strict?: boolean } = {},
+): Record<string, string> {
   const raw = text?.trim() ?? "";
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return {};
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new Error("环境变量必须是 JSON 对象");
+    }
     return Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, String(value)]));
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return {};
   }
 }

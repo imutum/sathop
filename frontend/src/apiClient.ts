@@ -63,6 +63,24 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await r.json()) as T;
 }
 
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const response = await fetch(path, { headers: authHeaders() });
+  if (!response.ok) throw await httpError(response);
+
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(await response.blob());
+  link.href = url;
+  link.download = filename;
+  try {
+    document.body.appendChild(link);
+    link.click();
+  } finally {
+    link.remove();
+    // Give the browser time to start reading the blob before releasing it.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
 export function jsonInit(method: string, body?: unknown): RequestInit {
   return body === undefined
     ? { method }

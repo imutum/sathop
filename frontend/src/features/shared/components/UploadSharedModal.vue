@@ -72,10 +72,7 @@ const onSubmit = handleSubmit((vals) => {
 </script>
 
 <template>
-  <Modal :dirty="meta.dirty" @close="emit('close')">
-    <h2 class="mb-5 text-lg font-semibold">
-      {{ lockName ? `替换 ${lockName}` : "上传共享文件" }}
-    </h2>
+  <Modal v-slot="{ close }" :title="lockName ? `替换 ${lockName}` : '上传共享文件'" description="供任务包复用的辅助数据与资源。" :dirty="meta.dirty" @close="emit('close')">
     <form class="space-y-4 text-sm" @submit.prevent="onSubmit">
       <FormField v-slot="{ componentField }" name="name">
         <FormItem>
@@ -114,7 +111,7 @@ const onSubmit = handleSubmit((vals) => {
           <FormControl>
             <Input
               v-bind="componentField"
-              placeholder="简短说明这个文件是什么"
+              placeholder="简述文件内容与用途"
             />
           </FormControl>
           <FormMessage />
@@ -125,8 +122,8 @@ const onSubmit = handleSubmit((vals) => {
         <AlertDescription>{{ submitError }}</AlertDescription>
       </Alert>
 
-      <div class="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="outline" @click="emit('close')">取消</Button>
+      <div class="modal-actions">
+        <Button type="button" variant="outline" @click="close">取消</Button>
         <Button
           type="submit"
           variant="default"

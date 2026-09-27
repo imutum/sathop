@@ -20,7 +20,7 @@ type Step = {
 };
 
 const STEPS: Step[] = [
-  { key: "worker", icon: "workers", title: "接入 worker", cta: { to: "/workers", label: "前往工作节点" } },
+  { key: "worker", icon: "workers", title: "接入工作节点", cta: { to: "/workers", label: "前往工作节点" } },
   { key: "bundle", icon: "bundles", title: "上传任务包", cta: { to: "/bundles", label: "前往任务包" } },
   { key: "batch", icon: "pulse", title: "新建批次", cta: { to: "/batches", label: "前往批次" } },
 ];
@@ -33,8 +33,8 @@ const activeIndex = computed(() => STEPS.findIndex((s) => !isDone(s.key)));
 
 <template>
   <CardSection
-    :title="doneCount === 0 ? '首次使用 SatHop？' : '完成集群配置'"
-    :description="`三步跑通首个批次 · 已完成 ${doneCount}/3`"
+    title="开始使用"
+    :description="`完成基础配置并创建首个批次 · ${doneCount}/3`"
   >
     <ol class="grid gap-4 md:grid-cols-3">
       <li
@@ -72,12 +72,10 @@ const activeIndex = computed(() => STEPS.findIndex((s) => !isDone(s.key)));
         </div>
         <p class="mt-3 flex-1 text-xs leading-relaxed text-muted-foreground">
           <template v-if="i === 0">
-            点击「接入工作节点」按钮生成
-            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-mini text-foreground">docker run</code>
-            命令，复制到目标机器执行即可注册。
+            生成接入命令，在目标机器执行并完成注册。
           </template>
-          <template v-else-if="i === 1">用户脚本入口、依赖、输入/输出契约。</template>
-          <template v-else>选定任务包 + 凭证，提交首组数据粒。</template>
+          <template v-else-if="i === 1">上传处理脚本、依赖与输入输出配置。</template>
+          <template v-else>选择任务包，填写凭证并提交数据。</template>
         </p>
         <div class="mt-3">
           <span v-if="isDone(s.key)" class="text-2xs font-medium text-success">✓ 已完成</span>

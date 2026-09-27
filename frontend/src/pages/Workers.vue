@@ -31,6 +31,13 @@ import { Icon } from "@/components/Icon";
 import { requestConfirm } from "@/composables/useConfirm";
 import { useToast } from "@/composables/useToast";
 import { useLatestRelease } from "@/composables/useVersionCheck";
+import {
+  parseConcurrency,
+  workerUpdateConfirmation,
+  workerRemoveConfirmation,
+  workerPurgeConfirmation,
+  workerRevokeConfirmation,
+} from "@/features/nodes/workerActions";
 
 const qc = useQueryClient();
 const toast = useToast();
@@ -61,8 +68,8 @@ const rows = computed(() =>
   hasHistory.value && tab.value === "history" ? removedList.value : activeList.value,
 );
 const tabOptions = computed(() => [
-  { value: "active", label: "活跃", count: activeCount.value },
-  { value: "history", label: "历史", count: removedList.value.length },
+  { value: "active", label: "当前节点", count: activeCount.value },
+  { value: "history", label: "已移除", count: removedList.value.length },
 ]);
 
 // ── Selection (always-on, scoped to current tab) ────────────────────────────
@@ -127,65 +134,40 @@ async function onBatchUpdate() {
   if (n === 0) return;
   const target = updateTarget.value;
   const ok = await requestConfirm({
-    title: target ? `升级 ${n} 个节点到 v${target}？` : `重启 ${n} 个节点？`,
-    description: target
-      ? `所选 worker 在下次心跳后各自排空在手任务、写入待装版本 v${target} 并重启，由 entrypoint 拉取该版本发布包安装。混版期间管道仍正常流转，建议分批操作以免吞吐断崖。`
-      : "未能确定最新版本，将发送同版本重启信号（排空在手任务后重启，版本不变）。",
-    confirmText: target ? "升级并重启" : "重启",
+    ...workerUpdateConfirmation(`${n} 个节点`, target),
     tone: "danger",
   });
   if (!ok) return;
-  void fanOut(target ? `升级到 v${target}` : "重启", (id) => API.updateWorker(id, target));
+  void fanOut(target ? `提交 v${target} 升级请求` : "提交重启请求", (id) => API.updateWorker(id, target));
 }
 function onBatchPause() {
-  void fanOut("暂停领新任务", (id) => API.setWorkerPaused(id, true));
+  void fanOut("暂停接收新任务", (id) => API.setWorkerPaused(id, true));
 }
 function onBatchResume() {
-  void fanOut("恢复", (id) => API.setWorkerPaused(id, false));
+  void fanOut("恢复接收新任务", (id) => API.setWorkerPaused(id, false));
 }
 function onBatchGc() {
-  void fanOut("发送清理信号", (id) => API.workerGc(id));
+  void fanOut("提交缓存清理请求", (id) => API.workerGc(id));
 }
 
 async function onBatchRevoke() {
   const n = selectedCount.value;
-  const ok = await requestConfirm({
-    title: `释放 ${n} 个节点的在手 lease？`,
-    description:
-      "把这些节点持有的全部在手 lease 重置回 待分配，等其他 worker 抢占。\n" +
-      "已下载/已处理的中间产物会被丢弃；retry_count 会 +1，仍受 max_retries 限制。",
-    confirmText: "立即释放",
-    tone: "danger",
-  });
+  const ok = await requestConfirm(workerRevokeConfirmation(`${n} 个节点`));
   if (!ok) return;
-  await fanOut("释放在手 lease", (id) => API.revokeWorkerLeases(id));
+  await fanOut("提交任务重新分配请求", (id) => API.revokeWorkerLeases(id));
   qc.invalidateQueries({ queryKey: [...K.batches] });
 }
 
 async function onBatchRemove() {
   const n = selectedCount.value;
-  const ok = await requestConfirm({
-    title: `移除 ${n} 个工作节点？`,
-    description:
-      "这些节点将被永久移除，容器会在排空任务后自动停止。\n" +
-      "移除后节点 ID 不可再注册 — 如需恢复，请启动新的 worker。",
-    confirmText: "移除",
-    tone: "danger",
-  });
-  if (ok) await fanOut("发送移除信号", (id) => API.removeWorker(id));
+  const ok = await requestConfirm(workerRemoveConfirmation(`${n} 个节点`));
+  if (ok) await fanOut("提交移除请求", (id) => API.removeWorker(id));
 }
 
 async function onBatchPurge() {
   const n = selectedCount.value;
-  const ok = await requestConfirm({
-    title: `彻底删除 ${n} 个节点记录？`,
-    description:
-      "从注册表中物理删除这些节点记录（已上传产物与事件日志不受影响，各自按保留周期老化）。\n" +
-      "如果对应容器仍在运行，删除后它会以新节点身份重新注册。",
-    confirmText: "彻底删除",
-    tone: "danger",
-  });
-  if (ok) await fanOut("彻底删除", (id) => API.purgeWorker(id));
+  const ok = await requestConfirm(workerPurgeConfirmation(`${n} 个节点`));
+  if (ok) await fanOut("删除记录", (id) => API.purgeWorker(id));
 }
 
 // ── Batch concurrency (bulk endpoint) ────────────────────────────────────────
@@ -198,7 +180,7 @@ const setConcurrencyBulk = useMutation({
     API.setWorkersConcurrency([...selected.value], body),
   onSuccess: (r) => {
     qc.invalidateQueries({ queryKey: [...K.workers] });
-    toast.success(`已向 ${r.applied.length} 个节点下发并发设置，下次心跳收敛`);
+    toast.success(`已更新 ${r.applied.length} 个节点的并发设置，下次心跳生效`);
     showBulkConc.value = false;
     clearSelection();
   },
@@ -211,19 +193,11 @@ function openBulkConc() {
   showBulkConc.value = true;
 }
 
-// type=number 的 v-model 会回吐 number，先 String(...) 再 trim 才安全。
-function parseConc(s: string): number | null | undefined {
-  const t = String(s ?? "").trim();
-  if (t === "") return null;
-  const n = Number(t);
-  return Number.isInteger(n) && n >= 1 ? n : undefined;
-}
-
 function submitBulkConc() {
-  const dl = parseConc(bulkDl.value);
-  const pr = parseConc(bulkPr.value);
+  const dl = parseConcurrency(bulkDl.value);
+  const pr = parseConcurrency(bulkPr.value);
   if (dl === undefined || pr === undefined) {
-    toast.error("并发必须是 ≥ 1 的整数，留空表示用各节点默认值");
+    toast.error("并发数须为正整数，留空使用节点默认值");
     return;
   }
   setConcurrencyBulk.mutate({ download_concurrency: dl, process_concurrency: pr });
@@ -283,7 +257,7 @@ function setRowRef(id: string, el: Element | null) {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="工作节点" description="集群内已注册的 Worker · 心跳 / 资源 / 队列">
+    <PageHeader title="工作节点" description="查看节点状态与资源使用，管理任务分配">
       <template #actions>
         <Button variant="default" class="gap-1.5" @click="showOnboard = true">
           <Icon name="plus" :size="13" />
@@ -309,7 +283,7 @@ function setRowRef(id: string, el: Element | null) {
           <CardContent class="pt-6">
             <EmptyState
               title="暂无已注册的工作节点"
-              description="点下方按钮生成接入命令，复制到目标机器执行即可。"
+              description="生成接入命令后，在目标机器执行。"
               illustration="inbox"
             >
               <template #action>
@@ -328,7 +302,7 @@ function setRowRef(id: string, el: Element | null) {
             v-if="hasHistory"
             v-model="tab"
             :options="tabOptions"
-            aria-label="活跃 / 历史 工作节点"
+            aria-label="当前 / 已移除 工作节点"
           />
 
           <!-- 批量工具栏：>=1 选中时出现 -->
@@ -350,7 +324,7 @@ function setRowRef(id: string, el: Element | null) {
               <Button variant="outline" size="xs" :disabled="batchPending" @click="onBatchUpdate">更新</Button>
               <Button variant="outline" size="xs" :disabled="batchPending" @click="onBatchPause">暂停</Button>
               <Button variant="outline" size="xs" :disabled="batchPending" @click="onBatchResume">恢复</Button>
-              <Button variant="outline" size="xs" :disabled="batchPending" @click="onBatchGc">清缓存</Button>
+              <Button variant="outline" size="xs" :disabled="batchPending" @click="onBatchGc">清理缓存</Button>
               <Button
                 variant="outline"
                 size="xs"
@@ -358,9 +332,9 @@ function setRowRef(id: string, el: Element | null) {
                 :disabled="batchPending"
                 @click="onBatchRevoke"
               >
-                释放lease
+                重新分配任务
               </Button>
-              <Button variant="outline" size="xs" :disabled="batchPending" @click="openBulkConc">设并发</Button>
+              <Button variant="outline" size="xs" :disabled="batchPending" @click="openBulkConc">设置并发</Button>
               <Button
                 variant="outline"
                 size="xs"
@@ -379,7 +353,7 @@ function setRowRef(id: string, el: Element | null) {
               :disabled="batchPending"
               @click="onBatchPurge"
             >
-              彻底删除
+              删除记录
             </Button>
           </div>
 
@@ -387,7 +361,7 @@ function setRowRef(id: string, el: Element | null) {
             <CardContent class="pt-6">
               <EmptyState
                 :title="tab === 'history' ? '暂无历史节点' : '当前无活跃节点'"
-                :description="tab === 'history' ? undefined : '已注册的节点都在历史中。'"
+                :description="tab === 'history' ? undefined : '已移除的节点可在“已移除”页签查看。'"
                 illustration="inbox"
               />
             </CardContent>
@@ -455,11 +429,9 @@ function setRowRef(id: string, el: Element | null) {
 
     <OnboardWorkerModal v-if="showOnboard" @close="showOnboard = false" />
 
-    <Modal v-if="showBulkConc" width-class="w-[min(420px,95vw)]" @close="showBulkConc = false">
-      <h2 class="mb-1 text-base font-semibold">批量设置并发</h2>
-      <p class="mb-4 text-2xs text-muted-foreground">
-        对已选的 {{ selectedCount }} 个节点统一下发。留空 = 用各节点默认值（清除覆盖）。
-        节点流水线天花板 = 下载并发 + 处理并发；调大瞬时生效，调小会触发一次短暂排空后重建。
+    <Modal v-if="showBulkConc" title="批量设置并发" :description="`应用于已选的 ${selectedCount} 个节点。留空则恢复节点默认值。`" width-class="w-[460px]" @close="showBulkConc = false">
+      <p class="mb-5 text-xs leading-relaxed text-muted-foreground">
+        增大并发会立即扩容；减小并发需等待当前流水线排空后生效。
       </p>
       <div class="grid grid-cols-2 gap-3">
         <div>
@@ -471,14 +443,14 @@ function setRowRef(id: string, el: Element | null) {
           <Input id="bulk-pr" v-model="bulkPr" type="number" min="1" placeholder="默认" class="tabular-nums" />
         </div>
       </div>
-      <div class="mt-5 flex justify-end gap-2">
-        <Button variant="ghost" @click="showBulkConc = false">取消</Button>
+      <div class="modal-actions">
+        <Button variant="outline" @click="showBulkConc = false">取消</Button>
         <Button
           variant="default"
           :disabled="setConcurrencyBulk.isPending.value"
           @click="submitBulkConc"
         >
-          下发
+          应用设置
         </Button>
       </div>
     </Modal>

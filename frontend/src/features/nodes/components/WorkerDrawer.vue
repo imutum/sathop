@@ -4,8 +4,10 @@ import type { WorkerInfo } from "@/api";
 import { fmtGB, nodeStatusBadge } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { useWorkerLifecycle } from "@/features/nodes/useWorkerLifecycle";
+import { parseConcurrency } from "@/features/nodes/workerActions";
+import { WORKER_QUEUE_STAGES, workerQueueTotal } from "@/features/nodes/workerQueue";
 import { useToast } from "@/composables/useToast";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import CopyButton from "@/components/CopyButton.vue";
@@ -40,28 +42,7 @@ const diskTone = computed<"bad" | "warn" | "accent">(() => {
   return "accent";
 });
 
-const inflightTotal = computed(() => {
-  const w = props.worker;
-  if (!w) return 0;
-  return (
-    w.queue_pending_download +
-    w.queue_downloading +
-    w.queue_pending_processing +
-    w.queue_processing +
-    w.queue_pending_upload +
-    w.queue_uploading
-  );
-});
-
-// 6 阶段栅格（顺序/文案/提示与原 WorkerCard 一致）。
-const STAGES = [
-  { key: "queue_pending_download", label: "待下载", tip: "已 lease、等下载槽位（download_sem 满）" },
-  { key: "queue_downloading", label: "下载中", tip: "正在拉源数据" },
-  { key: "queue_pending_processing", label: "待处理", tip: "已下载、等 CPU 槽位（process_sem 满）" },
-  { key: "queue_processing", label: "处理中", tip: "正在执行任务包脚本（CPU 在跑）" },
-  { key: "queue_pending_upload", label: "待上传", tip: "处理完、等上传槽位（upload_sem 满）— 防 MinIO/WAN 打满网卡" },
-  { key: "queue_uploading", label: "上传中", tip: "正在把产物落到本节点存储" },
-] as const;
+const inflightTotal = computed(() => workerQueueTotal(props.worker));
 
 // 两个并发编辑器（下载 / 处理）。editing===null ⇒ 显示态；否则编辑该维度。
 type Dim = "download" | "process";
@@ -95,11 +76,9 @@ function startEdit(dim: Dim) {
 function submitDraft() {
   const dim = editing.value;
   if (dim === null) return;
-  // type=number 的 v-model 会回吐 number，必须 String(...) 再 trim，否则 .trim() 抛 TypeError。
-  const t = String(draft.value ?? "").trim();
-  const next = t === "" ? null : Number(t);
-  if (next !== null && (!Number.isInteger(next) || next < 1)) {
-    toast.error("并发必须是 ≥ 1 的整数，留空表示用节点默认值");
+  const next = parseConcurrency(draft.value);
+  if (next === undefined) {
+    toast.error("并发数须为正整数，留空使用节点默认值");
     return;
   }
   const body = {
@@ -117,13 +96,13 @@ function onKey(e: KeyboardEvent) {
 
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <SheetContent side="right" class="w-full gap-0 overflow-y-auto p-0 sm:max-w-md">
+    <SheetContent side="right" :aria-describedby="undefined" class="w-full gap-0 overflow-y-auto p-0 sm:max-w-md">
       <template v-if="worker">
         <!-- 身份 -->
         <div class="flex items-start justify-between gap-2 border-b border-border/60 px-5 pb-4 pt-5 pr-12">
           <div class="min-w-0">
             <div class="flex items-center gap-1 font-mono text-sm font-semibold">
-              <span class="truncate">{{ worker.worker_id }}</span>
+              <SheetTitle class="truncate font-mono text-sm">{{ worker.worker_id }}</SheetTitle>
               <CopyButton :value="worker.worker_id" title="复制节点 ID" />
             </div>
             <div
@@ -136,13 +115,13 @@ function onKey(e: KeyboardEvent) {
           <div class="flex shrink-0 items-center gap-1.5">
             <HintTip
               v-if="worker.operator_paused && !isRemoved"
-              text="管理员手动暂停 — 在手任务继续，不接新单。点下方「恢复」按钮解除"
+              text="已暂停接收新任务，当前任务继续执行。可通过“恢复”重新接收任务"
             >
               <Badge tone="warn">手动暂停</Badge>
             </HintTip>
             <HintTip
               v-else-if="worker.paused && !isRemoved"
-              :text="`worker 自我暂停 — 当前磁盘 ${diskPct.toFixed(0)}%，等待降到恢复阈值再领新任务`"
+              :text="`磁盘使用率 ${diskPct.toFixed(0)}%，降至恢复阈值后自动分配任务`"
             >
               <Badge tone="warn">磁盘暂停</Badge>
             </HintTip>
@@ -156,7 +135,7 @@ function onKey(e: KeyboardEvent) {
             :version="worker.version"
             :pending="lc.pending.value"
             :actionable="!isRemoved"
-            update-title="排空在手任务后拉取最新代码并重启该 worker"
+            update-title="当前任务完成后更新并重启节点"
             @update="lc.confirmUpdate"
           />
         </div>
@@ -203,7 +182,7 @@ function onKey(e: KeyboardEvent) {
 
           <!-- 队列 6 阶段栅格 -->
           <div class="grid grid-cols-3 gap-2 rounded-lg border border-border bg-muted/60 p-3 text-center lg:grid-cols-6">
-            <HintTip v-for="s in STAGES" :key="s.key" :text="s.tip">
+            <HintTip v-for="s in WORKER_QUEUE_STAGES" :key="s.key" :text="s.tip">
               <div>
                 <div class="stat-label">{{ s.label }}</div>
                 <div class="mt-0.5 text-base font-semibold tabular-nums text-foreground">
@@ -253,7 +232,7 @@ function onKey(e: KeyboardEvent) {
                 size="xs"
                 class="ml-auto text-muted-foreground hover:text-foreground"
                 @click="startEdit('download')"
-              >改</Button>
+              >设置</Button>
             </div>
             <!-- 处理并发 -->
             <div class="flex items-center gap-1.5">
@@ -293,7 +272,7 @@ function onKey(e: KeyboardEvent) {
                 size="xs"
                 class="ml-auto text-muted-foreground hover:text-foreground"
                 @click="startEdit('process')"
-              >改</Button>
+              >设置</Button>
             </div>
           </div>
 
@@ -304,7 +283,7 @@ function onKey(e: KeyboardEvent) {
               <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
                 <RouterLink
                   :to="`/events?source=${encodeURIComponent(worker.worker_id)}`"
-                  title="跳转到事件日志，已按本节点过滤"
+                  title="查看本节点的事件日志"
                 >
                   <Icon name="events" :size="11" />
                   事件
@@ -316,7 +295,7 @@ function onKey(e: KeyboardEvent) {
                   :variant="worker.operator_paused ? 'default' : 'outline'"
                   size="xs"
                   :disabled="lc.pause.isPending.value"
-                  :title="worker.operator_paused ? '恢复领取新任务' : '暂停领取新任务（在手的继续跑完）'"
+                  :title="worker.operator_paused ? '恢复领取新任务' : '暂停接收新任务，当前任务继续执行'"
                   @click="lc.togglePause(worker.operator_paused)"
                 >
                   {{ lc.pause.isPending.value ? "…" : worker.operator_paused ? "恢复" : "暂停" }}
@@ -327,10 +306,10 @@ function onKey(e: KeyboardEvent) {
                   size="xs"
                   class="text-muted-foreground hover:text-foreground"
                   :disabled="lc.gc.isPending.value"
-                  title="向该 worker 发送清理信号，下次心跳生效"
+                  title="提交缓存清理请求，下次心跳生效"
                   @click="lc.confirmGc"
                 >
-                  清缓存
+                  清理缓存
                 </Button>
                 <Button
                   type="button"
@@ -338,10 +317,10 @@ function onKey(e: KeyboardEvent) {
                   size="xs"
                   class="text-danger hover:bg-danger/10"
                   :disabled="lc.revoke.isPending.value || inflightTotal === 0"
-                  :title="inflightTotal === 0 ? '当前无在手 lease' : `立即释放在手的 ${inflightTotal} 条 lease（丢弃中间产物）`"
+                  :title="inflightTotal === 0 ? '当前没有可重新分配的任务' : `重新分配 ${inflightTotal} 条任务，中间结果将被丢弃`"
                   @click="lc.confirmRevoke(inflightTotal)"
                 >
-                  释放lease {{ inflightTotal > 0 ? `(${inflightTotal})` : "" }}
+                  重新分配任务 {{ inflightTotal > 0 ? `(${inflightTotal})` : "" }}
                 </Button>
                 <Button
                   type="button"
@@ -375,7 +354,7 @@ function onKey(e: KeyboardEvent) {
                 @click="lc.confirmPurge"
               >
                 <Icon name="trash" :size="11" />
-                彻底删除
+                删除记录
               </Button>
             </div>
           </div>

@@ -34,7 +34,7 @@ function parts(path: string) {
   <div v-else-if="(files.data.value?.length ?? 0) === 0" class="py-4 text-xs text-muted-foreground">
     （包为空）
   </div>
-  <div v-else class="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,280px)_1fr]">
+  <div v-else class="grid grid-cols-1 gap-3 2xl:grid-cols-[minmax(140px,180px)_minmax(0,1fr)]">
     <ul class="max-h-[420px] overflow-auto rounded-lg border border-border bg-muted/40 py-1">
       <li v-for="f in files.data.value ?? []" :key="f.path">
         <button
@@ -59,15 +59,15 @@ function parts(path: string) {
         </button>
       </li>
     </ul>
-    <div class="rounded-lg border border-border bg-muted/30">
+    <div class="min-w-0 rounded-lg border border-border bg-muted/30">
       <div v-if="content.isLoading.value" class="p-3 text-xs text-muted-foreground">加载 {{ sel }}…</div>
       <div v-else-if="content.isError.value" class="p-3 text-xs text-danger">
         读取失败：{{ (content.error.value as Error).message }}
       </div>
       <div v-else-if="content.data.value">
-        <div class="flex items-center justify-between border-b border-border px-3 py-2 text-2xs text-muted-foreground">
-          <span class="font-mono">{{ content.data.value.path }}</span>
-          <span class="flex gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2 text-2xs text-muted-foreground">
+          <span class="break-all font-mono">{{ content.data.value.path }}</span>
+          <span class="flex flex-wrap gap-2">
             <span class="tabular-nums">{{ fmtBytes(content.data.value.size) }}</span>
             <span v-if="content.data.value.truncated" class="text-warning">
               已截断（512 KB 上限）

@@ -35,6 +35,6 @@ export function nodeStatusBadge(
   if (!active) return { tone: "error", label: inactiveLabel };
   const sec = (useNow().value - new Date(lastSeenISO).getTime()) / 1000;
   if (sec < 60) return { tone: "acked", label: "在线" };
-  if (sec < 300) return { tone: "warn", label: "待机" };
+  if (sec < 300) return { tone: "warn", label: "心跳延迟" };
   return { tone: "error", label: "离线" };
 }

@@ -23,7 +23,7 @@ describe("features/batch/createBatchHeaderSchema", () => {
   });
 
   it.each([
-    ["name", "请填展示名称"],
+    ["name", "请填写批次名称"],
     ["bundleSel", "请选择任务包"],
   ])("rejects empty %s with the user-facing prompt", (field, msg) => {
     const r = createBatchHeaderSchema.safeParse({ ...VALID, [field]: "" });

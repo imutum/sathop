@@ -45,9 +45,3 @@ export const router = createRouter({
   history: createWebHistory(),
   routes,
 });
-
-const BASE_TITLE = "SatHop · 控制面板";
-router.afterEach((to) => {
-  const pageTitle = (to.meta?.title as string | undefined) ?? "";
-  document.title = pageTitle ? `${pageTitle} · ${BASE_TITLE}` : BASE_TITLE;
-});

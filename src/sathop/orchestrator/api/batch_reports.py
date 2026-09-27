@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import csv
-import io
-from urllib.parse import quote
-
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import Batch, DeliveryRecord, Granule, GranuleObject, get_session_maker, utcnow
+from ..delivery_ledger import has_delivery_record, iter_receipt_chunks
 from .batch_readmodels import summary
+from .csv_export import csv_response
 
 _CHUNK_SIZE = 500
 _STATES = {
@@ -28,21 +26,6 @@ _STATES = {
     "failed": "待重试",
     "blacklisted": "已停止（含主动取消）",
 }
-
-
-def _csv(rows: list[list[object]]) -> str:
-    buf = io.StringIO(newline="")
-    writer = csv.writer(buf)
-    for row in rows:
-        cells = []
-        for value in row:
-            text = "" if value is None else str(value)
-            # Quoting alone does not stop spreadsheet formula evaluation.
-            if text.lstrip().startswith(("=", "+", "-", "@")) or text.startswith(("\t", "\r", "\n")):
-                text = "'" + text
-            cells.append(text)
-        writer.writerow(cells)
-    return buf.getvalue()
 
 
 async def retained_delivery_count(s: AsyncSession, batch_id: str) -> int:
@@ -71,16 +54,7 @@ async def delivery_report(s: AsyncSession, batch: Batch) -> StreamingResponse:
         await s.scalar(select(func.max(DeliveryRecord.id)).where(DeliveryRecord.batch_id == batch.batch_id))
         or 0
     )
-    recorded = (
-        select(DeliveryRecord.id)
-        .where(
-            DeliveryRecord.id <= ledger_upper,
-            DeliveryRecord.source_object_id == GranuleObject.id,
-            DeliveryRecord.uploaded_at == GranuleObject.uploaded_at,
-            DeliveryRecord.granule_id == GranuleObject.granule_id,
-        )
-        .exists()
-    )
+    recorded = has_delivery_record(upper_id=ledger_upper)
     header: list[list[object]] = [
         ["SatHop 批次交付报告"],
         ["生成时间（UTC）", utcnow().isoformat()],
@@ -109,7 +83,7 @@ async def delivery_report(s: AsyncSession, batch: Batch) -> StreamingResponse:
     await s.rollback()
 
     async def chunks():
-        yield "\ufeff" + _csv(header)
+        yield header
         after = 0
         while after < upper:
             async with get_session_maker()() as read:
@@ -137,60 +111,34 @@ async def delivery_report(s: AsyncSession, batch: Batch) -> StreamingResponse:
                 ).all()
             if not records:
                 break
-            yield _csv(
+            yield [
                 [
-                    [
-                        gid,
-                        key,
-                        size,
-                        sha,
-                        "已交付" if ack else "待交付",
-                        receiver,
-                        ack.isoformat() if ack else "",
-                    ]
-                    for _, gid, key, size, sha, ack, receiver in records
+                    gid,
+                    key,
+                    size,
+                    sha,
+                    "已交付" if ack else "待交付",
+                    receiver,
+                    ack.isoformat() if ack else "",
                 ]
-            )
+                for _, gid, key, size, sha, ack, receiver in records
+            ]
             after = records[-1][0]
 
-        after = 0
-        while after < ledger_upper:
-            async with get_session_maker()() as read:
-                receipts = (
-                    await read.scalars(
-                        select(DeliveryRecord)
-                        .where(
-                            DeliveryRecord.batch_id == batch_id,
-                            DeliveryRecord.id > after,
-                            DeliveryRecord.id <= ledger_upper,
-                        )
-                        .order_by(DeliveryRecord.id)
-                        .limit(_CHUNK_SIZE)
-                    )
-                ).all()
-            if not receipts:
-                break
-            yield _csv(
+        async for receipts in iter_receipt_chunks(
+            DeliveryRecord.batch_id == batch_id, upper_id=ledger_upper, chunk_size=_CHUNK_SIZE
+        ):
+            yield [
                 [
-                    [
-                        r.granule_id,
-                        r.object_key,
-                        r.size,
-                        r.sha256,
-                        "已交付",
-                        r.receiver_id,
-                        r.delivered_at.isoformat(),
-                    ]
-                    for r in receipts
+                    receipt.granule_id,
+                    receipt.object_key,
+                    receipt.size,
+                    receipt.sha256,
+                    "已交付",
+                    receipt.receiver_id,
+                    receipt.delivered_at.isoformat(),
                 ]
-            )
-            after = receipts[-1].id
+                for receipt in receipts
+            ]
 
-    return StreamingResponse(
-        chunks(),
-        media_type="text/csv; charset=utf-8",
-        headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(batch_id, safe='')}-delivery.csv",
-            "Cache-Control": "no-store",
-        },
-    )
+    return csv_response(chunks(), f"{batch_id}-delivery.csv")

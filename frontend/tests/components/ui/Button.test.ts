@@ -21,8 +21,8 @@ describe("ui/Button", () => {
 
   it("buttonVariants() composes class string", () => {
     const cls = buttonVariants({ variant: "outline", size: "lg" });
-    expect(cls).toContain("border-input");
-    expect(cls).toContain("h-10");
+    expect(cls).toContain("border-border");
+    expect(cls).toContain("h-11");
   });
 
   it("merges user class via cn()", () => {

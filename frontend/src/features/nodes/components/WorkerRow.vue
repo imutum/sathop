@@ -4,6 +4,7 @@ import type { WorkerInfo } from "@/api";
 import { nodeStatusBadge } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { useWorkerLifecycle } from "@/features/nodes/useWorkerLifecycle";
+import { workerQueueTotal } from "@/features/nodes/workerQueue";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,15 +50,8 @@ const diskTone = computed(() => {
   return "bg-primary";
 });
 
-const inflightTotal = computed(
-  () =>
-    props.worker.queue_pending_download +
-    props.worker.queue_downloading +
-    props.worker.queue_pending_processing +
-    props.worker.queue_processing +
-    props.worker.queue_pending_upload +
-    props.worker.queue_uploading,
-);
+const inflightTotal = computed(() => workerQueueTotal(props.worker));
+const lastSeenLabel = computed(() => fmtAge(props.worker.last_seen));
 
 // dl/pr 显示：实测生效值，括号内为覆盖值（若有）。
 function concDisplay(live: number | null, override: number | null): string {
@@ -70,53 +64,34 @@ let shiftPressed = false;
 function onCheckboxMousedown(e: MouseEvent) {
   shiftPressed = e.shiftKey;
 }
-
-// v-memo 签名（design item 10）。
-const memo = computed(() => [
-  props.worker.last_seen,
-  props.worker.cpu_percent,
-  props.worker.mem_percent,
-  props.worker.disk_used_gb,
-  props.worker.disk_total_gb,
-  props.worker.operator_paused,
-  props.worker.paused,
-  props.worker.live_download_concurrency,
-  props.worker.live_process_concurrency,
-  props.worker.download_concurrency,
-  props.worker.process_concurrency,
-  inflightTotal.value,
-  props.worker.version,
-  props.selected,
-]);
 </script>
 
 <template>
   <!-- active -->
   <TableRow
     v-if="tab === 'active'"
-    v-memo="memo"
     :data-state="selected ? 'selected' : undefined"
     class="cursor-pointer"
     @click="emit('open')"
   >
     <TableCell class="w-8" @click.stop @mousedown="onCheckboxMousedown">
-      <Checkbox :model-value="selected" @update:model-value="emit('toggle', shiftPressed)" />
+      <Checkbox :model-value="selected" :aria-label="`选择节点 ${worker.worker_id}`" @update:model-value="emit('toggle', shiftPressed)" />
     </TableCell>
     <TableCell class="w-6">
       <Badge :tone="status.tone" dot :title="status.label" class="size-1.5 border-0 bg-transparent p-0" />
     </TableCell>
     <TableCell class="font-mono text-xs">
       <span class="flex items-center gap-1.5">
-        <span class="truncate">{{ worker.worker_id }}</span>
+        <button type="button" class="truncate text-left hover:text-primary hover:underline" :aria-label="`查看节点 ${worker.worker_id}`" @click.stop="emit('open')">{{ worker.worker_id }}</button>
         <HintTip
           v-if="worker.operator_paused"
-          text="管理员手动暂停 — 在手任务继续，不接新单"
+          text="已暂停接收新任务，当前任务继续执行"
         >
           <Badge tone="warn" class="px-1.5 py-0 text-mini">暂停</Badge>
         </HintTip>
         <HintTip
           v-else-if="worker.paused"
-          text="worker 自我暂停 — 磁盘超阈值，等待降回恢复阈值再领新任务"
+          text="磁盘使用率超过阈值，释放空间后自动恢复任务分配"
         >
           <Badge tone="warn" class="px-1.5 py-0 text-mini">磁盘暂停</Badge>
         </HintTip>
@@ -144,7 +119,7 @@ const memo = computed(() => [
       </HintTip>
     </TableCell>
     <TableCell><QueueBar :worker="worker" /></TableCell>
-    <TableCell class="whitespace-nowrap text-2xs text-muted-foreground">{{ fmtAge(worker.last_seen) }}</TableCell>
+    <TableCell class="whitespace-nowrap text-2xs text-muted-foreground">{{ lastSeenLabel }}</TableCell>
     <TableCell class="w-8 text-right" @click.stop>
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
@@ -160,15 +135,15 @@ const memo = computed(() => [
             {{ worker.operator_paused ? "恢复" : "暂停" }}
           </DropdownMenuItem>
           <DropdownMenuItem :disabled="lc.gc.isPending.value" @select="lc.confirmGc">
-            立即清理缓存
+            清理缓存
           </DropdownMenuItem>
           <DropdownMenuItem
             :disabled="lc.revoke.isPending.value || inflightTotal === 0"
-            :title="inflightTotal === 0 ? '当前无在手 lease' : `立即释放在手的 ${inflightTotal} 条 lease`"
+            :title="inflightTotal === 0 ? '当前没有可重新分配的任务' : `重新分配 ${inflightTotal} 条任务`"
             class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
             @select="lc.confirmRevoke(inflightTotal)"
           >
-            释放在手 lease {{ inflightTotal > 0 ? `(${inflightTotal})` : "" }}
+            重新分配任务 {{ inflightTotal > 0 ? `(${inflightTotal})` : "" }}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem :disabled="lc.pending.value" @select="lc.confirmUpdate">
@@ -196,21 +171,20 @@ const memo = computed(() => [
   <!-- history -->
   <TableRow
     v-else
-    v-memo="memo"
     :data-state="selected ? 'selected' : undefined"
     class="cursor-pointer opacity-70"
     @click="emit('open')"
   >
     <TableCell class="w-8" @click.stop @mousedown="onCheckboxMousedown">
-      <Checkbox :model-value="selected" @update:model-value="emit('toggle', shiftPressed)" />
+      <Checkbox :model-value="selected" :aria-label="`选择节点 ${worker.worker_id}`" @update:model-value="emit('toggle', shiftPressed)" />
     </TableCell>
     <TableCell class="w-16">
       <Badge tone="error" class="px-1.5 py-0 text-mini">已移除</Badge>
     </TableCell>
     <TableCell class="font-mono text-xs">
-      <span class="truncate">{{ worker.worker_id }}</span>
+      <button type="button" class="truncate text-left hover:text-primary hover:underline" :aria-label="`查看节点 ${worker.worker_id}`" @click.stop="emit('open')">{{ worker.worker_id }}</button>
     </TableCell>
-    <TableCell class="whitespace-nowrap text-2xs text-muted-foreground">{{ fmtAge(worker.last_seen) }}</TableCell>
+    <TableCell class="whitespace-nowrap text-2xs text-muted-foreground">{{ lastSeenLabel }}</TableCell>
     <TableCell class="w-8 text-right" @click.stop>
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
@@ -228,7 +202,7 @@ const memo = computed(() => [
             @select="lc.confirmPurge"
           >
             <Icon name="trash" :size="12" />
-            彻底删除
+            删除记录
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

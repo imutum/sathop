@@ -24,23 +24,23 @@ const lifecycle = useNodeLifecycle<ReceiverInfo>({
   forget: () => API.forgetReceiver(props.receiver.receiver_id),
   restart: () => API.restartReceiver(props.receiver.receiver_id),
   enabledMessage: "已启用",
-  disabledMessage: "已禁用，下次 pull 会被拒绝",
+  disabledMessage: "已禁用，停止接收新的交付任务",
   deletedMessage: `已删除接收端 ${props.receiver.receiver_id}`,
-  restartMessage: "已发送更新信号，下次心跳生效",
+  restartMessage: "已提交更新请求，下次心跳生效",
   forgetConfirm: {
-    title: `永久移除接收端 ${props.receiver.receiver_id}？`,
+    title: `删除接收端记录 ${props.receiver.receiver_id}？`,
     description:
-      "将从注册表中删除这条接收端记录。\n" +
-      "如果接收端容器仍在运行，下次心跳会自动重新注册（misclick 重启容器即恢复）。\n" +
-      "想让它彻底不再回来：先停掉容器再点移除。",
-    confirmText: "永久移除",
+      "将删除接收端记录，已接收的文件保留。\n" +
+      "若接收端仍在运行，会自动重新注册。\n" +
+      "如需停止接收服务，请先停止接收端。",
+    confirmText: "删除记录",
     tone: "danger",
   },
   restartConfirm: {
     title: `更新接收端 ${props.receiver.receiver_id}？`,
     description:
-      "向该接收端发送更新信号 — 它会在下一次心跳收到后立即退出，由容器 restart 策略拉取最新代码后拉起。\n" +
-      "在手的拉取会被中断，未 ack 的对象会在重启后重新分发。",
+      "接收端将在下次心跳后更新并重启。\n" +
+      "当前文件拉取会中断，未确认交付的文件将在重启后重新分配。",
     confirmText: "更新",
   },
 });
@@ -67,7 +67,7 @@ const status = computed(() => nodeStatusBadge(props.receiver.enabled, props.rece
       <NodeVersionRow
         :version="receiver.version"
         :pending="lifecycle.pending.value"
-        update-title="中断在手拉取并拉取最新代码后重启该接收端"
+        update-title="更新并重启接收端，当前拉取将中断"
         @update="lifecycle.confirmRestart"
       />
     </div>

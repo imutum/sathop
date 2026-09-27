@@ -2,21 +2,15 @@
 import { computed } from "vue";
 import HintTip from "@/components/HintTip.vue";
 
-// Node summary tile — bigger icon tile + value/total + plain Chinese
-// status chip. Tone derives from the value/total ratio so the operator
-// sees "全员在线" vs "部分异常" at a glance without reading the badge.
-const props = withDefaults(
-  defineProps<{
-    label: string;
-    value: number;
-    total: number;
-    /** Optional secondary line, defaults to "在线 / 已注册". */
-    caption?: string;
-    /** Hover explanation — e.g. "几台 worker 当前在线 / 共注册了多少". */
-    tooltip?: string;
-  }>(),
-  {},
-);
+// Heartbeats indicate availability, not task success or overall system health.
+const props = defineProps<{
+  label: string;
+  value: number;
+  total: number;
+  /** Optional secondary line, defaults to "在线 / 已注册". */
+  caption?: string;
+  tooltip?: string;
+}>();
 defineEmits<{ click: [] }>();
 
 type Tone = "muted" | "success" | "warning" | "danger";
@@ -49,25 +43,11 @@ const tileCls = computed(
     })[tone.value],
 );
 
-const statusLabel = computed(
-  () =>
-    ({
-      muted: "未注册",
-      success: "健康",
-      warning: "降级",
-      danger: "异常",
-    })[tone.value],
-);
-
-const statusCls = computed(
-  () =>
-    ({
-      muted: "text-muted-foreground",
-      success: "text-success",
-      warning: "text-warning",
-      danger: "text-danger",
-    })[tone.value],
-);
+const statusLabel = computed(() => {
+  if (props.total === 0) return "未接入";
+  if (props.value === props.total) return "全部在线";
+  return props.value === 0 ? "全部离线" : "部分离线";
+});
 </script>
 
 <template>
@@ -98,7 +78,7 @@ const statusCls = computed(
           </span>
           <span class="text-sm text-muted-foreground">/ {{ total }}</span>
         </div>
-        <span :class="['text-xs font-medium', statusCls]">{{ statusLabel }}</span>
+        <span :class="['text-xs font-medium', valueCls]">{{ statusLabel }}</span>
       </div>
     </button>
   </HintTip>

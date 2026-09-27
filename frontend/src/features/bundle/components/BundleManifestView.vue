@@ -66,10 +66,10 @@ async function download() {
 
 <template>
   <div class="space-y-5 text-sm">
-    <div class="flex items-start justify-between gap-3">
-      <div>
-        <div class="flex items-center gap-2">
-          <div class="font-mono text-[14px]">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="break-all font-mono text-sm">
             <span class="font-semibold">{{ d.name }}</span>
             <span class="text-muted-foreground">@{{ d.version }}</span>
           </div>
@@ -107,15 +107,15 @@ async function download() {
     </div>
     <Alert v-if="error" variant="destructive"><AlertDescription>{{ error }}</AlertDescription></Alert>
 
-    <BundleSection title="输入槽位 · slots" :count="slots.length">
+    <BundleSection title="数据输入" :count="slots.length">
       <div v-if="slots.length === 0" class="text-xs text-muted-foreground">未声明</div>
       <table v-else class="w-full font-mono text-cell">
         <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
-            <th class="py-1.5 pr-3 text-left font-normal">name</th>
-            <th class="py-1.5 pr-3 text-left font-normal">product</th>
-            <th class="py-1.5 pr-3 text-left font-normal">filename_pattern</th>
-            <th class="py-1.5 text-left font-normal">credential</th>
+            <th class="py-1.5 pr-3 text-left font-sans font-normal">名称</th>
+            <th class="py-1.5 pr-3 text-left font-sans font-normal">产品</th>
+            <th class="py-1.5 pr-3 text-left font-sans font-normal">文件名规则</th>
+            <th class="py-1.5 text-left font-sans font-normal">凭证</th>
           </tr>
         </thead>
         <tbody>
@@ -129,12 +129,12 @@ async function download() {
       </table>
     </BundleSection>
 
-    <BundleSection v-if="metaFields.length > 0" title="元字段 · meta" :count="metaFields.length">
+    <BundleSection v-if="metaFields.length > 0" title="元数据字段" :count="metaFields.length">
       <table class="w-full font-mono text-cell">
         <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
-            <th class="py-1.5 pr-3 text-left font-normal">name</th>
-            <th class="py-1.5 text-left font-normal">pattern</th>
+            <th class="py-1.5 pr-3 text-left font-sans font-normal">名称</th>
+            <th class="py-1.5 text-left font-sans font-normal">匹配规则</th>
           </tr>
         </thead>
         <tbody>
@@ -148,7 +148,7 @@ async function download() {
 
     <BundleSection
       v-if="sharedFiles.length > 0"
-      title="所需共享文件 · shared_files"
+      title="所需共享文件"
       :count="sharedFiles.length"
     >
       <div class="flex flex-wrap gap-1.5">
@@ -196,10 +196,10 @@ async function download() {
             {{ m.execution.timeout_sec ? `${m.execution.timeout_sec}s` : "默认" }}
           </Field>
           <Field label="输出目录">
-            <span class="font-mono">{{ m.outputs.watch_dir }}</span>
+            <span class="font-mono">{{ m.outputs?.watch_dir ?? "output" }}</span>
           </Field>
           <Field label="输出扩展名">
-            {{ m.outputs.extensions?.length ? m.outputs.extensions.join(", ") : "全部" }}
+            {{ m.outputs?.extensions?.length ? m.outputs.extensions.join(", ") : "全部" }}
           </Field>
         </div>
 

@@ -10,7 +10,7 @@ import { pipelineGroups, pipelineSegments, pipelineTotals } from "@/features/bat
 // processing order. The big-stage number is the sum; the small stages are its
 // breakdown (parent→child, intentionally both shown), so nothing is duplicated
 // — 待分配 is a leaf, present only as its card.
-const props = defineProps<{ counts: Partial<Record<GranuleState, number>> }>();
+const props = defineProps<{ counts: Partial<Record<GranuleState, number>>; overview?: boolean }>();
 
 // Stage colors stay local because they are presentation-only, not pipeline
 // semantics. Each literal hue carries a `dark:` shift one shade lighter so
@@ -31,15 +31,18 @@ const STAGE: Record<GranuleState, { bar: string; dot: string }> = {
 };
 
 // Big-stage header tone + a one-line tip (kept on the card, not the small rows).
-const GROUP: Record<string, { num: string; dot: string; tip: string }> = {
-  pending: { num: "text-muted-foreground",           dot: "bg-muted-foreground",        tip: "orchestrator 还没派给任何 worker 的数据粒" },
-  active:  { num: "text-sky-600 dark:text-sky-400",  dot: "bg-sky-500 dark:bg-sky-400", tip: "已 lease 到待交付之间的所有状态（含待分发：已上传待 receiver 拉取）；不含已交付" },
-  done:    { num: "text-success",                    dot: "bg-success",                 tip: "receiver 已确认（待清理）或已清理（已完成）——已交付" },
-  failed:  { num: "text-danger",                     dot: "bg-danger",                  tip: "失败待重试 + 已停止（包含重试耗尽和主动取消）" },
+const GROUP: Record<string, { dot: string; tip: string }> = {
+  pending: { dot: "bg-muted-foreground", tip: "尚未分配给工作节点的数据粒" },
+  active:  { dot: "bg-sky-500 dark:bg-sky-400", tip: "已分配给工作节点，尚未确认交付的数据粒" },
+  done:    { dot: "bg-success", tip: "接收端已确认交付，包括待清理和已完成的数据粒" },
+  failed:  { dot: "bg-danger", tip: "等待重试或已停止的数据粒；已停止包括重试耗尽和主动取消" },
 };
 
-const total = computed(() => pipelineTotals(props.counts).total);
+const totals = computed(() => pipelineTotals(props.counts));
+const total = computed(() => totals.value.total);
+const deliveredPct = computed(() => total.value ? (totals.value.done / total.value) * 100 : 0);
 const groups = computed(() => pipelineGroups(props.counts));
+const detailedGroups = computed(() => groups.value.filter((group) => group.subs.length));
 const segments = computed(() =>
   pipelineSegments(props.counts).map((seg) => ({ ...seg, label: stateLabel(seg.state) })),
 );
@@ -53,7 +56,7 @@ function pct(n: number): string {
 <template>
   <div class="space-y-5">
     <!-- 顶部：阶段分布条形图（全处理顺序，仅非零段） -->
-    <div>
+    <div v-if="!overview">
       <div class="mb-2 flex items-center justify-between text-xs">
         <span class="text-muted-foreground">阶段分布</span>
         <span class="tabular-nums text-muted-foreground">
@@ -72,40 +75,59 @@ function pct(n: number): string {
       </div>
     </div>
 
-    <!-- 分级：大阶段卡片 + 其小阶段。窄屏竖向堆叠，宽屏 4 列。 -->
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <!-- Keep totals visible; expand the detailed stages when needed. -->
+    <div :class="overview ? 'grid items-center gap-6 sm:grid-cols-[156px_minmax(0,1fr)]' : ''">
+      <div v-if="overview" class="relative mx-auto grid h-[156px] w-[156px] place-items-center">
+        <svg viewBox="0 0 160 160" class="absolute inset-0 h-full w-full -rotate-90" role="img" :aria-label="`交付比例 ${pct(totals.done)}，${totals.done} / ${total} 个数据粒`">
+          <circle cx="80" cy="80" r="70" fill="none" stroke="currentColor" stroke-width="7" class="text-primary/10" />
+          <circle v-if="deliveredPct > 0" cx="80" cy="80" r="70" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" pathLength="100" :stroke-dasharray="`${deliveredPct} 100`" class="text-primary" />
+          <circle cx="80" cy="80" r="58" fill="none" stroke="currentColor" stroke-width="0.5" class="text-primary/15" />
+        </svg>
+        <div class="text-center">
+          <div class="text-[34px] font-semibold leading-none tracking-tight tabular-nums">{{ pct(totals.done) }}</div>
+          <div class="mt-2 text-xs text-muted-foreground">交付比例</div>
+          <div class="mt-1 text-[11px] text-muted-foreground">共 {{ total.toLocaleString() }} 个数据粒</div>
+        </div>
+      </div>
+    <div :class="overview ? 'grid grid-cols-2 gap-x-5 gap-y-6' : 'grid grid-cols-2 gap-3 sm:grid-cols-4'">
       <div
         v-for="g in groups"
         :key="g.key"
-        class="rounded-lg border border-border bg-muted/40 px-3 py-2.5"
+        :class="overview ? 'border-l border-border/70 pl-4' : 'rounded-xl bg-muted/55 px-4 py-4'"
       >
         <div class="flex items-center gap-1.5 text-xs text-muted-foreground" :title="GROUP[g.key].tip">
           <span :class="['h-1.5 w-1.5 rounded-full', GROUP[g.key].dot]" aria-hidden />
           {{ g.label }}
         </div>
-        <div class="mt-1 flex items-baseline gap-1.5 tabular-nums">
-          <span :class="['text-xl font-semibold leading-none', GROUP[g.key].num]">
+        <div class="mt-3 flex flex-wrap items-baseline gap-2 tabular-nums">
+          <span class="text-[28px] font-semibold leading-none tracking-tight text-foreground">
             {{ g.total.toLocaleString() }}
           </span>
           <span class="text-xs text-muted-foreground">{{ pct(g.total) }}</span>
         </div>
-        <!-- 小阶段：按处理顺序，count=0 也显示（位置稳定）；待分配为叶子无子项 -->
-        <div v-if="g.subs.length" class="mt-2.5 space-y-1 border-t border-border/50 pt-2">
+      </div>
+    </div>
+    </div>
+    <details class="border-t border-border/70 pt-4">
+      <summary class="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">阶段明细</summary>
+      <div class="mt-4 grid gap-5 sm:grid-cols-3">
+        <div v-for="g in detailedGroups" :key="g.key" class="space-y-2">
+          <div class="mb-3 text-xs font-medium text-foreground">{{ g.label }}</div>
           <div
             v-for="sub in g.subs"
             :key="sub.state"
-            class="flex items-center justify-between gap-2 text-2xs"
+            class="flex items-center justify-between gap-2 text-xs"
           >
             <span class="inline-flex items-center gap-1.5 text-muted-foreground">
               <span :class="['h-1.5 w-1.5 rounded-sm', STAGE[sub.state].dot]" aria-hidden />
               {{ stateLabel(sub.state) }}
             </span>
-            <span :class="['tabular-nums', sub.value ? 'text-foreground' : 'text-muted-foreground/40']">
+            <span :class="['tabular-nums', sub.value ? 'text-foreground' : 'text-muted-foreground']">
               {{ sub.value.toLocaleString() }}
             </span>
           </div>
         </div>
       </div>
-    </div>
+    </details>
   </div>
 </template>

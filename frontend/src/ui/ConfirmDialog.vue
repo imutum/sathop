@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { confirmInput, confirmRequest, resolveConfirm } from "@/composables/useConfirm";
+import { Icon } from "@/components/Icon";
 
 const inputRef = ref<{ $el?: HTMLInputElement } | null>(null);
 
@@ -52,11 +53,14 @@ function onActionClick() {
 <template>
   <AlertDialog v-model:open="open">
     <AlertDialogContent v-if="confirmRequest" class="max-w-[420px]">
-      <AlertDialogHeader>
+      <div :class="['grid size-11 place-items-center rounded-xl', confirmRequest.tone === 'danger' ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary']" aria-hidden="true">
+        <Icon :name="confirmRequest.tone === 'danger' ? 'alert' : 'info'" :size="22" />
+      </div>
+      <AlertDialogHeader class="text-left">
         <AlertDialogTitle>{{ confirmRequest.title }}</AlertDialogTitle>
         <AlertDialogDescription
           v-if="confirmRequest.description"
-          class="whitespace-pre-line"
+          class="whitespace-pre-line leading-relaxed"
         >
           {{ confirmRequest.description }}
         </AlertDialogDescription>

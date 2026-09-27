@@ -3,6 +3,7 @@
 import {
   authHeaders,
   deleteJson,
+  downloadFile,
   getJson,
   httpError,
   postJson,
@@ -190,18 +191,10 @@ const batchApi = {
     if (state) qs.set("state", state);
     return getJson<GranulePage>(`/api/batches/${encodeURIComponent(batchId)}/granule-page?${qs}`);
   },
-  downloadDeliveryReport: async (batchId: string): Promise<void> => {
-    const r = await fetch(`/api/batches/${encodeURIComponent(batchId)}/delivery-report`, { headers: authHeaders() });
-    if (!r.ok) throw await httpError(r);
-    const url = URL.createObjectURL(await r.blob());
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${batchId.replace(/[\\/:*?"<>|]/g, "_")}-delivery.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  },
+  downloadDeliveryReport: (batchId: string) => downloadFile(
+    `/api/batches/${encodeURIComponent(batchId)}/delivery-report`,
+    `${batchId.replace(/[\\/:*?"<>|]/g, "_")}-delivery.csv`,
+  ),
   retryFailed: (batchId: string, includeBlacklisted = false) =>
     postJson<{ reset: number }>(`/api/batches/${batchId}/retry-failed?include_blacklisted=${includeBlacklisted}`),
   resetExhaustedObjects: (batchId: string) =>
