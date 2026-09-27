@@ -196,20 +196,27 @@ function onForget(n: string) {
   remember[n] = false;
 }
 
-async function applyTemplate(t: TaskTemplate) {
-  const bundle = t.bundle_ref.replace(/^orch:/, "");
+async function applyTemplate(template: TaskTemplate) {
+  const bundle = template.bundle_ref.replace(/^orch:/, "");
   if (!bundles.data.value?.some(b => `${b.name}@${b.version}` === bundle)) {
     toast.error("模板引用的任务包不存在，请上传对应版本或更新模板");
     return;
   }
-  if (t.target_receiver_id && !receivers.data.value?.some(r => r.receiver_id === t.target_receiver_id)) {
+  if (template.target_receiver_id && !receivers.data.value?.some(r => r.receiver_id === template.target_receiver_id)) {
     toast.error("模板引用的接收端不存在，请更新模板");
     return;
   }
-  if (dirty.value && !await requestConfirm({ title: "套用模板配置？", description: "将替换任务包、接收端和环境变量。切换任务包时，已填的输入表格会清空。批次名称保持不变。", confirmText: "套用配置" })) return;
+  if (dirty.value) {
+    const confirmed = await requestConfirm({
+      title: "套用模板配置？",
+      description: "将替换任务包、接收端和环境变量。切换任务包时，已填的输入表格会清空。批次名称保持不变。",
+      confirmText: "套用配置",
+    });
+    if (!confirmed) return;
+  }
   setFieldValue("bundleSel", bundle);
-  setFieldValue("targetReceiver", t.target_receiver_id ?? "");
-  setFieldValue("envText", Object.keys(t.execution_env).length ? JSON.stringify(t.execution_env, null, 2) : "");
+  setFieldValue("targetReceiver", template.target_receiver_id ?? "");
+  setFieldValue("envText", Object.keys(template.execution_env).length ? JSON.stringify(template.execution_env, null, 2) : "");
   toast.success("已套用模板，请填写本次任务名称与输入数据");
 }
 </script>
@@ -227,7 +234,12 @@ async function applyTemplate(t: TaskTemplate) {
       <kbd class="kbd">Esc</kbd>
       <span>关闭</span>
     </div>
-    <TaskTemplatePicker :bundle-ref="`orch:${bundleSel}`" :receiver-id="headerValues.targetReceiver ?? ''" :env-text="headerValues.envText ?? ''" @apply="applyTemplate" />
+    <TaskTemplatePicker
+      :bundle-ref="`orch:${bundleSel}`"
+      :receiver-id="headerValues.targetReceiver ?? ''"
+      :env-text="headerValues.envText ?? ''"
+      @apply="applyTemplate"
+    />
     <form @submit.prevent="onSubmit" @keydown="onKeydown" class="space-y-3 text-sm">
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <FormField v-slot="{ componentField }" name="name">

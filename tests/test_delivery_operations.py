@@ -11,6 +11,7 @@ from httpx import ASGITransport, AsyncClient
 
 from sathop.orchestrator import db
 from sathop.orchestrator.api import batch_reports
+from sathop.orchestrator.api.csv_export import encode_csv
 from sathop.orchestrator.db import Batch, Granule, GranuleObject, utcnow
 from sathop.orchestrator.main import app
 
@@ -167,4 +168,4 @@ async def test_report_and_search_require_auth(client, patch_settings, path):
 
 @pytest.mark.parametrize("value", ["=1+1", "  +1", "-1", "@SUM(A1)", "\tplain", "\rplain", "\nplain"])
 def test_report_formula_escaping(value):
-    assert next(csv.reader(io.StringIO(batch_reports._csv([[value]]))))[0] == "'" + value
+    assert next(csv.reader(io.StringIO(encode_csv([[value]]))))[0] == "'" + value
