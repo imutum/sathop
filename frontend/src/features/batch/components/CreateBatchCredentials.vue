@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { hasCred } from "@/credCache";
+import { canRememberCredentials, hasCred } from "@/credCache";
 import { type CredDraft } from "@/features/batch/credentials";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,6 +13,8 @@ const props = defineProps<{
   drafts: Record<string, CredDraft>;
   remember: Record<string, boolean>;
 }>();
+
+const canRemember = canRememberCredentials();
 
 const emit = defineEmits<{
   change: [name: string, d: CredDraft];
@@ -77,11 +79,12 @@ function update(name: string, patch: Partial<CredDraft>) {
         <div class="flex items-center gap-2 whitespace-nowrap">
           <div
             class="flex items-center gap-1.5"
-            title="勾选后，提交成功时把该凭证保存到本浏览器；下次新建批次自动填入。"
+            :title="canRemember ? '提交成功后保存到当前浏览器，下次自动填入。' : '当前连接不支持记住凭证，请使用 HTTPS 访问。'"
           >
             <Checkbox
               :id="`cred-${name}-remember`"
               :model-value="remember[name] ?? false"
+              :disabled="!canRemember"
               @update:model-value="(v: boolean | 'indeterminate') => emit('rememberChange', name, v === true)"
               class="h-3.5 w-3.5"
             />
@@ -108,7 +111,8 @@ function update(name: string, patch: Partial<CredDraft>) {
     </div>
     <div class="text-2xs text-muted-foreground">
       凭证用于本批次，随任务提供给工作节点。更新凭证请创建新批次。
-      勾选“记住”后，凭证将在当前浏览器以明文保存，并在下次创建批次时自动填入。
+      <template v-if="canRemember">勾选“记住”后将在当前浏览器保存并自动填入，请仅在可信设备上使用。</template>
+      <template v-else>当前连接不支持记住凭证，本次仍可正常填写和提交。使用 HTTPS 访问后可启用。</template>
     </div>
   </fieldset>
 </template>

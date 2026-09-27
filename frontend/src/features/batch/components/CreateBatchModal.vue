@@ -9,7 +9,7 @@ import { requestConfirm } from "@/composables/useConfirm";
 import TaskTemplatePicker from "./TaskTemplatePicker.vue";
 import { K } from "@/queryKeys";
 import { createBatchHeaderSchema } from "@/features/batch/schemas";
-import { clearCred, hasCred, loadCred, saveCred } from "@/credCache";
+import { canRememberCredentials, clearCred, hasCred, loadCred, saveCred } from "@/credCache";
 import { useToast } from "@/composables/useToast";
 import {
   type CredDraft,
@@ -101,7 +101,7 @@ watch(
     for (const k of Object.keys(remember)) delete remember[k];
     names.forEach((n, i) => {
       creds[n] = stored[i] ?? emptyCred();
-      remember[n] = hasCred(n);
+      remember[n] = canRememberCredentials() && stored[i] !== null;
     });
   },
   { immediate: true },
@@ -125,17 +125,17 @@ const create = useMutation({
       execution_env: parsedEnv.value,
       credentials: credsPayload.value,
     }),
-  onSuccess: (b) => {
+  onSuccess: async (b) => {
     submitError.value = null;
-    for (const n of requiredCreds.value) {
+    const cached = await Promise.all(requiredCreds.value.map((n) => {
       const d = creds[n];
       if (remember[n] && d) {
-        void saveCred(n, { scheme: d.scheme, username: d.username, secret: d.secret });
-      } else if (hasCred(n)) {
-        clearCred(n);
+        return saveCred(n, { scheme: d.scheme, username: d.username, secret: d.secret });
       }
-    }
+      return !hasCred(n) || clearCred(n);
+    }));
     toast.success(`已创建批次 "${b.name}"，共 ${rows.value.length} 条数据粒`);
+    if (cached.includes(false)) toast.info("批次已创建，但浏览器未能更新已保存的凭证。下次创建时请重新填写。");
     emit("created");
   },
   onError: (e: Error) => {
@@ -187,7 +187,10 @@ function onRememberChange(n: string, v: boolean) {
   remember[n] = v;
 }
 function onForget(n: string) {
-  clearCred(n);
+  if (!clearCred(n)) {
+    toast.error("浏览器未能清除已保存的凭证，请检查网站存储权限");
+    return;
+  }
   creds[n] = emptyCred();
   remember[n] = false;
 }

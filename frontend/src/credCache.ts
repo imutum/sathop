@@ -14,14 +14,24 @@ export type StoredCred = {
 
 const PREFIX = "sathop.cred.";
 
-const KEY_PROMISE: Promise<CryptoKey> = (async () => {
-  const raw = new TextEncoder().encode("sathop");
-  const hash = await crypto.subtle.digest("SHA-256", raw);
-  return crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["encrypt", "decrypt"]);
-})();
+export function canRememberCredentials(): boolean {
+  return !!globalThis.crypto?.subtle;
+}
+
+let keyPromise: Promise<CryptoKey> | undefined;
+
+function cacheKey(): Promise<CryptoKey> {
+  // HTTP origins may not expose Web Crypto. Initialize only inside a cache
+  // operation so importing the batch page cannot create an unhandled rejection.
+  return keyPromise ??= (async () => {
+    const raw = new TextEncoder().encode("sathop");
+    const hash = await crypto.subtle.digest("SHA-256", raw);
+    return crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["encrypt", "decrypt"]);
+  })();
+}
 
 async function encrypt(plain: string): Promise<string> {
-  const key = await KEY_PROMISE;
+  const key = await cacheKey();
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = new Uint8Array(
     await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(plain)),
@@ -35,7 +45,7 @@ async function encrypt(plain: string): Promise<string> {
 }
 
 async function decrypt(b64: string): Promise<string> {
-  const key = await KEY_PROMISE;
+  const key = await cacheKey();
   const blob = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
   if (blob.length <= 12) throw new Error("ciphertext too short");
   const iv = blob.subarray(0, 12);
@@ -59,26 +69,43 @@ function parseCred(json: string): StoredCred | null {
 }
 
 export async function loadCred(name: string): Promise<StoredCred | null> {
-  const raw = localStorage.getItem(PREFIX + name);
-  if (!raw) return null;
+  if (!canRememberCredentials()) return null;
+  let raw: string | null = null;
   // New-format records are AES-GCM ciphertext; legacy records (from the
   // earlier plaintext-JSON revision) are valid JSON. Try decrypt first; on
   // failure fall through to plaintext, the next save will re-encrypt.
   try {
+    raw = localStorage.getItem(PREFIX + name);
+    if (!raw) return null;
     return parseCred(await decrypt(raw));
   } catch {
-    return parseCred(raw);
+    return raw ? parseCred(raw) : null;
   }
 }
 
-export async function saveCred(name: string, c: StoredCred): Promise<void> {
-  localStorage.setItem(PREFIX + name, await encrypt(JSON.stringify(c)));
+export async function saveCred(name: string, c: StoredCred): Promise<boolean> {
+  if (!canRememberCredentials()) return false;
+  try {
+    localStorage.setItem(PREFIX + name, await encrypt(JSON.stringify(c)));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function clearCred(name: string): void {
-  localStorage.removeItem(PREFIX + name);
+export function clearCred(name: string): boolean {
+  try {
+    localStorage.removeItem(PREFIX + name);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function hasCred(name: string): boolean {
-  return localStorage.getItem(PREFIX + name) !== null;
+  try {
+    return localStorage.getItem(PREFIX + name) !== null;
+  } catch {
+    return false;
+  }
 }
