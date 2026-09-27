@@ -21,39 +21,11 @@ const info = useQuery({
 });
 
 // Shared version check — same GitHub query the node cards use.
-const { latestTag, channel, status, htmlUrl, isFetching, refresh: refreshLatest } = useVersionCheck(
-  () => info.data.value?.version,
-);
-const currentVersion = computed(() => info.data.value?.version ?? "");
+const {
+  latestTag, channel, currentVersion, status, statusLabel, dotClass, htmlUrl,
+  isFetching, refresh: refreshLatest,
+} = useVersionCheck(() => info.data.value?.version);
 const busy = computed(() => info.isFetching.value || isFetching.value);
-
-const statusLabel = computed(() => {
-  switch (status.value) {
-    case "current":
-      return "已是最新版本";
-    case "outdated":
-      return `有新版本 ${latestTag.value} 可用`;
-    case "loading":
-      return "正在检查更新…";
-    case "unchecked":
-      return "点击下方按钮检查更新";
-    default:
-      return "无法访问 GitHub（网络或限流）";
-  }
-});
-
-const dotClass = computed(() => {
-  switch (status.value) {
-    case "current":
-      return "bg-success";
-    case "outdated":
-      return "bg-warning animate-pulse-soft";
-    case "loading":
-      return "bg-muted-foreground animate-pulse-soft";
-    default:
-      return "bg-muted-foreground";
-  }
-});
 
 function refresh() {
   void info.refetch();

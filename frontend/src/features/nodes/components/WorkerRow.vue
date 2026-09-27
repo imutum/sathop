@@ -4,6 +4,7 @@ import type { WorkerInfo } from "@/api";
 import { nodeStatusBadge } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { useWorkerLifecycle } from "@/features/nodes/useWorkerLifecycle";
+import { workerQueueTotal } from "@/features/nodes/workerQueue";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,15 +50,8 @@ const diskTone = computed(() => {
   return "bg-primary";
 });
 
-const inflightTotal = computed(
-  () =>
-    props.worker.queue_pending_download +
-    props.worker.queue_downloading +
-    props.worker.queue_pending_processing +
-    props.worker.queue_processing +
-    props.worker.queue_pending_upload +
-    props.worker.queue_uploading,
-);
+const inflightTotal = computed(() => workerQueueTotal(props.worker));
+const lastSeenLabel = computed(() => fmtAge(props.worker.last_seen));
 
 // dl/pr 显示：实测生效值，括号内为覆盖值（若有）。
 function concDisplay(live: number | null, override: number | null): string {
@@ -70,31 +64,12 @@ let shiftPressed = false;
 function onCheckboxMousedown(e: MouseEvent) {
   shiftPressed = e.shiftKey;
 }
-
-// v-memo 签名（design item 10）。
-const memo = computed(() => [
-  props.worker.last_seen,
-  props.worker.cpu_percent,
-  props.worker.mem_percent,
-  props.worker.disk_used_gb,
-  props.worker.disk_total_gb,
-  props.worker.operator_paused,
-  props.worker.paused,
-  props.worker.live_download_concurrency,
-  props.worker.live_process_concurrency,
-  props.worker.download_concurrency,
-  props.worker.process_concurrency,
-  inflightTotal.value,
-  props.worker.version,
-  props.selected,
-]);
 </script>
 
 <template>
   <!-- active -->
   <TableRow
     v-if="tab === 'active'"
-    v-memo="memo"
     :data-state="selected ? 'selected' : undefined"
     class="cursor-pointer"
     @click="emit('open')"
@@ -144,7 +119,7 @@ const memo = computed(() => [
       </HintTip>
     </TableCell>
     <TableCell><QueueBar :worker="worker" /></TableCell>
-    <TableCell class="whitespace-nowrap text-2xs text-muted-foreground">{{ fmtAge(worker.last_seen) }}</TableCell>
+    <TableCell class="whitespace-nowrap text-2xs text-muted-foreground">{{ lastSeenLabel }}</TableCell>
     <TableCell class="w-8 text-right" @click.stop>
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
@@ -196,7 +171,6 @@ const memo = computed(() => [
   <!-- history -->
   <TableRow
     v-else
-    v-memo="memo"
     :data-state="selected ? 'selected' : undefined"
     class="cursor-pointer opacity-70"
     @click="emit('open')"
@@ -210,7 +184,7 @@ const memo = computed(() => [
     <TableCell class="font-mono text-xs">
       <span class="truncate">{{ worker.worker_id }}</span>
     </TableCell>
-    <TableCell class="whitespace-nowrap text-2xs text-muted-foreground">{{ fmtAge(worker.last_seen) }}</TableCell>
+    <TableCell class="whitespace-nowrap text-2xs text-muted-foreground">{{ lastSeenLabel }}</TableCell>
     <TableCell class="w-8 text-right" @click.stop>
       <DropdownMenu>
         <DropdownMenuTrigger as-child>

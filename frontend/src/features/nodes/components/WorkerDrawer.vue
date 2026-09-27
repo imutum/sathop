@@ -5,6 +5,7 @@ import { fmtGB, nodeStatusBadge } from "@/lib/format";
 import { fmtAge } from "@/i18n";
 import { useWorkerLifecycle } from "@/features/nodes/useWorkerLifecycle";
 import { parseConcurrency } from "@/features/nodes/workerActions";
+import { WORKER_QUEUE_STAGES, workerQueueTotal } from "@/features/nodes/workerQueue";
 import { useToast } from "@/composables/useToast";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -41,28 +42,7 @@ const diskTone = computed<"bad" | "warn" | "accent">(() => {
   return "accent";
 });
 
-const inflightTotal = computed(() => {
-  const w = props.worker;
-  if (!w) return 0;
-  return (
-    w.queue_pending_download +
-    w.queue_downloading +
-    w.queue_pending_processing +
-    w.queue_processing +
-    w.queue_pending_upload +
-    w.queue_uploading
-  );
-});
-
-// 6 阶段栅格（顺序/文案/提示与原 WorkerCard 一致）。
-const STAGES = [
-  { key: "queue_pending_download", label: "待下载", tip: "已领取，等待下载资源" },
-  { key: "queue_downloading", label: "下载中", tip: "正在下载源数据" },
-  { key: "queue_pending_processing", label: "待处理", tip: "已下载，等待处理资源" },
-  { key: "queue_processing", label: "处理中", tip: "正在执行任务包脚本" },
-  { key: "queue_pending_upload", label: "待上传", tip: "已处理完成，等待上传资源" },
-  { key: "queue_uploading", label: "上传中", tip: "正在上传产物到节点存储" },
-] as const;
+const inflightTotal = computed(() => workerQueueTotal(props.worker));
 
 // 两个并发编辑器（下载 / 处理）。editing===null ⇒ 显示态；否则编辑该维度。
 type Dim = "download" | "process";
@@ -202,7 +182,7 @@ function onKey(e: KeyboardEvent) {
 
           <!-- 队列 6 阶段栅格 -->
           <div class="grid grid-cols-3 gap-2 rounded-lg border border-border bg-muted/60 p-3 text-center lg:grid-cols-6">
-            <HintTip v-for="s in STAGES" :key="s.key" :text="s.tip">
+            <HintTip v-for="s in WORKER_QUEUE_STAGES" :key="s.key" :text="s.tip">
               <div>
                 <div class="stat-label">{{ s.label }}</div>
                 <div class="mt-0.5 text-base font-semibold tabular-nums text-foreground">

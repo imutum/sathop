@@ -20,36 +20,10 @@ const info = useQuery({ queryKey: [...K.orchInfo], queryFn: API.orchestratorInfo
 
 // Same version check as the sidebar banner — but surfaced inline here so the
 // update action sits next to the freshness signal (检查 + 更新 together).
-const { latestTag, status, isFetching, refresh } = useVersionCheck(
+const { latestTag, status, statusLabel, dotClass, isFetching, refresh } = useVersionCheck(
   () => info.data.value?.version,
 );
 const outdated = computed(() => status.value === "outdated");
-const versionLabel = computed(() => {
-  switch (status.value) {
-    case "current":
-      return "已是最新版本";
-    case "outdated":
-      return `有新版本 ${latestTag.value} 可用`;
-    case "loading":
-      return "正在检查更新…";
-    case "unchecked":
-      return "点击检查最新版本";
-    default:
-      return "无法检查最新版本";
-  }
-});
-const dotClass = computed(() => {
-  switch (status.value) {
-    case "current":
-      return "bg-success";
-    case "outdated":
-      return "bg-warning animate-pulse-soft";
-    case "loading":
-      return "bg-muted-foreground animate-pulse-soft";
-    default:
-      return "bg-muted-foreground";
-  }
-});
 
 const busy = ref(false);
 
@@ -134,7 +108,7 @@ async function confirmRestart() {
               <span :class="['absolute inset-0 rounded-full', dotClass]" aria-hidden />
             </span>
             <span class="font-mono text-foreground">v{{ info.data.value?.version ?? "?" }}</span>
-            <span :class="outdated ? 'text-warning' : ''">{{ versionLabel }}</span>
+            <span :class="outdated ? 'text-warning' : ''">{{ statusLabel }}</span>
             <Button
               type="button"
               variant="ghost"
