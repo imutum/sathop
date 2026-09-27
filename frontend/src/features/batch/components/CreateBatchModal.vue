@@ -244,7 +244,7 @@ async function applyTemplate(template: TaskTemplate) {
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <FormField v-slot="{ componentField }" name="name">
           <FormItem>
-            <FormLabel>展示名称</FormLabel>
+            <FormLabel>批次名称</FormLabel>
             <FormControl>
               <Input v-bind="componentField" placeholder="MOD09A1 2024 第 1 天" />
             </FormControl>
@@ -256,7 +256,7 @@ async function applyTemplate(template: TaskTemplate) {
             <FormLabel>目标接收端</FormLabel>
             <FormControl>
               <SelectInput v-bind="componentField">
-                <option value="">任意（由调度器决定）</option>
+                <option value="">自动分配接收端</option>
                 <option
                   v-for="r in receivers.data.value ?? []"
                   :key="r.receiver_id"

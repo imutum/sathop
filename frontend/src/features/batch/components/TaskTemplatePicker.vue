@@ -104,7 +104,7 @@ async function remove() {
       模板加载失败。<button type="button" class="underline" @click="templates.refetch()">重试</button>
     </div>
     <p v-if="current" class="break-all text-xs text-muted-foreground">
-      {{ current.bundle_ref }} · {{ current.target_receiver_id || '任意接收端' }} ·
+      {{ current.bundle_ref }} · {{ current.target_receiver_id || '自动分配接收端' }} ·
       {{ Object.keys(current.execution_env).length }} 个环境变量
     </p>
     <details>

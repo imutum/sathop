@@ -385,7 +385,7 @@ async function confirmDelete() {
     >
       <span>任务包 <span class="font-mono text-foreground">{{ b.bundle_ref }}</span></span>
       <span aria-hidden>·</span>
-      <span>接收端 <span class="text-foreground">{{ b.target_receiver_id ?? "任意" }}</span></span>
+      <span>接收端 <span class="text-foreground">{{ b.target_receiver_id ?? "自动分配" }}</span></span>
       <span aria-hidden>·</span>
       <span>创建 {{ fmtAge(b.created_at) }}</span>
       <span aria-hidden>·</span>
