@@ -232,7 +232,7 @@ function onKey(e: KeyboardEvent) {
                 size="xs"
                 class="ml-auto text-muted-foreground hover:text-foreground"
                 @click="startEdit('download')"
-              >改</Button>
+              >设置</Button>
             </div>
             <!-- 处理并发 -->
             <div class="flex items-center gap-1.5">
@@ -272,7 +272,7 @@ function onKey(e: KeyboardEvent) {
                 size="xs"
                 class="ml-auto text-muted-foreground hover:text-foreground"
                 @click="startEdit('process')"
-              >改</Button>
+              >设置</Button>
             </div>
           </div>
 
@@ -283,7 +283,7 @@ function onKey(e: KeyboardEvent) {
               <Button as-child variant="outline" size="xs" class="text-muted-foreground hover:text-primary">
                 <RouterLink
                   :to="`/events?source=${encodeURIComponent(worker.worker_id)}`"
-                  title="跳转到事件日志，已按本节点过滤"
+                  title="查看本节点的事件日志"
                 >
                   <Icon name="events" :size="11" />
                   事件
@@ -309,7 +309,7 @@ function onKey(e: KeyboardEvent) {
                   title="提交缓存清理请求，下次心跳生效"
                   @click="lc.confirmGc"
                 >
-                  清缓存
+                  清理缓存
                 </Button>
                 <Button
                   type="button"

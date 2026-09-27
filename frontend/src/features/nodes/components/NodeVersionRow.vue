@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import HintTip from "@/components/HintTip.vue";
 import { Icon } from "@/components/Icon";
 
-// One visual anchor fusing "运行版本 + 是否与控制端一致 + 更新动作". The control
+// One visual anchor fusing "运行版本 + 是否与调度服务一致 + 更新动作". The control
 // plane (orchestrator) is the version anchor: a node is compared against the
 // orchestrator's running version, NOT GitHub. The single global "is a newer
 // release available?" check lives only in the sidebar VersionStatus, so there
@@ -58,9 +58,9 @@ const dotClass = computed(() => {
 const label = computed(() => {
   switch (status.value) {
     case "match":
-      return "与控制端一致";
+      return "与调度服务一致";
     case "drift":
-      return `与控制端不一致 v${target.value}`;
+      return `与调度服务版本不同（v${target.value}）`;
     default:
       return "版本未知";
   }
