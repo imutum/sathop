@@ -29,7 +29,7 @@
 
 以非 root 用户运行时，镜像内预热依赖缓存可能不可写。新版 entrypoint 会改用 `/app/repo/.uv-cache`；仍使用旧运行镜像的部署可在 orchestrator 的 Compose environment 中显式设置 `UV_CACHE_DIR: /app/repo/.uv-cache`。
 
-v1.0.19 和 v1.0.20 均无数据库迁移；需要退回时，将已保留旧版本写入 `/app/repo/.pending-version` 并重启对应服务，然后重新检查健康和数据。未来有数据库迁移的版本必须另行评估恢复步骤，不应仅切换代码。
+v1.0.19 和 v1.0.21 均无数据库迁移；需要退回时，将已保留旧版本写入 `/app/repo/.pending-version` 并重启对应服务，然后重新检查健康和数据。未来有数据库迁移的版本必须另行评估恢复步骤，不应仅切换代码。
 
 ## 下一阶段的体验优先级
 

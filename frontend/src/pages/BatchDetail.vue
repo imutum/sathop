@@ -420,10 +420,10 @@ async function confirmDelete() {
           description="搜索 ID、筛选状态后核对任务 · 点击行展开详细进度与错误"
           :padded="false"
         >
-          <template #meta>
-            <Segmented v-model="filter" size="sm" :options="stateOptions" />
-          </template>
           <div class="space-y-3 border-b border-border/60 px-5 py-4">
+            <div class="max-w-full overflow-x-auto pb-1">
+              <Segmented v-model="filter" size="sm" :options="stateOptions" class="whitespace-nowrap" aria-label="数据粒状态筛选" />
+            </div>
             <div class="flex items-center gap-2">
               <TextInput v-model="search" class="w-full sm:max-w-sm" maxlength="200" placeholder="搜索数据粒 ID" aria-label="搜索数据粒 ID">
                 <template #leftIcon><Icon name="search" :size="13" /></template>
