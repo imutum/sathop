@@ -152,7 +152,7 @@ async def test_one_shot_backfill_seeds_existing_deleted_rows(tmp_path, patch_set
 
 
 async def test_overview_cache_single_flight(client):
-    """The 1s TTL cache collapses rapid overview calls onto one snapshot — a new
+    """The TTL cache collapses rapid overview calls onto one snapshot — a new
     delete between two calls within the window is not visible until reset/expiry."""
     from sathop.orchestrator.api.admin import reset_overview_cache
 

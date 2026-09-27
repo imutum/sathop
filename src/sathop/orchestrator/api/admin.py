@@ -37,6 +37,7 @@ from ..db import (
 )
 from ..pubsub import commit_and_publish
 from ..pubsub import log_event as log
+from ..read_cache import AsyncTTLCache
 from ._helpers import object_is_exhausted, object_is_pullable
 from ._transition import apply_transition
 from .admin_readmodels import (
@@ -51,44 +52,19 @@ from .progress import evict_granule
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_token)])
 
-# 5s single-flight TTL cache for the overview aggregate: every open UI tab
-# refetches it on each 'batches' SSE nudge, so bursts of concurrent calls within
-# the window collapse onto one DB computation. The aggregate is two GROUP-BY-state
-# scans over ~500k non-deleted granule rows — the dominant orchestrator read cost
-# under Postgres multi-process (the cache is per-process, so a 1s window let each
-# of N uvicorn workers re-run the scan ~once/s). 5s keeps the big numbers live
-# enough (per-entity lists still update instantly via SSE) at 1/5th the scan rate.
-# Set TTL=0 to disable.
-_OVERVIEW_TTL = 5.0
-_overview_lock = asyncio.Lock()
-_overview_cache: tuple[float, dict] | None = None
+# SSE nudges can trigger many concurrent dashboard requests. Cache the expensive
+# grouped granule scans for 5s per process; entity lists use their shorter TTL.
+_overview_cache = AsyncTTLCache[dict](ttl_seconds=5.0)
 
 
 def reset_overview_cache() -> None:
     """Drop the cached overview — used by tests to avoid cross-test staleness."""
-    global _overview_cache
-    _overview_cache = None
-
-
-async def _cached_overview(s: AsyncSession) -> dict:
-    global _overview_cache
-    if _OVERVIEW_TTL > 0 and _overview_cache is not None:
-        ts, body = _overview_cache
-        if time.monotonic() - ts < _OVERVIEW_TTL:
-            return body
-    async with _overview_lock:
-        if _OVERVIEW_TTL > 0 and _overview_cache is not None:
-            ts, body = _overview_cache
-            if time.monotonic() - ts < _OVERVIEW_TTL:
-                return body
-        body = await admin_overview(s, now=datetime.now(UTC))
-        _overview_cache = (time.monotonic(), body)
-        return body
+    _overview_cache.clear()
 
 
 @router.get("/overview")
 async def overview(s: AsyncSession = Depends(session)) -> dict:
-    return await _cached_overview(s)
+    return await _overview_cache.get(lambda: admin_overview(s, now=datetime.now(UTC)))
 
 
 @router.get("/in-flight")
@@ -413,7 +389,7 @@ async def latest_version(
     hour boundary. Throttled by the UI (the button disables while a fetch is in
     flight), so it can't be spammed into a storm.
 
-    Double-checked locking (like _cached_overview): the cache-hit fast path never
+    Double-checked locking: the cache-hit fast path never
     touches the lock, so a burst of UI tabs sharing one query key never queues
     behind it — and a slow/hanging GitHub stalls only true cache-miss callers."""
     ch = _normalize_channel(channel or settings.channel)
