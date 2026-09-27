@@ -56,7 +56,7 @@ function onActionClick() {
       <div :class="['grid size-11 place-items-center rounded-xl', confirmRequest.tone === 'danger' ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary']" aria-hidden="true">
         <Icon :name="confirmRequest.tone === 'danger' ? 'alert' : 'info'" :size="22" />
       </div>
-      <AlertDialogHeader>
+      <AlertDialogHeader class="text-left">
         <AlertDialogTitle>{{ confirmRequest.title }}</AlertDialogTitle>
         <AlertDialogDescription
           v-if="confirmRequest.description"
