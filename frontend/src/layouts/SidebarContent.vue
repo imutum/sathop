@@ -21,7 +21,7 @@ defineProps<{
       </div>
       <div v-if="!collapsed" class="min-w-0">
         <div class="text-[15px] font-semibold leading-none">SatHop</div>
-        <div class="mt-1 text-mini uppercase tracking-brand text-muted-foreground">控制面板</div>
+        <div class="mt-1 text-mini uppercase tracking-brand text-muted-foreground">数据服务控制台</div>
       </div>
     </div>
 

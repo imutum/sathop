@@ -44,7 +44,7 @@ const showToken = ref(false);
 type TabKey = "docker-run" | "compose" | "uvx";
 const activeTab = ref<TabKey>("docker-run");
 const tabs: Array<{ key: TabKey; label: string; hint: string }> = [
-  { key: "docker-run", label: "Docker Run", hint: "一行命令，最直接" },
+  { key: "docker-run", label: "Docker Run", hint: "在终端执行命令" },
   { key: "compose", label: "Docker Compose", hint: "保存为 docker-compose.yml 后 docker compose up -d" },
   { key: "uvx", label: "Python (uvx)", hint: "无需 docker，需要本机已装 uv" },
 ];
@@ -105,16 +105,16 @@ async function copySnippet() {
   <Modal width-class="w-[min(820px,95vw)]" @close="$emit('close')">
     <h2 class="mb-1 text-lg font-semibold">接入新接收端</h2>
     <p class="mb-5 text-xs text-muted-foreground">
-      填好下面的参数 → 复制下方一段命令到目标机器执行 → 接收端会自动注册并开始拉取产物
+      填写参数后，在目标机器执行生成的命令。接收端注册后开始接收交付文件。
     </p>
 
     <div class="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
       <div>
-        <Label for="ob-id">Receiver ID</Label>
+        <Label for="ob-id">接收端 ID</Label>
         <Input id="ob-id" v-model="receiverId" placeholder="recv-xxx" class="font-mono text-xs" />
       </div>
       <div>
-        <Label for="ob-dir">归档目录（host 绝对路径）</Label>
+        <Label for="ob-dir">归档目录（宿主机绝对路径）</Label>
         <Input
           id="ob-dir"
           v-model="outputDir"
@@ -123,7 +123,7 @@ async function copySnippet() {
         />
       </div>
       <div class="md:col-span-2">
-        <Label for="ob-orch">Orchestrator URL</Label>
+        <Label for="ob-orch">调度服务地址</Label>
         <Input
           id="ob-orch"
           v-model="orchUrl"
@@ -132,13 +132,13 @@ async function copySnippet() {
         />
       </div>
       <div class="md:col-span-2">
-        <Label for="ob-token">Token</Label>
+        <Label for="ob-token">访问令牌</Label>
         <div class="relative">
           <Input
             id="ob-token"
             v-model="token"
             :type="showToken ? 'text' : 'password'"
-            placeholder="orchestrator bearer token"
+            placeholder="输入访问令牌"
             class="pr-9 font-mono text-xs"
           />
           <Button
@@ -153,7 +153,7 @@ async function copySnippet() {
           </Button>
         </div>
         <p class="mt-1 text-2xs text-muted-foreground">
-          默认填的是当前登录 token；要发给同事，可以换成另一个有权限的 token
+          默认使用当前登录令牌，须与目标调度服务的配置一致。
         </p>
       </div>
     </div>
@@ -177,7 +177,7 @@ async function copySnippet() {
           :class="tlsMode === 'trust-orch' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="tlsMode = 'trust-orch'"
         >
-          信任调度中心 CA（自签 worker，推荐）
+          信任调度服务 CA（自签证书）
         </button>
         <button
           type="button"
@@ -185,7 +185,7 @@ async function copySnippet() {
           :class="tlsMode === 'strict' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="tlsMode = 'strict'"
         >
-          仅公网 CA（Caddy 域名 worker）
+          系统 CA（公开证书）
         </button>
         <button
           type="button"
@@ -198,13 +198,13 @@ async function copySnippet() {
       </div>
       <p class="mt-1.5 text-2xs text-muted-foreground">
         <span v-if="tlsMode === 'trust-orch'">
-          启动时从调度中心拉取所有 worker 的 CA 形成可信清单。中间人没有 worker 私钥就过不了 TLS — 内网最佳搭配
+          使用调度服务提供的 CA 校验工作节点证书，适用于使用自签证书的节点。
         </span>
         <span v-else-if="tlsMode === 'strict'">
-          只信任系统 CA（Let's Encrypt 等公开证书）。Worker 用「自签 IP + HTTPS」时会握手失败 — 仅公网域名 worker 适用
+          使用系统 CA 校验公开证书；不接受工作节点的自签证书。
         </span>
         <span v-else>
-          完全跳过证书验证，加密但不验身份。Worker 走明文 HTTP 时 TLS 模式本就无效；仅在严格管控的物理网络下使用
+          不校验证书，无法确认节点身份。仅适用于受控网络；此设置不影响 HTTP 连接。
         </span>
       </p>
     </div>
@@ -227,7 +227,7 @@ async function copySnippet() {
 
     <Alert v-if="!valid" variant="destructive" class="mt-4">
       <AlertDescription>
-        Receiver ID / Token / Orchestrator URL / 输出目录 都不能为空
+        请填写接收端 ID、访问令牌、调度服务地址和归档目录
       </AlertDescription>
     </Alert>
 

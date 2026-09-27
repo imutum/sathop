@@ -110,13 +110,13 @@ const memo = computed(() => [
         <span class="truncate">{{ worker.worker_id }}</span>
         <HintTip
           v-if="worker.operator_paused"
-          text="管理员手动暂停 — 在手任务继续，不接新单"
+          text="已暂停接收新任务，当前任务继续执行"
         >
           <Badge tone="warn" class="px-1.5 py-0 text-mini">暂停</Badge>
         </HintTip>
         <HintTip
           v-else-if="worker.paused"
-          text="worker 自我暂停 — 磁盘超阈值，等待降回恢复阈值再领新任务"
+          text="磁盘使用率超过阈值，释放空间后自动恢复任务分配"
         >
           <Badge tone="warn" class="px-1.5 py-0 text-mini">磁盘暂停</Badge>
         </HintTip>
@@ -160,15 +160,15 @@ const memo = computed(() => [
             {{ worker.operator_paused ? "恢复" : "暂停" }}
           </DropdownMenuItem>
           <DropdownMenuItem :disabled="lc.gc.isPending.value" @select="lc.confirmGc">
-            立即清理缓存
+            清理缓存
           </DropdownMenuItem>
           <DropdownMenuItem
             :disabled="lc.revoke.isPending.value || inflightTotal === 0"
-            :title="inflightTotal === 0 ? '当前无在手 lease' : `立即释放在手的 ${inflightTotal} 条 lease`"
+            :title="inflightTotal === 0 ? '当前没有可重新分配的任务' : `重新分配 ${inflightTotal} 条任务`"
             class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
             @select="lc.confirmRevoke(inflightTotal)"
           >
-            释放在手 lease {{ inflightTotal > 0 ? `(${inflightTotal})` : "" }}
+            重新分配任务 {{ inflightTotal > 0 ? `(${inflightTotal})` : "" }}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem :disabled="lc.pending.value" @select="lc.confirmUpdate">
@@ -228,7 +228,7 @@ const memo = computed(() => [
             @select="lc.confirmPurge"
           >
             <Icon name="trash" :size="12" />
-            彻底删除
+            删除记录
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

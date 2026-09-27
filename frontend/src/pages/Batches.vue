@@ -30,25 +30,8 @@ import RowActions from "@/components/RowActions.vue";
 import Segmented from "@/components/Segmented.vue";
 import TextInput from "@/ui/TextInput.vue";
 import CreateBatchModal from "@/features/batch/components/CreateBatchModal.vue";
-import {
-  completedTotal,
-  errorTotal,
-  inFlightTotal,
-  isBatchClosed,
-  totalCount,
-} from "@/features/batch/summary";
+import { batchProgress, inFlightTotal, isBatchClosed, totalCount } from "@/features/batch/summary";
 import { Icon } from "@/components/Icon";
-
-type BatchListRow = {
-  b: BatchSummary;
-  total: number;
-  done: number;
-  errors: number;
-  inFlight: number;
-  pct: number;
-  closed: boolean;
-  bundleLink: { name: string; version: string } | null;
-};
 
 const route = useRoute();
 const router = useRouter();
@@ -85,18 +68,12 @@ function matchesSearch(b: BatchSummary) {
   return `${b.name} ${b.batch_id} ${b.bundle_ref}`.toLowerCase().includes(needle.value);
 }
 
-function toBatchListRow(b: BatchSummary): BatchListRow {
-  const t = totalCount(b.counts);
-  const d = completedTotal(b);
+function toBatchListRow(batch: BatchSummary) {
   return {
-    b,
-    total: t,
-    done: d,
-    errors: errorTotal(b),
-    inFlight: inFlightTotal(b),
-    pct: t > 0 ? Math.round((d / t) * 100) : 0,
-    closed: isBatchClosed(b),
-    bundleLink: bundleLink(b.bundle_ref),
+    batch,
+    ...batchProgress(batch),
+    closed: isBatchClosed(batch),
+    bundleLink: bundleLink(batch.bundle_ref),
   };
 }
 
@@ -122,7 +99,7 @@ function bundleLink(ref: string): { name: string; version: string } | null {
 async function confirmCancel(b: BatchSummary) {
   const ok = await requestConfirm({
     title: `取消批次 "${b.name}"？`,
-    description: `将取消尚未完成的 ${inFlightTotal(b)} 条数据粒。\n\n待分发/待清理 状态的不会被取消（已经离开 worker）。`,
+    description: `将取消尚未完成的 ${inFlightTotal(b)} 条数据粒。\n\n待交付、待清理及已完成的数据粒不受影响。`,
     confirmText: "取消批次",
     tone: "danger",
   });
@@ -137,7 +114,7 @@ async function confirmDelete(b: BatchSummary) {
       t === 0
         ? "将清除该批次的运行记录。已确认的交付台账继续保留。此操作不可恢复。"
         : `将删除 ${t} 条数据粒，并清除运行记录。已确认的交付台账继续保留。\n` +
-          `（数据粒、产物、进度、阶段计时、事件）。此操作不可恢复。`,
+          `已上传的产物文件不会删除。此操作不可恢复。`,
     confirmText: "永久删除",
     tone: "danger",
     // 空批（无任何数据粒）跳过名称二次输入 —— 没东西可以丢失。
@@ -161,12 +138,12 @@ function onCreated() {
   <div class="space-y-6">
     <PageHeader
       title="批次"
-      description="管线提交单元 · 一个批次承载一组数据粒、统一的任务包与凭证"
+      description="管理数据处理批次，跟踪执行与交付进度"
     >
       <template #actions>
         <Button variant="default" @click="showCreate = true" title="提交一组数据粒，绑定任务包与凭证">
           <Icon name="plus" :size="13" />
-          新建任务
+          新建批次
         </Button>
       </template>
     </PageHeader>
@@ -187,7 +164,7 @@ function onCreated() {
         <Segmented
           v-model="scope"
           :options="[
-            { value: 'active', label: '进行中', count: activeCount },
+            { value: 'active', label: '未完成', count: activeCount },
             { value: 'all', label: '全部', count: allCount },
           ]"
         />
@@ -224,14 +201,14 @@ function onCreated() {
         </template>
         <template #empty>
           <EmptyState
-            title="还没有任何批次"
-            description="通过页面右上角“新建任务”创建第一个批次。"
+            title="暂无批次"
+            description="选择任务包并添加数据，创建首个批次。"
             illustration="inbox"
           >
             <template #action>
               <Button variant="default" @click="showCreate = true">
                 <Icon name="plus" :size="13" />
-                新建任务
+                新建批次
               </Button>
             </template>
           </EmptyState>
@@ -239,85 +216,85 @@ function onCreated() {
         <template #default>
           <EmptyState
             v-if="visible.length === 0"
-            title="当前筛选条件下没有匹配"
+            title="没有符合条件的批次"
           />
           <template v-else>
           <!-- Narrow: card list. min-w-[820px] table needs lg+ to feel right. -->
           <ul class="divide-y divide-border/60 lg:hidden">
-            <li v-for="r in visible" :key="r.b.batch_id" class="space-y-3 p-4">
+            <li v-for="row in visible" :key="row.batch.batch_id" class="space-y-3 p-4">
               <div class="flex items-start justify-between gap-3">
-                <RouterLink :to="`/batches/${r.b.batch_id}`" class="min-w-0 flex-1">
+                <RouterLink :to="`/batches/${row.batch.batch_id}`" class="min-w-0 flex-1">
                   <div class="truncate font-medium text-foreground transition-colors hover:text-primary">
-                    {{ r.b.name }}
+                    {{ row.batch.name }}
                   </div>
                   <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground">
-                    {{ r.b.batch_id }}
-                    <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
+                    {{ row.batch.batch_id }}
+                    <CopyButton :value="row.batch.batch_id" title="复制批次 ID" />
                   </div>
                 </RouterLink>
                 <div class="flex shrink-0 items-center gap-1.5">
-                  <Badge v-if="r.b.status === 'paused'" tone="warn">已暂停</Badge>
-                  <Badge tone="info">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
+                  <Badge v-if="row.batch.status === 'paused'" tone="warn">已暂停</Badge>
+                  <Badge tone="info">{{ row.batch.target_receiver_id ?? "自动分配" }}</Badge>
                 </div>
               </div>
               <RouterLink
-                v-if="r.bundleLink"
+                v-if="row.bundleLink"
                 :to="{
                   path: '/bundles',
-                  query: { name: r.bundleLink.name, version: r.bundleLink.version },
+                  query: { name: row.bundleLink.name, version: row.bundleLink.version },
                 }"
                 class="block truncate font-mono text-2xs text-muted-foreground transition-colors hover:text-primary"
                 title="在任务包页查看"
               >
-                {{ r.b.bundle_ref }}
+                {{ row.batch.bundle_ref }}
               </RouterLink>
               <div v-else class="truncate font-mono text-2xs text-muted-foreground">
-                {{ r.b.bundle_ref }}
+                {{ row.batch.bundle_ref }}
               </div>
               <BatchProgressCell
-                :done="r.done"
-                :total="r.total"
-                :pct="r.pct"
-                :eta-realtime="r.b.status === 'paused' ? null : r.b.eta_realtime ?? null"
-                :in-flight="r.inFlight"
-                :errors="r.errors"
-                :exhausted="r.b.objects_exhausted"
+                :done="row.done"
+                :total="row.total"
+                :pct="row.pct"
+                :eta-realtime="row.batch.status === 'paused' ? null : row.batch.eta_realtime ?? null"
+                :in-flight="row.inFlight"
+                :errors="row.errors"
+                :exhausted="row.batch.objects_exhausted"
               />
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="text-2xs text-muted-foreground">{{ fmtAge(r.b.created_at) }}</span>
+                <span class="text-2xs text-muted-foreground">{{ fmtAge(row.batch.created_at) }}</span>
                 <RowActions>
                   <template #primary>
                     <Button
-                      v-if="(r.b.counts.failed ?? 0) > 0"
+                      v-if="(row.batch.counts.failed ?? 0) > 0"
                       size="sm"
-                      :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
+                      :pending="retry.isPending.value && retry.variables.value === row.batch.batch_id"
                       pending-label="重试中…"
-                      @click="retry.mutate(r.b.batch_id)"
+                      @click="retry.mutate(row.batch.batch_id)"
                     >
-                      重试失败 ({{ r.b.counts.failed }})
+                      重试失败 ({{ row.batch.counts.failed }})
                     </Button>
                     <Button
-                      v-if="r.inFlight > 0"
+                      v-if="row.inFlight > 0"
                       variant="destructive"
                       size="sm"
-                      :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
+                      :pending="cancel.isPending.value && cancel.variables.value === row.batch.batch_id"
                       pending-label="取消中…"
-                      @click="confirmCancel(r.b)"
+                      @click="confirmCancel(row.batch)"
                     >
-                      取消 ({{ r.inFlight }})
+                      取消 ({{ row.inFlight }})
                     </Button>
                   </template>
                   <DropdownMenuItem
-                    v-if="r.b.status === 'paused' || !r.closed"
-                    :disabled="setPaused.isPending.value && setPaused.variables.value?.id === r.b.batch_id"
-                    @select="setPaused.mutate({ id: r.b.batch_id, paused: r.b.status !== 'paused' })"
+                    v-if="row.batch.status === 'paused' || !row.closed"
+                    :disabled="setPaused.isPending.value && setPaused.variables.value?.id === row.batch.batch_id"
+                    @select="setPaused.mutate({ id: row.batch.batch_id, paused: row.batch.status !== 'paused' })"
                   >
-                    {{ r.b.status === "paused" ? "恢复分发" : "暂停分发" }}
+                    {{ row.batch.status === "paused" ? "恢复调度" : "暂停调度" }}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     class="text-danger focus:bg-danger/10 focus:text-danger"
-                    @select="confirmDelete(r.b)"
+                    @select="confirmDelete(row.batch)"
                   >
                     永久删除…
                   </DropdownMenuItem>
@@ -331,7 +308,7 @@ function onCreated() {
               <TableHeader class="bg-muted/50">
                 <TableRow>
                   <TableHead class="px-5">批次</TableHead>
-                  <TableHead>处理包</TableHead>
+                  <TableHead>任务包</TableHead>
                   <TableHead>目标接收端</TableHead>
                   <TableHead>进度</TableHead>
                   <TableHead>创建时间</TableHead>
@@ -339,82 +316,82 @@ function onCreated() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                <TableRow v-for="r in visible" :key="r.b.batch_id">
+                <TableRow v-for="row in visible" :key="row.batch.batch_id">
                   <TableCell class="px-5 py-3.5">
-                    <RouterLink :to="`/batches/${r.b.batch_id}`" class="block">
+                    <RouterLink :to="`/batches/${row.batch.batch_id}`" class="block">
                       <div class="flex items-center gap-2">
-                        <span class="font-medium text-foreground transition-colors hover:text-primary">{{ r.b.name }}</span>
-                        <Badge v-if="r.b.status === 'paused'" tone="warn">已暂停</Badge>
+                        <span class="font-medium text-foreground transition-colors hover:text-primary">{{ row.batch.name }}</span>
+                        <Badge v-if="row.batch.status === 'paused'" tone="warn">已暂停</Badge>
                       </div>
                       <div class="mt-0.5 inline-flex items-center font-mono text-2xs text-muted-foreground">
-                        {{ r.b.batch_id }}
-                        <CopyButton :value="r.b.batch_id" title="复制批次 ID" />
+                        {{ row.batch.batch_id }}
+                        <CopyButton :value="row.batch.batch_id" title="复制批次 ID" />
                       </div>
                     </RouterLink>
                   </TableCell>
                   <TableCell class="py-3.5 font-mono text-cell text-muted-foreground">
                     <RouterLink
-                      v-if="r.bundleLink"
+                      v-if="row.bundleLink"
                       :to="{
                         path: '/bundles',
-                        query: { name: r.bundleLink.name, version: r.bundleLink.version },
+                        query: { name: row.bundleLink.name, version: row.bundleLink.version },
                       }"
                       class="transition-colors hover:text-primary"
                       title="在任务包页查看"
                     >
-                      {{ r.b.bundle_ref }}
+                      {{ row.batch.bundle_ref }}
                     </RouterLink>
-                    <template v-else>{{ r.b.bundle_ref }}</template>
+                    <template v-else>{{ row.batch.bundle_ref }}</template>
                   </TableCell>
                   <TableCell class="py-3.5">
-                    <Badge tone="info">{{ r.b.target_receiver_id ?? "任意" }}</Badge>
+                    <Badge tone="info">{{ row.batch.target_receiver_id ?? "自动分配" }}</Badge>
                   </TableCell>
                   <TableCell class="w-[280px] py-3.5">
                     <BatchProgressCell
-                      :done="r.done"
-                      :total="r.total"
-                      :pct="r.pct"
-                        :eta-realtime="r.b.status === 'paused' ? null : r.b.eta_realtime ?? null"
-                      :in-flight="r.inFlight"
-                      :errors="r.errors"
-                      :exhausted="r.b.objects_exhausted"
+                      :done="row.done"
+                      :total="row.total"
+                      :pct="row.pct"
+                        :eta-realtime="row.batch.status === 'paused' ? null : row.batch.eta_realtime ?? null"
+                      :in-flight="row.inFlight"
+                      :errors="row.errors"
+                      :exhausted="row.batch.objects_exhausted"
                     />
                   </TableCell>
-                  <TableCell class="py-3.5 text-cell text-muted-foreground">{{ fmtAge(r.b.created_at) }}</TableCell>
+                  <TableCell class="py-3.5 text-cell text-muted-foreground">{{ fmtAge(row.batch.created_at) }}</TableCell>
                   <TableCell class="whitespace-nowrap px-5 py-3.5 text-right">
                     <RowActions align="end">
                       <template #primary>
                         <Button
-                          v-if="(r.b.counts.failed ?? 0) > 0"
+                          v-if="(row.batch.counts.failed ?? 0) > 0"
                           size="sm"
-                          :pending="retry.isPending.value && retry.variables.value === r.b.batch_id"
+                          :pending="retry.isPending.value && retry.variables.value === row.batch.batch_id"
                           pending-label="重试中…"
-                          @click="retry.mutate(r.b.batch_id)"
+                          @click="retry.mutate(row.batch.batch_id)"
                         >
-                          重试失败 ({{ r.b.counts.failed }})
+                          重试失败 ({{ row.batch.counts.failed }})
                         </Button>
                         <Button
-                          v-if="r.inFlight > 0"
+                          v-if="row.inFlight > 0"
                           variant="destructive"
                           size="sm"
-                          :pending="cancel.isPending.value && cancel.variables.value === r.b.batch_id"
+                          :pending="cancel.isPending.value && cancel.variables.value === row.batch.batch_id"
                           pending-label="取消中…"
-                          @click="confirmCancel(r.b)"
+                          @click="confirmCancel(row.batch)"
                         >
-                          取消 ({{ r.inFlight }})
+                          取消 ({{ row.inFlight }})
                         </Button>
                       </template>
                       <DropdownMenuItem
-                        v-if="r.b.status === 'paused' || !r.closed"
-                        :disabled="setPaused.isPending.value && setPaused.variables.value?.id === r.b.batch_id"
-                        @select="setPaused.mutate({ id: r.b.batch_id, paused: r.b.status !== 'paused' })"
+                        v-if="row.batch.status === 'paused' || !row.closed"
+                        :disabled="setPaused.isPending.value && setPaused.variables.value?.id === row.batch.batch_id"
+                        @select="setPaused.mutate({ id: row.batch.batch_id, paused: row.batch.status !== 'paused' })"
                       >
-                        {{ r.b.status === "paused" ? "恢复分发" : "暂停分发" }}
+                        {{ row.batch.status === "paused" ? "恢复调度" : "暂停调度" }}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         class="text-danger focus:bg-danger/10 focus:text-danger"
-                        @select="confirmDelete(r.b)"
+                        @select="confirmDelete(row.batch)"
                       >
                         永久删除…
                       </DropdownMenuItem>

@@ -205,7 +205,7 @@ async function downloadReport() {
   downloadingReport.value = true;
   try {
     await API.downloadDeliveryReport(batchId.value);
-    toast.success("交付报告已导出，包含累计数量、交付台账和待交付产物");
+    toast.success("交付报告已导出");
   } catch (e) {
     toast.error(`导出失败：${(e as Error).message}`);
   } finally { downloadingReport.value = false; }
@@ -243,7 +243,7 @@ async function confirmCancelAll() {
   if (!b.value) return;
   const ok = await requestConfirm({
     title: `取消批次 "${b.value.name}"？`,
-    description: `将取消尚未完成的 ${inflightCount.value} 条数据粒。\n\n待分发/待清理 状态的不会被取消（已经离开 worker）。`,
+    description: `将取消尚未完成的 ${inflightCount.value} 条数据粒。\n\n待交付、待清理及已完成的数据粒不受影响。`,
     confirmText: "取消批次",
     tone: "danger",
   });
@@ -258,7 +258,7 @@ async function confirmDelete() {
     title: `永久删除批次 "${name}"？`,
     description:
       `将删除 ${total} 条数据粒并清除运行明细。已确认的交付台账继续保留。\n` +
-      "（数据粒、产物、进度、阶段计时、事件）。worker 已上传的产物文件不在清理范围内。",
+      "已上传的产物文件不会删除。此操作不可恢复。",
     confirmText: "永久删除",
     tone: "danger",
     requireText: name,
@@ -334,7 +334,7 @@ async function confirmDelete() {
                 v-if="inflightCount > 0"
                 :disabled="cancelAll.isPending.value"
                 class="text-danger focus:bg-danger/10 focus:text-danger"
-                title="把在途数据粒批量取消（逐粒拉黑）——这是原子层的批量操作，不同于暂停"
+                title="取消尚未上传完成的数据粒；待交付和已交付的数据粒不受影响"
                 @select="confirmCancelAll"
               >
                 取消在途数据粒 ({{ inflightCount }})
@@ -342,7 +342,7 @@ async function confirmDelete() {
               <DropdownMenuItem
                 v-if="exhaustedCount > 0"
                 :disabled="resetExhausted.isPending.value"
-                title="清零所有已放弃产物的拉取失败计数 — 下次 receiver poll 重新派发"
+                title="重置拉取失败次数，等待接收端重新拉取"
                 @select="confirmResetExhausted"
               >
                 恢复产物交付 ({{ exhaustedCount }})
@@ -383,7 +383,7 @@ async function confirmDelete() {
       v-if="b"
       class="flex flex-wrap items-center gap-x-4 gap-y-1 text-cell text-muted-foreground"
     >
-      <span>处理包 <span class="font-mono text-foreground">{{ b.bundle_ref }}</span></span>
+      <span>任务包 <span class="font-mono text-foreground">{{ b.bundle_ref }}</span></span>
       <span aria-hidden>·</span>
       <span>接收端 <span class="text-foreground">{{ b.target_receiver_id ?? "任意" }}</span></span>
       <span aria-hidden>·</span>
@@ -418,7 +418,7 @@ async function confirmDelete() {
       <TabsContent value="granules">
         <CardSection
           title="数据粒"
-          description="搜索 ID、筛选状态后核对任务 · 点击行展开详细进度与错误"
+          description="按 ID 或状态筛选，查看处理进度与错误详情"
           :padded="false"
         >
           <div class="space-y-3 border-b border-border/60 px-5 py-4">
@@ -475,7 +475,7 @@ async function confirmDelete() {
       </TabsContent>
 
       <TabsContent value="events">
-        <CardSection title="日志" description="按级别筛选 · 仅本批次的事件" :padded="false">
+        <CardSection title="日志" description="查看本批次事件，可按级别筛选" :padded="false">
           <template #meta>
             <Badge variant="info" class="tabular-nums">{{ eventCountLabel }}</Badge>
             <Segmented v-model="logLevel" size="sm" :options="LOG_LEVEL_OPTIONS" />

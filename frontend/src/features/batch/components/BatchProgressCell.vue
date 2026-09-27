@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import { fmtDuration } from "@/i18n";
 import ProgressBar from "@/components/ProgressBar.vue";
 
-const props = defineProps<{
+defineProps<{
   done: number;
   total: number;
   pct: number;
@@ -12,9 +11,6 @@ const props = defineProps<{
   errors: number;
   exhausted: number;
 }>();
-
-const bestEta = computed(() => props.etaRealtime);
-const etaHint = "按最近 1 分钟吞吐外推";
 </script>
 
 <template>
@@ -27,19 +23,19 @@ const etaHint = "按最近 1 分钟吞吐外推";
       </span>
       <span class="flex items-center gap-2">
         <span
-          v-if="bestEta != null"
+          v-if="etaRealtime != null"
           class="text-muted-foreground tabular-nums"
-          :title="`${etaHint}，剩余 ${inFlight} 条`"
+          :title="`按最近 1 分钟交付速率估算，未上传完成 ${inFlight} 条`"
         >
-          ≈ {{ fmtDuration(bestEta * 1000) }}
+          ≈ {{ fmtDuration(etaRealtime * 1000) }}
         </span>
-        <span v-if="errors > 0" class="text-danger">失败 {{ errors }}</span>
+        <span v-if="errors > 0" class="text-danger">失败 / 已停止 {{ errors }}</span>
         <span
           v-if="exhausted > 0"
           class="text-danger"
-          title="该批次有产物已超 receiver 拉取重试上限，停止派发"
+          title="产物已达到拉取重试上限，可在批次详情中恢复交付"
         >
-          已放弃 {{ exhausted }}
+          交付受阻 {{ exhausted }}
         </span>
       </span>
     </div>

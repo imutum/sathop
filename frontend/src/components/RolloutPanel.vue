@@ -24,7 +24,7 @@ const active = computed(() => r.value?.active ?? false);
 const halted = computed(() => r.value?.phase === "halted");
 const busy = ref(false);
 
-const WAVE_CN: Record<string, string> = { canary: "金丝雀", batch: "批量", fleet: "全量" };
+const WAVE_CN: Record<string, string> = { canary: "试点", batch: "分批", fleet: "全量" };
 const phaseLabel = computed(() => {
   const v = r.value;
   if (!v?.phase) return "—";
@@ -32,9 +32,9 @@ const phaseLabel = computed(() => {
     case "pending":
       return "准备中";
     case "running":
-      return `进行中 · ${WAVE_CN[v.wave ?? ""] ?? v.wave ?? ""}波`;
+      return `进行中 · ${WAVE_CN[v.wave ?? ""] ?? v.wave ?? ""}阶段`;
     case "halted":
-      return "已暂停（本波超时未确认）";
+      return "已暂停（当前批次确认超时）";
     case "done":
       return "已完成";
     case "aborted":
@@ -47,14 +47,14 @@ const phaseLabel = computed(() => {
 async function start() {
   const target = orchVersion.value;
   if (!target) {
-    toast.error("无法读取 Orchestrator 版本");
+    toast.error("无法获取调度服务版本");
     return;
   }
   const ok = await requestConfirm({
-    title: `分阶段升级机群到 v${target}？`,
+    title: `分阶段升级节点至 v${target}？`,
     description:
-      "先升 1 台金丝雀，确认它按新版本回报存活后再放量到批量、最后全量。" +
-      "任一波在时限内未确认即暂停（不自动回滚——单机崩溃由本地 A/B 槽兜底）。",
+      "先升级 1 个试点节点，确认新版本上线后逐步升级其余节点。" +
+      "任一批次确认超时即暂停，已升级的节点不会自动回退。",
     confirmText: "开始升级",
   });
   if (!ok) return;
@@ -73,7 +73,7 @@ async function start() {
 async function abort() {
   const ok = await requestConfirm({
     title: "中止当前升级？",
-    description: "停止继续放量；已升级的 worker 保持新版本（不回滚）。",
+    description: "停止后续节点升级。已升级的节点保持当前版本，不会回退。",
     confirmText: "中止",
     tone: "danger",
   });
@@ -94,7 +94,7 @@ async function resume() {
   busy.value = true;
   try {
     await API.resumeRollout();
-    toast.success("已恢复，重新放量");
+    toast.success("已恢复分阶段升级");
     await rollout.refetch();
   } catch (e: any) {
     toast.error(`恢复失败：${e.message ?? e}`);
@@ -116,7 +116,7 @@ async function resume() {
       :disabled="!orchVersion"
       @click="start"
     >
-      分阶段升级机群到 v{{ orchVersion || "?" }}
+      分阶段升级节点至 v{{ orchVersion || "?" }}
     </Button>
     <span v-if="r?.phase" class="text-2xs text-muted-foreground">
       上次：v{{ r.target_version }} · {{ phaseLabel }}
@@ -140,7 +140,7 @@ async function resume() {
         <span :class="halted ? 'text-warning' : 'text-foreground'">{{ phaseLabel }}</span>
       </div>
       <div v-if="r?.members" class="flex items-baseline gap-2">
-        <span class="text-2xs tracking-label text-muted-foreground">本波</span>
+        <span class="text-2xs tracking-label text-muted-foreground">当前批次</span>
         <span class="text-success">{{ r.members.confirmed }} 已确认</span>
         <span class="text-muted-foreground">·</span>
         <span :class="r.members.pending ? 'text-warning' : 'text-muted-foreground'"

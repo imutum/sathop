@@ -77,7 +77,7 @@ function update(name: string, patch: Partial<CredDraft>) {
         <div class="flex items-center gap-2 whitespace-nowrap">
           <div
             class="flex items-center gap-1.5"
-            title="勾选后，提交成功时把该凭证保存到本浏览器；下次新建任务自动填入。"
+            title="勾选后，提交成功时把该凭证保存到本浏览器；下次新建批次自动填入。"
           >
             <Checkbox
               :id="`cred-${name}-remember`"
@@ -107,8 +107,8 @@ function update(name: string, patch: Partial<CredDraft>) {
       </div>
     </div>
     <div class="text-2xs text-muted-foreground">
-      凭证仅保存于本批次数据库行；worker 在 lease 时一次性取用。轮换 = 创建新批次。
-      勾选"记住"后，凭证会被保存在本浏览器的 localStorage（明文，与登录 token 同等级别），下次新建任务自动填入。
+      凭证用于本批次，随任务提供给工作节点。更新凭证请创建新批次。
+      勾选“记住”后，凭证将在当前浏览器以明文保存，并在下次创建批次时自动填入。
     </div>
   </fieldset>
 </template>

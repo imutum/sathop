@@ -11,7 +11,7 @@ type PipelineTotals = {
 };
 
 const PENDING: GranuleState[] = ["pending"];
-// In-flight = leased through delivery. `uploaded` (待分发) is worker-done but
+// In-flight = leased through delivery. `uploaded` (待交付) is worker-done but
 // NOT yet delivered, so it stays here, not in DONE. `uploading` was previously
 // dropped from every bucket — fixed.
 const ACTIVE: GranuleState[] = [

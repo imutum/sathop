@@ -48,7 +48,7 @@ const del = useMutation({
 async function confirmDelete(f: SharedFileInfo) {
   const ok = await requestConfirm({
     title: `删除共享文件 ${f.name}？`,
-    description: "若仍被某个任务包的 shared_files 引用，服务端会拒绝删除。",
+    description: "仍被任务包引用的文件无法删除，请先解除引用。",
     confirmText: "删除",
     tone: "danger",
   });
@@ -66,13 +66,10 @@ function onUploaded() {
   <div class="space-y-6">
     <PageHeader title="共享文件">
       <template #description>
-        被任务包通过
-        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs">shared_files</code>
-        引用的辅助资源（掩膜、DEM、查找表等），Worker 按需拉取到
-        <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs">$SATHOP_SHARED_DIR</code>。
+        管理任务包复用的辅助资源，如掩膜、DEM 和查找表
       </template>
       <template #actions>
-        <Button variant="default" @click="showUpload = true" title="上传一个新的共享文件，需在任务包 manifest.shared_files 中引用">
+        <Button variant="default" @click="showUpload = true" title="上传供任务包引用的共享文件">
           <Icon name="upload" :size="13" />
           上传文件
         </Button>
@@ -99,7 +96,7 @@ function onUploaded() {
         <template #empty>
           <EmptyState
             title="还没有共享文件"
-            description='点击上方"上传文件"添加第一个。'
+            description='上传掩膜、DEM 或查找表，供任务包复用。'
             illustration="inbox"
           />
         </template>

@@ -194,7 +194,7 @@ function highlight(text: string, n: string): HighlightSeg[] {
   <div class="space-y-6">
     <PageHeader
       title="事件日志"
-      description="所有 Orchestrator / Worker / Receiver 上报事件的合并视图"
+      description="查询调度服务、工作节点与接收端的运行事件"
     >
       <template #actions>
         <Badge variant="info" class="tabular-nums">

@@ -3,7 +3,6 @@ import { ref } from "vue";
 import { API, setToken, suspendAuthRecovery } from "@/api";
 import { useAuthGate } from "@/composables/useAuthGate";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import FieldLabel from "@/components/FieldLabel.vue";
 import TextInput from "@/ui/TextInput.vue";
@@ -30,8 +29,8 @@ async function submit() {
     else localStorage.removeItem("sathop.token");
     loginError.value =
       msg.startsWith("401") || msg.startsWith("403")
-        ? "令牌被 Orchestrator 拒绝，请检查 SATHOP_TOKEN。"
-        : `无法连接 Orchestrator：${msg}`;
+        ? "访问令牌无效，请核对后重试。"
+        : `无法连接调度服务：${msg}`;
   } finally {
     probing.value = false;
   }
@@ -56,7 +55,7 @@ const year = new Date().getFullYear();
           </div>
           <div>
             <div class="text-lg font-semibold">SatHop</div>
-            <div class="text-2xs uppercase tracking-brand text-muted-foreground">控制面板</div>
+            <div class="text-2xs uppercase tracking-brand text-muted-foreground">数据服务控制台</div>
           </div>
         </div>
 
@@ -64,27 +63,15 @@ const year = new Date().getFullYear();
           <h1 class="text-balance text-3xl font-semibold leading-tight">
             遥感数据
             <br />
-            下载 · 处理 · 分发
-            <br />
-            <span class="text-primary">一站调度</span>
+            <span class="text-primary">下载 · 处理 · 交付</span>
           </h1>
           <p class="max-w-sm text-sm leading-relaxed text-muted-foreground">
-            基于 lease 的分布式管线 · SQLite 单事实状态 · 实时事件流 · 用户脚本任务包热插拔。
+            集中管理数据任务，跟踪处理进度，核对交付结果。
           </p>
-          <div class="flex flex-wrap items-center gap-2">
-            <Badge
-              v-for="t in ['Orchestrator', 'Worker', 'Receiver', '任务包注册表']"
-              :key="t"
-              variant="outline"
-              class="rounded-full font-mono"
-            >
-              {{ t }}
-            </Badge>
-          </div>
         </div>
 
         <div class="text-2xs text-muted-foreground">
-          © {{ year }} SatHop · 拉取式 · 仅 HTTP
+          © {{ year }} SatHop
         </div>
       </div>
 
@@ -94,24 +81,22 @@ const year = new Date().getFullYear();
         class="rounded-lg border border-border bg-background/95 p-8 shadow-pop backdrop-blur"
       >
         <div class="mb-6">
-          <div class="text-xl font-semibold">欢迎回来</div>
+          <div class="text-xl font-semibold">登录控制台</div>
           <p class="mt-1.5 text-xs text-muted-foreground">
-            使用 Orchestrator 的
-            <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">SATHOP_TOKEN</code>
-            登录。
+            输入部署时设置的访问令牌。
           </p>
         </div>
 
         <label class="block">
-          <FieldLabel required>API 令牌</FieldLabel>
+          <FieldLabel required>访问令牌</FieldLabel>
           <TextInput
             autofocus
             type="password"
             autocomplete="current-password"
-            aria-label="Orchestrator API 令牌"
+            aria-label="访问令牌"
             v-model="input"
             @input="loginError = null"
-            placeholder="部署时设置的 token"
+            placeholder="输入访问令牌"
             class="mt-2 font-mono"
           />
         </label>
@@ -132,8 +117,7 @@ const year = new Date().getFullYear();
         </Button>
 
         <div class="mt-6 border-t border-border pt-4 text-2xs leading-relaxed text-muted-foreground">
-          令牌仅保存在本浏览器 localStorage。
-          如需轮换，请在 Orchestrator 容器重新设置
+          登录后，令牌将保存在当前浏览器。如需更换，请更新调度服务的
           <span class="font-mono text-foreground">SATHOP_TOKEN</span>。
         </div>
       </form>

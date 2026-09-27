@@ -29,7 +29,7 @@ function toggle(): void {
 <template>
   <RowActions>
     <template #primary>
-      <HintTip :text="enabled ? (disableTitle ?? '禁用此节点（在手任务继续，可点启用恢复）') : '重新启用此节点'">
+      <HintTip :text="enabled ? (disableTitle ?? '停止接收新任务，当前任务继续执行') : '重新启用此节点'">
         <Button
           type="button"
           :variant="enabled ? 'outline' : 'default'"
@@ -42,19 +42,19 @@ function toggle(): void {
       </HintTip>
     </template>
     <DropdownMenuItem
-      :title="restartTitle ?? '触发该节点更新（一次心跳内生效，拉取最新代码后由容器 restart 策略恢复）'"
+      :title="restartTitle ?? '提交节点更新请求，下次心跳后更新并重启'"
       :disabled="pending"
       @select="emit('restart')"
     >
       更新…
     </DropdownMenuItem>
     <DropdownMenuItem
-      :title="enabled ? '请先禁用此节点，再点击此按钮永久移除' : (forgetTitle ?? '永久从注册表中删除（misclick → 重启 receiver/worker 自动重建）')"
+      :title="enabled ? '请先禁用节点，再删除记录' : (forgetTitle ?? '删除节点记录；仍在运行的节点会重新注册')"
       :disabled="pending || enabled"
       class="text-danger focus:bg-danger/10 focus:text-danger data-[disabled]:text-muted-foreground/50"
       @select="emit('forget')"
     >
-      永久移除…
+      删除记录…
     </DropdownMenuItem>
   </RowActions>
 </template>

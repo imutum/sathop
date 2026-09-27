@@ -81,7 +81,7 @@ const emit = defineEmits<{
               v-if="g.objects_exhausted > 0"
               :title="`${g.objects_exhausted} 个产物超出 receiver 拉取重试上限，已停止派发`"
             >
-              <Badge tone="error">{{ g.objects_exhausted }} 已放弃</Badge>
+              <Badge tone="error">{{ g.objects_exhausted }} 交付受阻</Badge>
             </span>
           </div>
         </div>
@@ -179,7 +179,7 @@ const emit = defineEmits<{
                       v-if="g.objects_exhausted > 0"
                       :title="`${g.objects_exhausted} 个产物超出 receiver 拉取重试上限，已停止派发`"
                     >
-                      <Badge tone="error">{{ g.objects_exhausted }} 已放弃</Badge>
+                      <Badge tone="error">{{ g.objects_exhausted }} 交付受阻</Badge>
                     </span>
                   </div>
                   <LatestProgressLine

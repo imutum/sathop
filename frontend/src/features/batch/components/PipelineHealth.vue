@@ -32,10 +32,10 @@ const STAGE: Record<GranuleState, { bar: string; dot: string }> = {
 
 // Big-stage header tone + a one-line tip (kept on the card, not the small rows).
 const GROUP: Record<string, { num: string; dot: string; tip: string }> = {
-  pending: { num: "text-muted-foreground",           dot: "bg-muted-foreground",        tip: "orchestrator 还没派给任何 worker 的数据粒" },
-  active:  { num: "text-sky-600 dark:text-sky-400",  dot: "bg-sky-500 dark:bg-sky-400", tip: "已 lease 到待交付之间的所有状态（含待分发：已上传待 receiver 拉取）；不含已交付" },
-  done:    { num: "text-success",                    dot: "bg-success",                 tip: "receiver 已确认（待清理）或已清理（已完成）——已交付" },
-  failed:  { num: "text-danger",                     dot: "bg-danger",                  tip: "失败待重试 + 已停止（包含重试耗尽和主动取消）" },
+  pending: { num: "text-muted-foreground",           dot: "bg-muted-foreground",        tip: "尚未分配给工作节点的数据粒" },
+  active:  { num: "text-sky-600 dark:text-sky-400",  dot: "bg-sky-500 dark:bg-sky-400", tip: "已分配给工作节点，尚未确认交付的数据粒" },
+  done:    { num: "text-success",                    dot: "bg-success",                 tip: "接收端已确认交付，包括待清理和已完成的数据粒" },
+  failed:  { num: "text-danger",                     dot: "bg-danger",                  tip: "等待重试或已停止的数据粒；已停止包括重试耗尽和主动取消" },
 };
 
 const total = computed(() => pipelineTotals(props.counts).total);

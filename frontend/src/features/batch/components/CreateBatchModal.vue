@@ -217,13 +217,13 @@ async function applyTemplate(template: TaskTemplate) {
   setFieldValue("bundleSel", bundle);
   setFieldValue("targetReceiver", template.target_receiver_id ?? "");
   setFieldValue("envText", Object.keys(template.execution_env).length ? JSON.stringify(template.execution_env, null, 2) : "");
-  toast.success("已套用模板，请填写本次任务名称与输入数据");
+  toast.success("已套用模板，请填写批次名称与输入数据");
 }
 </script>
 
 <template>
   <Modal width-class="w-[min(1200px,95vw)]" :dirty="dirty" @close="tryClose">
-    <h2 class="mb-1 text-lg font-semibold">新建任务</h2>
+    <h2 class="mb-1 text-lg font-semibold">新建批次</h2>
     <div class="mb-4 flex items-center gap-1.5 text-2xs text-muted-foreground">
       <span>提示：</span>
       <kbd class="kbd">Ctrl</kbd>
@@ -276,7 +276,7 @@ async function applyTemplate(template: TaskTemplate) {
           <FormLabel>任务包</FormLabel>
           <FormControl>
             <SelectInput v-bind="componentField" class="font-mono text-xs">
-              <option value="">-- 选择任务包 --</option>
+              <option value="">请选择任务包</option>
               <option
                 v-for="b in bundles.data.value ?? []"
                 :key="`${b.name}@${b.version}`"
@@ -288,7 +288,7 @@ async function applyTemplate(template: TaskTemplate) {
           </FormControl>
           <FormMessage />
           <div v-if="(bundles.data.value ?? []).length === 0" class="text-2xs text-warning">
-            尚无已注册任务包。先到"任务包"页上传一个 ZIP。
+            暂无任务包，请先前往“任务包”页上传。
           </div>
         </FormItem>
       </FormField>
@@ -332,7 +332,7 @@ async function applyTemplate(template: TaskTemplate) {
 
       <details class="rounded-lg border border-border bg-muted/40 px-3 py-2.5">
         <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-          高级：环境变量覆盖（可选，JSON 对象）
+          高级设置：环境变量（JSON）
         </summary>
         <FormField v-slot="{ componentField }" name="envText">
           <FormItem class="mt-2">

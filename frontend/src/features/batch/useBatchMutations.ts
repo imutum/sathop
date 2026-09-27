@@ -34,7 +34,7 @@ export function useBatchListMutations() {
     mutationFn: (id: string) => API.retryFailed(id),
     onSuccess: (res) => {
       inv.lists();
-      toast.success(`已重置 ${res.reset} 条失败数据粒为待处理`);
+      toast.success(`已提交 ${res.reset} 条数据粒重新处理`);
     },
     onError: (e: Error) => toast.error(`重试失败：${e.message}`),
   });
@@ -59,7 +59,7 @@ export function useBatchListMutations() {
         /mid-flight/.test(e.message) &&
         (await requestConfirm({
           title: "强制删除批次？",
-          description: `${e.message}\n\n强制删除会让正在处理的 worker 在下次状态汇报时收到 404。`,
+          description: `${e.message}\n\n仍在执行的任务将无法继续上报结果。已确认的交付记录保留，此操作不可恢复。`,
           confirmText: "强制删除",
           tone: "danger",
         }))
@@ -76,7 +76,7 @@ export function useBatchListMutations() {
       paused ? API.pauseBatch(id) : API.resumeBatch(id),
     onSuccess: (res) => {
       inv.lists();
-      toast.success(res.status === "paused" ? "已暂停，不再分发新数据粒" : "已恢复分发");
+      toast.success(res.status === "paused" ? "已暂停调度，已领取的任务继续执行" : "已恢复调度");
     },
     onError: (e: Error) => toast.error(`操作失败：${e.message}`),
   });
@@ -102,7 +102,7 @@ export function useBatchDetailMutations(batchId: Ref<string>) {
     mutationFn: (g: string) => API.retryGranule(batchId.value, g),
     onSuccess: (_r, g) => {
       inv.detail();
-      toast.success(`已重试数据粒 ${g}`);
+      toast.success(`已提交数据粒 ${g} 重新处理`);
     },
     onError: (e: Error, g) => toast.error(`重试 ${g} 失败：${e.message}`),
   });
@@ -111,7 +111,7 @@ export function useBatchDetailMutations(batchId: Ref<string>) {
     mutationFn: (includeBlacklisted: boolean) => API.retryFailed(batchId.value, includeBlacklisted),
     onSuccess: (res) => {
       inv.detail();
-      toast.success(`已重置 ${res.reset} 条失败数据粒为待处理`);
+      toast.success(`已提交 ${res.reset} 条数据粒重新处理`);
     },
     onError: (e: Error) => toast.error(`重试失败：${e.message}`),
   });
@@ -129,8 +129,8 @@ export function useBatchDetailMutations(batchId: Ref<string>) {
     mutationFn: () => API.resetExhaustedObjects(batchId.value),
     onSuccess: (res) => {
       inv.detail();
-      if (res.reset > 0) toast.success(`已重置 ${res.reset} 个产物的重试计数，下个 receiver poll 周期会重新派发`);
-      else toast.info("当前批次没有已放弃的产物");
+      if (res.reset > 0) toast.success(`已恢复 ${res.reset} 个产物的交付，等待接收端拉取`);
+      else toast.info("当前没有需要恢复交付的产物");
     },
     onError: (e: Error) => toast.error(`重置失败：${e.message}`),
   });
@@ -148,8 +148,8 @@ export function useBatchDetailMutations(batchId: Ref<string>) {
         (await requestConfirm({
           title: "强制删除批次？",
           description:
-            `批次仍有 worker 在处理。\n\n${e.message}\n\n` +
-            "强制删除会让正在处理的 worker 在下次状态汇报时收到 404。",
+            `批次仍有任务正在执行。\n\n${e.message}\n\n` +
+            "仍在执行的任务将无法继续上报结果。已确认的交付记录保留，此操作不可恢复。",
           confirmText: "强制删除",
           tone: "danger",
         }))
@@ -168,7 +168,7 @@ export function useBatchDetailMutations(batchId: Ref<string>) {
       paused ? API.pauseBatch(batchId.value) : API.resumeBatch(batchId.value),
     onSuccess: (res) => {
       inv.detail();
-      toast.success(res.status === "paused" ? "已暂停，不再分发新数据粒" : "已恢复分发");
+      toast.success(res.status === "paused" ? "已暂停调度，已领取的任务继续执行" : "已恢复调度");
     },
     onError: (e: Error) => toast.error(`操作失败：${e.message}`),
   });

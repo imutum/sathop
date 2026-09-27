@@ -49,7 +49,7 @@ const activeTab = ref<TabKey>("one-click");
 const tabs = computed<Array<{ key: TabKey; label: string; hint: string }>>(() => [
   {
     key: "one-click",
-    label: "一键部署",
+    label: "自动部署",
     hint: "适合云服务器，自动检测 IP / 端口 / 生成 ID",
   },
   {
@@ -145,7 +145,7 @@ async function copySnippet() {
   <Modal width-class="w-[min(880px,95vw)]" @close="$emit('close')">
     <h2 class="mb-1 text-lg font-semibold">接入新工作节点</h2>
     <p class="mb-4 text-xs text-muted-foreground">
-      选择部署方式 → 填参数 → 复制命令到目标机器执行
+      选择部署方式并填写参数，然后在目标机器执行生成的命令。
     </p>
 
     <Tabs v-model="activeTab" class="mb-4">
@@ -158,25 +158,25 @@ async function copySnippet() {
 
     <Alert v-if="activeTab === 'one-click'" class="mb-4">
       <AlertDescription class="space-y-1 text-2xs">
-        <div class="text-xs font-medium text-foreground">一键部署说明</div>
+        <div class="text-xs font-medium text-foreground">自动部署说明</div>
         <div>自动检测公网 IP，生成随机 Worker ID，使用自签证书</div>
         <div>端口自动选择：443 → 8443 → 9443（选第一个空闲的）</div>
         <div>数据目录：<code class="font-mono">/var/lib/sathop/worker</code></div>
-        <div>只需填写 Orchestrator URL 和 Token，其余全自动</div>
+        <div>填写调度服务地址和访问令牌后，生成部署命令。</div>
       </AlertDescription>
     </Alert>
 
     <div class="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
       <div v-if="activeTab !== 'one-click'">
-        <Label for="ow-id">Worker ID</Label>
+        <Label for="ow-id">节点 ID</Label>
         <Input id="ow-id" v-model="workerId" placeholder="worker-xxx" class="font-mono text-xs" />
       </div>
       <div v-if="activeTab !== 'one-click'">
-        <Label for="ow-data">数据目录（host 绝对路径）</Label>
+        <Label for="ow-data">数据目录（宿主机绝对路径）</Label>
         <Input id="ow-data" v-model="dataDir" :placeholder="DEFAULT_WORKER_DIR" class="font-mono text-xs" />
       </div>
       <div class="md:col-span-2">
-        <Label for="ow-orch">Orchestrator URL</Label>
+        <Label for="ow-orch">调度服务地址</Label>
         <Input
           id="ow-orch"
           v-model="orchUrl"
@@ -185,13 +185,13 @@ async function copySnippet() {
         />
       </div>
       <div class="md:col-span-2">
-        <Label for="ow-token">Token</Label>
+        <Label for="ow-token">访问令牌</Label>
         <div class="relative">
           <Input
             id="ow-token"
             v-model="token"
             :type="showToken ? 'text' : 'password'"
-            placeholder="orchestrator bearer token"
+            placeholder="输入访问令牌"
             class="pr-9 font-mono text-xs"
           />
           <Button
@@ -209,7 +209,7 @@ async function copySnippet() {
     </div>
 
     <div v-if="activeTab !== 'one-click'" class="mt-3">
-      <Label>暴露方式</Label>
+      <Label>访问方式</Label>
       <div class="mt-1 grid grid-cols-1 gap-1 rounded-md border border-border bg-muted/40 p-0.5 md:grid-cols-3">
         <button
           type="button"

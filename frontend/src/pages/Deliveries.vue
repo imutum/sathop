@@ -47,7 +47,7 @@ const query = useQuery({
 const { data } = query;
 const stats = computed(() => data.value ? [
   { label: "交付文件", value: data.value.total.toLocaleString() },
-  { label: "交付体积", value: fmtBytes(data.value.total_bytes) },
+  { label: "文件总大小", value: fmtBytes(data.value.total_bytes) },
   { label: "数据粒", value: data.value.granules.toLocaleString() },
   { label: "批次", value: data.value.batches.toLocaleString() },
 ] : []);
@@ -79,7 +79,7 @@ function reset() {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="交付台账" description="按批次核对交付文件、接收端与校验值。任务明细清理或批次删除后，确认记录仍会保留。">
+    <PageHeader title="交付台账" description="查询已确认的交付文件，核对接收记录与校验值">
       <template #actions>
         <Button variant="outline" :disabled="query.isFetching.value" @click="query.refetch()">刷新</Button>
         <Button :disabled="!canExport" :pending="exporting" @click="exportReport">导出筛选结果</Button>
@@ -182,7 +182,7 @@ function reset() {
       </div>
     </Card>
     <p class="text-xs leading-relaxed text-muted-foreground">
-      台账从本功能启用后持续留存，并补录升级时仍存在的确认记录。升级前已清理的历史明细无法恢复，因此这里的文件数可能与批次累计交付数不同。接收确认是交付凭据，产品内容仍需按客户要求验收。
+      批次删除后，已确认的交付记录仍保留。启用台账前已清理的明细无法补录，文件数可能与批次累计值不同。接收确认不等同于内容验收。
     </p>
   </div>
 </template>
