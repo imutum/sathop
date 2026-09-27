@@ -1,14 +1,17 @@
+import { Blob as NodeBlob } from "node:buffer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { downloadFile, setToken } from "@/apiClient";
 import { API } from "@/api";
 import { serviceAPI } from "@/serviceWorkflows";
 
 const fetchMock = vi.fn();
-const createObjectURL = vi.fn(() => "blob:delivery-report");
+const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:delivery-report");
 const revokeObjectURL = vi.fn();
 
 beforeEach(() => {
   vi.useFakeTimers();
+  // jsdom's Blob lacks text(); use the same complete implementation across Node versions.
+  vi.stubGlobal("Blob", NodeBlob);
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("URL", class extends URL {
     static createObjectURL = createObjectURL;
@@ -41,7 +44,8 @@ describe("authenticated file downloads", () => {
     expect(fetchMock.mock.calls[0][0]).toBe(path);
     expect(fetchMock.mock.calls[0][1].headers.get("Authorization")).toBe("Bearer test-download-token");
     expect(click).toHaveBeenCalledOnce();
-    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(await createObjectURL.mock.calls[0][0].text()).toBe("交付文件,SHA-256\r\n");
     expect(document.querySelector("a[download]")).toBeNull();
     expect(revokeObjectURL).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1000);
