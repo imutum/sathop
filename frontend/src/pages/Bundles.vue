@@ -1,28 +1,18 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { useRoute } from "vue-router";
-import { API, type BundleDetail, type BundleSummary } from "@/api";
+import { API, type BundleDetail } from "@/api";
 import { K } from "@/queryKeys";
-import { fmtBytes } from "@/lib/format";
-import { fmtAge } from "@/i18n";
 import { useToast } from "@/composables/useToast";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import EmptyState from "@/components/EmptyState.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import QueryState from "@/components/QueryState.vue";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import BundleCatalog from "@/features/bundle/components/BundleCatalog.vue";
 import BundleManifestView from "@/features/bundle/components/BundleManifestView.vue";
 import UploadBundleModal from "@/features/bundle/components/UploadBundleModal.vue";
 import { Icon } from "@/components/Icon";
@@ -39,6 +29,8 @@ const initial = (() => {
 
 const selected = ref<{ name: string; version: string } | null>(initial);
 const showUpload = ref(false);
+const detailPanel = ref<HTMLElement | null>(null);
+const listPanel = ref<HTMLElement | null>(null);
 
 watch(
   () => [route.query.name, route.query.version] as const,
@@ -66,8 +58,16 @@ const del = useMutation({
   onError: (e: Error) => toast.error(`删除失败：${e.message}`),
 });
 
-function isActive(b: BundleSummary) {
-  return selected.value?.name === b.name && selected.value?.version === b.version;
+async function selectBundle(bundle: { name: string; version: string }) {
+  selected.value = { name: bundle.name, version: bundle.version };
+  await nextTick();
+  detailPanel.value?.focus({ preventScroll: true });
+}
+
+async function backToList() {
+  selected.value = null;
+  await nextTick();
+  listPanel.value?.focus({ preventScroll: true });
 }
 
 function onUploaded(d: BundleDetail) {
@@ -91,134 +91,80 @@ function onUploaded(d: BundleDetail) {
       </template>
     </PageHeader>
 
-    <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-      <Card>
-        <QueryState :query="list">
-          <template #loading>
-            <div class="space-y-2 p-5">
-              <Skeleton v-for="n in 5" :key="n" class="h-10 w-full" />
-            </div>
-          </template>
-          <template #error="{ error, retry }">
-            <div class="p-5">
-              <Alert variant="destructive">
-                <AlertDescription class="flex items-center justify-between gap-3">
-                  <span>加载失败：{{ error.message }}</span>
-                  <Button size="sm" variant="outline" @click="retry">重试</Button>
-                </AlertDescription>
-              </Alert>
-            </div>
-          </template>
-          <template #empty>
-            <EmptyState
-              title="暂无任务包"
-              illustration="inbox"
-            >
-              <template #description>
-                <div class="space-y-2 text-left">
-                  <p>将处理脚本打包为 ZIP 上传，批次通过 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">orch:&lt;name&gt;@&lt;version&gt;</code> 引用。</p>
-                  <p>ZIP 结构示例：</p>
-                  <pre class="rounded bg-muted px-3 py-2 text-mini font-mono text-foreground/80">my-bundle/
-├── manifest.yaml      # 版本、入口、依赖、输入/输出
-├── entrypoint.py      # 处理脚本
-└── requirements.txt   # 可选 pip 依赖</pre>
-                  <p>本地用 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">sathop-upload-bundle</code> 命令上传并校验任务包配置。</p>
-                </div>
-              </template>
-            </EmptyState>
-          </template>
-          <template #default="{ data: bundleRows }">
-            <!-- Narrow: card list. Each row collapses into a stacked card. -->
-            <ul class="divide-y divide-border/60 sm:hidden">
-              <li
-                v-for="b in bundleRows"
-                :key="`${b.name}@${b.version}`"
-                role="button"
-                tabindex="0"
-                @click="selected = { name: b.name, version: b.version }"
-                @keydown.enter="selected = { name: b.name, version: b.version }"
-                @keydown.space.prevent="selected = { name: b.name, version: b.version }"
-                :class="[
-                  'cursor-pointer p-4 transition-colors focus:outline-none focus-visible:bg-muted/50',
-                  isActive(b) ? 'bg-accent/60' : 'hover:bg-muted/50',
-                ]"
+    <div class="grid items-start gap-5 xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]">
+      <Card :class="['min-w-0 overflow-hidden xl:sticky xl:top-6', selected ? 'hidden xl:block' : '']">
+        <div ref="listPanel" tabindex="-1" aria-label="任务包目录" class="outline-none">
+          <QueryState :query="list">
+            <template #loading>
+              <div class="space-y-2 p-5">
+                <Skeleton v-for="n in 5" :key="n" class="h-10 w-full" />
+              </div>
+            </template>
+            <template #error="{ error, retry }">
+              <div class="p-5">
+                <Alert variant="destructive">
+                  <AlertDescription class="flex items-center justify-between gap-3">
+                    <span>加载失败：{{ error.message }}</span>
+                    <Button size="sm" variant="outline" @click="retry">重试</Button>
+                  </AlertDescription>
+                </Alert>
+              </div>
+            </template>
+            <template #empty>
+              <EmptyState
+                title="暂无任务包"
+                illustration="inbox"
               >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0 flex-1 truncate font-mono text-[12px] font-medium">{{ b.name }}</div>
-                  <Badge tone="info">{{ b.version }}</Badge>
-                </div>
-                <div class="mt-2 flex items-center justify-between text-2xs text-muted-foreground">
-                  <span class="tabular-nums">{{ fmtBytes(b.size) }}</span>
-                  <span class="tabular-nums">
-                    <span v-if="b.in_use_count > 0" class="font-medium text-foreground">{{ b.in_use_count }}</span>
-                    <span v-else class="text-muted-foreground/60">0</span>
-                    <span class="ml-0.5">引用</span>
-                  </span>
-                  <span>{{ fmtAge(b.uploaded_at) }}</span>
-                </div>
-              </li>
-            </ul>
-            <!-- sm+ : table. -->
-            <div class="hidden sm:block">
-            <Table>
-              <TableHeader class="bg-muted/50">
-                <TableRow>
-                  <TableHead class="px-5">名称</TableHead>
-                  <TableHead>版本</TableHead>
-                  <TableHead>大小</TableHead>
-                  <TableHead title="引用此包的批次数">引用</TableHead>
-                  <TableHead class="px-5">上传</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow
-                  v-for="b in bundleRows"
-                  :key="`${b.name}@${b.version}`"
-                  role="button"
-                  tabindex="0"
-                  @click="selected = { name: b.name, version: b.version }"
-                  @keydown.enter="selected = { name: b.name, version: b.version }"
-                  @keydown.space.prevent="selected = { name: b.name, version: b.version }"
-                  :class="['cursor-pointer focus:outline-none focus-visible:bg-muted/50', isActive(b) ? 'bg-accent/60' : '']"
-                >
-                  <TableCell class="px-5 font-mono text-[12px] font-medium">{{ b.name }}</TableCell>
-                  <TableCell>
-                    <Badge tone="info">{{ b.version }}</Badge>
-                  </TableCell>
-                  <TableCell class="text-cell text-muted-foreground tabular-nums">{{ fmtBytes(b.size) }}</TableCell>
-                  <TableCell class="text-cell tabular-nums">
-                    <span v-if="b.in_use_count > 0" class="font-medium text-foreground">
-                      {{ b.in_use_count }}
-                    </span>
-                    <span v-else class="text-muted-foreground/60">0</span>
-                  </TableCell>
-                  <TableCell class="px-5 text-cell text-muted-foreground">{{ fmtAge(b.uploaded_at) }}</TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
-            </div>
-          </template>
-        </QueryState>
+                <template #description>
+                  <div class="space-y-2 text-left">
+                    <p>将处理脚本打包为 ZIP 上传，批次通过 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">orch:&lt;name&gt;@&lt;version&gt;</code> 引用。</p>
+                    <p>ZIP 结构示例：</p>
+                    <pre class="rounded bg-muted px-3 py-2 text-mini font-mono text-foreground/80">my-bundle/
+  ├── manifest.yaml      # 版本、入口、依赖、输入/输出
+  ├── entrypoint.py      # 处理脚本
+  └── requirements.txt   # 可选 pip 依赖</pre>
+                    <p>本地用 <code class="rounded bg-muted px-1 py-0.5 font-mono text-mini">sathop-upload-bundle</code> 命令上传并校验任务包配置。</p>
+                  </div>
+                </template>
+              </EmptyState>
+            </template>
+            <template #default="{ data: bundleRows }">
+              <BundleCatalog :bundles="bundleRows" :selected="selected" @select="selectBundle" />
+            </template>
+          </QueryState>
+        </div>
       </Card>
 
-      <Card>
+      <Card :class="['min-w-0', !selected ? 'hidden xl:block' : '']">
         <CardContent class="pt-6">
-          <EmptyState
-            v-if="!selected"
-            title="未选择任务包"
-            description="选择任务包，查看配置与文件。"
-            illustration="inbox"
-          />
-          <div v-else-if="detail.isLoading.value" class="py-8 text-center text-sm text-muted-foreground">
-            加载中…
+          <div ref="detailPanel" tabindex="-1" role="region" aria-label="任务包详情" class="outline-none">
+            <Button v-if="selected" variant="ghost" size="sm" class="mb-4 -ml-2 xl:hidden" @click="backToList">
+              <Icon name="chevronLeft" :size="14" />返回任务包目录
+            </Button>
+            <EmptyState
+              v-if="!selected"
+              title="未选择任务包"
+              description="选择任务包，查看配置与文件。"
+              illustration="inbox"
+            />
+            <div v-else-if="detail.isLoading.value" class="py-8 text-center text-sm text-muted-foreground">
+              加载中…
+            </div>
+            <Alert v-else-if="detail.isError.value" variant="destructive">
+              <AlertDescription class="flex flex-wrap items-center justify-between gap-3">
+                <span>任务包加载失败：{{ detail.error.value?.message }}</span>
+                <Button variant="outline" size="sm" @click="detail.refetch()">重试</Button>
+              </AlertDescription>
+            </Alert>
+            <BundleManifestView
+              v-else-if="detail.data.value"
+              :key="`${detail.data.value.name}@${detail.data.value.version}`"
+              :d="detail.data.value"
+              :pending="del.isPending.value"
+              :error="del.error.value?.message ?? null"
+              @delete="del.mutate(selected!)"
+            />
           </div>
-          <BundleManifestView
-            v-else-if="detail.data.value"
-            :d="detail.data.value"
-            :pending="del.isPending.value"
-            :error="del.error.value?.message ?? null"
-            @delete="del.mutate(selected!)"
-          />
         </CardContent>
       </Card>
     </div>

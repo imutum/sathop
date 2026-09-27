@@ -66,20 +66,19 @@ async function download() {
 
 <template>
   <div class="space-y-5 text-sm">
-    <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="space-y-4">
       <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="break-all font-mono text-sm">
-            <span class="font-semibold">{{ d.name }}</span>
-            <span class="text-muted-foreground">@{{ d.version }}</span>
-          </div>
+        <h2 class="text-lg font-semibold leading-relaxed tracking-tight [overflow-wrap:anywhere]">{{ d.name }}</h2>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <Badge tone="info" class="font-mono">v{{ d.version }}</Badge>
+          <span class="text-2xs tabular-nums text-muted-foreground">{{ fmtBytes(d.size) }}</span>
           <span v-if="d.in_use_count > 0" title="被批次引用 — 删除会被拒绝">
             <Badge tone="info">{{ d.in_use_count }} 批次引用中</Badge>
           </span>
         </div>
         <div v-if="d.description" class="mt-1.5 text-xs text-muted-foreground">{{ d.description }}</div>
       </div>
-      <RowActions align="end">
+      <RowActions align="start">
         <template #primary>
           <Button variant="default" @click="gotoNewBatch" title="跳转到批次页并预选此任务包">
             新建批次
@@ -109,7 +108,19 @@ async function download() {
 
     <BundleSection title="数据输入" :count="slots.length">
       <div v-if="slots.length === 0" class="text-xs text-muted-foreground">未声明</div>
-      <table v-else class="w-full font-mono text-cell">
+      <dl v-else class="divide-y divide-border/50 sm:hidden">
+        <div v-for="slot in slots" :key="slot.name" class="py-3 first:pt-0 last:pb-0">
+          <dt class="break-all font-mono text-xs font-medium">{{ slot.name }}</dt>
+          <dd class="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-2xs text-muted-foreground">
+            <span>产品 <span class="break-all font-mono text-foreground">{{ slot.product }}</span></span>
+            <span>凭证 <span class="break-all font-mono text-foreground">{{ slot.credential || "—" }}</span></span>
+          </dd>
+          <dd v-if="slot.filename_pattern" class="mt-2 text-2xs text-muted-foreground">
+            文件名规则 <span class="mt-1 block break-all font-mono text-foreground">{{ slot.filename_pattern }}</span>
+          </dd>
+        </div>
+      </dl>
+      <table v-if="slots.length" class="hidden w-full min-w-[380px] font-mono text-cell sm:table [&_td]:py-2.5 [&_td]:align-top">
         <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
             <th class="py-1.5 pr-3 text-left font-sans font-normal">名称</th>
@@ -130,7 +141,7 @@ async function download() {
     </BundleSection>
 
     <BundleSection v-if="metaFields.length > 0" title="元数据字段" :count="metaFields.length">
-      <table class="w-full font-mono text-cell">
+      <table class="w-full font-mono text-cell [&_td]:py-2.5 [&_td]:align-top">
         <thead class="text-muted-foreground">
           <tr class="border-b border-border/50">
             <th class="py-1.5 pr-3 text-left font-sans font-normal">名称</th>

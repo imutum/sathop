@@ -21,6 +21,8 @@ const emit = defineEmits<{
 }>();
 
 const scrollRef = ref<HTMLElement | null>(null);
+const tableWidth = computed(() => 170 + 44 + props.schema.metaFields.length * 120 +
+  props.schema.slots.reduce((width, slot) => width + 430 + (slot.credential ? 0 : 140), 0));
 
 const {
   currentPage, totalPages, pageStart, pageEnd,
@@ -111,7 +113,7 @@ function measureRow(el: unknown) {
 
 <template>
   <div>
-    <div class="mb-2 flex items-center justify-between">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
       <span class="text-xs text-muted-foreground">
         数据粒 · {{ rows.length }} 条
         <template v-if="showPagination">（显示 {{ pageStart + 1 }}–{{ pageEnd }}）</template>
@@ -140,12 +142,25 @@ function measureRow(el: unknown) {
     </div>
     <div
       ref="scrollRef"
-      class="max-h-[420px] overflow-auto rounded-lg border border-border"
+      class="max-h-[420px] overflow-auto overscroll-x-contain rounded-lg border border-border"
+      tabindex="0"
+      role="region"
+      aria-label="输入数据表格，可横向滚动"
     >
-      <table class="w-full text-xs">
+      <table class="w-full table-fixed text-xs" :style="{ minWidth: `${tableWidth}px` }">
+        <colgroup>
+          <col style="width: 170px" />
+          <template v-for="slot in schema.slots" :key="slot.name">
+            <col style="width: 240px" />
+            <col style="width: 190px" />
+            <col v-if="!slot.credential" style="width: 140px" />
+          </template>
+          <col v-for="field in schema.metaFields" :key="field.name" style="width: 120px" />
+          <col style="width: 44px" />
+        </colgroup>
         <thead class="sticky top-0 z-10 bg-muted text-left text-mini font-semibold tracking-label text-muted-foreground">
           <tr>
-            <th class="px-2 py-1.5">granule_id</th>
+            <th class="px-2 py-1.5" title="granule_id">数据粒 ID</th>
             <th
               v-for="s in schema.slots"
               :key="s.name"
@@ -168,14 +183,14 @@ function measureRow(el: unknown) {
           <tr class="text-3xs normal-case">
             <th></th>
             <template v-for="s in schema.slots" :key="`sub-${s.name}`">
-              <th class="px-2 py-1 text-muted-foreground">url</th>
-              <th class="px-2 py-1 text-muted-foreground">filename</th>
-              <th v-if="!s.credential" class="px-2 py-1 text-muted-foreground">credential</th>
+              <th class="px-2 py-1 text-muted-foreground">数据链接</th>
+              <th class="px-2 py-1 text-muted-foreground">文件名（可选）</th>
+              <th v-if="!s.credential" class="px-2 py-1 text-muted-foreground">凭证名（可选）</th>
             </template>
             <th
               v-for="m in schema.metaFields"
               :key="`sub-meta-${m.name}`"
-              class="px-2 py-1 text-muted-foreground"
+              class="break-all px-2 py-1 text-muted-foreground"
             >
               {{ m.pattern ?? "—" }}
             </th>

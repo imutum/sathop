@@ -32,15 +32,15 @@ function update(name: string, patch: Partial<CredDraft>) {
 </script>
 
 <template>
-  <fieldset class="space-y-2">
+  <fieldset class="min-w-0 space-y-2">
     <legend><FieldLabel>凭证 · 任务包需要 {{ names.length }} 个</FieldLabel></legend>
     <div class="space-y-3 rounded-lg border border-border bg-muted/40 p-3">
       <div
         v-for="name in names"
         :key="name"
-        class="grid grid-cols-[140px_100px_1fr_2fr_auto] gap-2 items-center text-xs"
+        class="grid min-w-0 grid-cols-[minmax(0,1fr)_100px] items-center gap-3 text-xs lg:grid-cols-[130px_90px_minmax(0,1fr)_minmax(0,1.5fr)_auto]"
       >
-        <label :for="`cred-${name}-secret`" class="font-mono" title="凭证名">
+        <label :for="`cred-${name}-secret`" class="font-mono [overflow-wrap:anywhere]" title="凭证名">
           {{ name }}
         </label>
         <SelectInput
@@ -56,27 +56,30 @@ function update(name: string, patch: Partial<CredDraft>) {
           <option value="basic">Basic</option>
           <option value="bearer">Bearer</option>
         </SelectInput>
-        <TextInput
-          v-if="draftFor(name).scheme === 'basic'"
-          :id="`cred-${name}-user`"
-          :aria-label="`${name} 用户名`"
-          autocomplete="off"
-          :model-value="draftFor(name).username"
-          @update:model-value="update(name, { username: $event })"
-          placeholder="用户名"
-        />
-        <div v-else class="text-muted-foreground">—</div>
-        <TextInput
-          :id="`cred-${name}-secret`"
-          :aria-label="draftFor(name).scheme === 'basic' ? `${name} 密码` : `${name} Token`"
-          autocomplete="off"
-          type="password"
-          :model-value="draftFor(name).secret"
-          @update:model-value="update(name, { secret: $event })"
-          :placeholder="draftFor(name).scheme === 'basic' ? '密码' : 'Token'"
-          class="font-mono"
-        />
-        <div class="flex items-center gap-2 whitespace-nowrap">
+        <div v-if="draftFor(name).scheme === 'basic'" class="col-span-2 min-w-0 lg:col-span-1">
+          <TextInput
+            :id="`cred-${name}-user`"
+            :aria-label="`${name} 用户名`"
+            autocomplete="off"
+            :model-value="draftFor(name).username"
+            @update:model-value="update(name, { username: $event })"
+            placeholder="用户名"
+          />
+        </div>
+        <div v-else class="hidden text-muted-foreground lg:block">—</div>
+        <div class="col-span-2 min-w-0 lg:col-span-1">
+          <TextInput
+            :id="`cred-${name}-secret`"
+            :aria-label="draftFor(name).scheme === 'basic' ? `${name} 密码` : `${name} Token`"
+            autocomplete="off"
+            type="password"
+            :model-value="draftFor(name).secret"
+            @update:model-value="update(name, { secret: $event })"
+            :placeholder="draftFor(name).scheme === 'basic' ? '密码' : 'Token'"
+            class="font-mono"
+          />
+        </div>
+        <div class="col-span-2 flex items-center gap-2 whitespace-nowrap lg:col-span-1">
           <div
             class="flex items-center gap-1.5"
             :title="canRemember ? '提交成功后保存到当前浏览器，下次自动填入。' : '当前连接不支持记住凭证，请使用 HTTPS 访问。'"
@@ -109,7 +112,7 @@ function update(name: string, patch: Partial<CredDraft>) {
         </div>
       </div>
     </div>
-    <div class="text-2xs text-muted-foreground">
+    <div class="text-2xs leading-relaxed text-muted-foreground">
       凭证用于本批次，随任务提供给工作节点。更新凭证请创建新批次。
       <template v-if="canRemember">勾选“记住”后将在当前浏览器保存并自动填入，请仅在可信设备上使用。</template>
       <template v-else>当前连接不支持记住凭证，本次仍可正常填写和提交。使用 HTTPS 访问后可启用。</template>
