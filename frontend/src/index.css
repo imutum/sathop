@@ -2,68 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tokens follow shadcn-vue's slate baseColor verbatim. We add `success` /
-   `warning` (shadcn ships only destructive) so status semantics are typed
-   instead of literal Tailwind palette colors. Nothing else is bespoke. */
+/* Mineral: quiet neutral surfaces, one green accent, distinct status colors. */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 160 14% 97%;
+    --foreground: 170 18% 13%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 170 18% 13%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 72% 50%;
+    --popover-foreground: 170 18% 13%;
+    --primary: 164 64% 28%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 160 12% 93%;
+    --secondary-foreground: 170 18% 20%;
+    --muted: 160 10% 94%;
+    --muted-foreground: 168 8% 43%;
+    --accent: 160 24% 92%;
+    --accent-foreground: 164 64% 24%;
+    --destructive: 0 64% 47%;
     --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
+    --border: 160 10% 88%;
+    --input: 160 9% 81%;
+    --ring: 164 64% 35%;
+    --radius: 0.625rem;
+    --sidebar: 160 14% 96%;
 
-    /* Status tokens — typed extras on top of the slate base. */
-    --success: 142 71% 35%;
-    --warning: 38 92% 45%;
-    --danger: 0 72% 50%;
-    --shadow: 222.2 84% 4.9%;
+    /* Status colors stay distinct from the primary action color. */
+    --success: 155 62% 30%;
+    --warning: 34 90% 34%;
+    --danger: 0 64% 47%;
+    --shadow: 170 20% 12%;
 
     color-scheme: light;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 47.4% 7.5%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 55%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --background: 180 12% 7%;
+    --foreground: 160 14% 93%;
+    --card: 180 10% 10%;
+    --card-foreground: 160 14% 93%;
+    --popover: 180 9% 13%;
+    --popover-foreground: 160 14% 93%;
+    --primary: 158 51% 66%;
+    --primary-foreground: 170 34% 10%;
+    --secondary: 175 9% 16%;
+    --secondary-foreground: 160 14% 90%;
+    --muted: 180 8% 14%;
+    --muted-foreground: 170 7% 64%;
+    --accent: 168 18% 18%;
+    --accent-foreground: 158 51% 76%;
+    --destructive: 0 63% 49%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 175 8% 21%;
+    --input: 175 7% 29%;
+    --ring: 158 51% 66%;
+    --sidebar: 180 12% 8%;
 
-    --success: 142 69% 45%;
-    --warning: 38 92% 55%;
-    --danger: 0 62.8% 55%;
+    --success: 155 49% 63%;
+    --warning: 38 80% 65%;
+    --danger: 0 75% 72%;
     --shadow: 0 0% 0%;
 
     color-scheme: dark;
+  }
+
+  *,
+  ::before,
+  ::after {
+    @apply border-border;
   }
 
   html,
@@ -78,6 +84,8 @@
     font-size: 14px;
     text-rendering: optimizeLegibility;
   }
+
+  select option { @apply bg-popover text-popover-foreground; }
 
   ::selection {
     background: hsl(var(--primary) / 0.30);
@@ -107,10 +115,22 @@
 
 @layer components {
   .stat-label {
-    @apply text-mini font-medium tracking-label text-muted-foreground whitespace-nowrap;
+    @apply text-xs font-medium text-muted-foreground whitespace-nowrap;
   }
   .kbd {
     @apply rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10.5px];
+  }
+
+  .modal-actions {
+    @apply sticky bottom-0 z-10 -mx-6 mt-6 flex flex-wrap justify-end gap-2 border-t bg-card px-6 py-4;
+  }
+
+  .surface-overlay {
+    @apply fixed inset-0 bg-black/45 backdrop-blur-sm;
+  }
+
+  .dialog-close {
+    @apply absolute right-4 top-4 grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring;
   }
 }
 

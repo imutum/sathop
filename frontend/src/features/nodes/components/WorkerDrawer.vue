@@ -7,7 +7,7 @@ import { useWorkerLifecycle } from "@/features/nodes/useWorkerLifecycle";
 import { parseConcurrency } from "@/features/nodes/workerActions";
 import { WORKER_QUEUE_STAGES, workerQueueTotal } from "@/features/nodes/workerQueue";
 import { useToast } from "@/composables/useToast";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import CopyButton from "@/components/CopyButton.vue";
@@ -96,13 +96,13 @@ function onKey(e: KeyboardEvent) {
 
 <template>
   <Sheet :open="open" @update:open="emit('update:open', $event)">
-    <SheetContent side="right" class="w-full gap-0 overflow-y-auto p-0 sm:max-w-md">
+    <SheetContent side="right" :aria-describedby="undefined" class="w-full gap-0 overflow-y-auto p-0 sm:max-w-md">
       <template v-if="worker">
         <!-- 身份 -->
         <div class="flex items-start justify-between gap-2 border-b border-border/60 px-5 pb-4 pt-5 pr-12">
           <div class="min-w-0">
             <div class="flex items-center gap-1 font-mono text-sm font-semibold">
-              <span class="truncate">{{ worker.worker_id }}</span>
+              <SheetTitle class="truncate font-mono text-sm">{{ worker.worker_id }}</SheetTitle>
               <CopyButton :value="worker.worker_id" title="复制节点 ID" />
             </div>
             <div

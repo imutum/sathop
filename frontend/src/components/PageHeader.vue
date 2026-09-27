@@ -6,14 +6,14 @@ defineProps<{
 </script>
 
 <template>
-  <header class="flex flex-wrap items-end justify-between gap-4">
+  <header class="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
     <div class="min-w-0">
-      <h1 class="text-balance text-2xl font-semibold tracking-tight text-foreground">
+      <h1 class="text-balance text-2xl font-semibold leading-tight tracking-tight text-foreground md:text-[28px]">
         {{ title }}
       </h1>
       <p
         v-if="$slots.description || description"
-        class="mt-1.5 max-w-2xl text-sm text-muted-foreground"
+        class="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground"
       >
         <slot name="description">{{ description }}</slot>
       </p>

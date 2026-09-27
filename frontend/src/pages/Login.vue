@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import FieldLabel from "@/components/FieldLabel.vue";
 import TextInput from "@/ui/TextInput.vue";
+import BrandMark from "@/components/BrandMark.vue";
 
 const { markReady } = useAuthGate();
 
@@ -40,49 +41,47 @@ const year = new Date().getFullYear();
 </script>
 
 <template>
-  <div class="relative flex h-full items-center justify-center overflow-hidden bg-background">
-    <div aria-hidden class="bg-dotgrid pointer-events-none absolute inset-0 opacity-35" />
-
-    <div class="relative grid w-full max-w-[920px] gap-10 px-6 lg:grid-cols-[1.1fr_1fr]">
-      <!-- ─── Brand panel (md+ only) ────────────────────────────────────── -->
-      <div class="hidden flex-col justify-between lg:flex">
+  <div class="relative min-h-full overflow-x-hidden bg-background px-5 py-8 sm:px-10 lg:flex lg:items-center lg:py-16">
+    <div class="relative mx-auto grid w-full max-w-[1080px] items-center gap-10 lg:grid-cols-[1.2fr_1fr] lg:gap-20">
+      <div class="relative">
         <div class="flex items-center gap-3">
-          <div class="grid h-11 w-11 place-items-center rounded-lg border border-border bg-background text-foreground shadow-soft">
-            <svg aria-hidden="true" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3" />
-              <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
-            </svg>
-          </div>
+          <BrandMark class="size-11" />
           <div>
-            <div class="text-lg font-semibold">SatHop</div>
-            <div class="text-2xs uppercase tracking-brand text-muted-foreground">数据服务控制台</div>
+            <div class="text-xl font-semibold tracking-tight">SatHop</div>
+            <div class="mt-1 text-xs text-muted-foreground">数据服务控制台</div>
           </div>
         </div>
 
-        <div class="space-y-6">
-          <h1 class="text-balance text-3xl font-semibold leading-tight">
-            遥感数据
-            <br />
-            <span class="text-primary">下载 · 处理 · 交付</span>
+        <div class="relative mt-16 hidden lg:block">
+          <div class="mb-5 flex items-center gap-3 text-xs font-medium tracking-label text-primary">
+            <span class="h-px w-8 bg-primary/50" /> 遥感数据工作空间
+          </div>
+          <h1 class="text-[46px] font-semibold leading-[1.3] tracking-tight">
+            遥感数据，<br /><span class="text-primary">从处理到交付。</span>
           </h1>
-          <p class="max-w-sm text-sm leading-relaxed text-muted-foreground">
+          <p class="mt-6 max-w-sm text-sm leading-7 text-muted-foreground">
             集中管理数据任务，跟踪处理进度，核对交付结果。
           </p>
-        </div>
-
-        <div class="text-2xs text-muted-foreground">
-          © {{ year }} SatHop
+          <svg aria-hidden="true" viewBox="0 0 460 140" class="mt-10 w-full max-w-[440px] text-primary" fill="none">
+            <path d="M20 90C120 90 140 30 235 30S350 90 440 90" stroke="currentColor" stroke-opacity=".18" />
+            <path d="M20 90H440" stroke="currentColor" stroke-opacity=".15" stroke-dasharray="3 7" />
+            <ellipse cx="235" cy="70" rx="85" ry="55" stroke="currentColor" stroke-opacity=".18" />
+            <ellipse cx="235" cy="70" rx="45" ry="55" stroke="currentColor" stroke-opacity=".12" />
+            <circle cx="40" cy="90" r="5" fill="currentColor" fill-opacity=".65" />
+            <circle cx="235" cy="30" r="5" fill="currentColor" />
+            <circle cx="420" cy="90" r="5" fill="currentColor" fill-opacity=".65" />
+          </svg>
+          <div class="flex justify-between pr-5 text-xs text-muted-foreground"><span>01 / 下载</span><span>02 / 处理</span><span>03 / 交付</span></div>
         </div>
       </div>
 
-      <!-- ─── Login card ────────────────────────────────────────────────── -->
       <form
         @submit.prevent="submit"
-        class="rounded-lg border border-border bg-background/95 p-8 shadow-pop backdrop-blur"
+        class="w-full rounded-2xl border border-border bg-card p-7 shadow-pop sm:p-9"
       >
-        <div class="mb-6">
-          <div class="text-xl font-semibold">登录控制台</div>
-          <p class="mt-1.5 text-xs text-muted-foreground">
+        <div class="mb-8">
+          <h2 class="text-2xl font-semibold tracking-tight">登录控制台</h2>
+          <p class="mt-2 text-sm text-muted-foreground">
             输入部署时设置的访问令牌。
           </p>
         </div>
@@ -97,7 +96,7 @@ const year = new Date().getFullYear();
             v-model="input"
             @input="loginError = null"
             placeholder="输入访问令牌"
-            class="mt-2 font-mono"
+            class="mt-2 h-11 font-mono"
           />
         </label>
 
@@ -108,7 +107,7 @@ const year = new Date().getFullYear();
         <Button
           type="submit"
           size="lg"
-          class="mt-5 w-full"
+          class="mt-6 w-full"
           :disabled="!input.trim()"
           :pending="probing"
           pending-label="验证中…"
@@ -116,11 +115,12 @@ const year = new Date().getFullYear();
           进入控制台
         </Button>
 
-        <div class="mt-6 border-t border-border pt-4 text-2xs leading-relaxed text-muted-foreground">
+        <div class="mt-8 border-t border-border pt-5 text-xs leading-6 text-muted-foreground">
           登录后，令牌将保存在当前浏览器。如需更换，请更新调度服务的
           <span class="font-mono text-foreground">SATHOP_TOKEN</span>。
         </div>
       </form>
+      <div class="text-xs text-muted-foreground lg:col-span-2">© {{ year }} SatHop</div>
     </div>
   </div>
 </template>

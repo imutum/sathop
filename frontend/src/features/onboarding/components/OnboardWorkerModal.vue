@@ -142,11 +142,7 @@ async function copySnippet() {
 </script>
 
 <template>
-  <Modal width-class="w-[min(880px,95vw)]" @close="$emit('close')">
-    <h2 class="mb-1 text-lg font-semibold">接入新工作节点</h2>
-    <p class="mb-4 text-xs text-muted-foreground">
-      选择部署方式并填写参数，然后在目标机器执行生成的命令。
-    </p>
+  <Modal title="接入工作节点" description="选择部署方式并填写参数，在目标机器执行生成的命令。" width-class="w-[880px]" @close="$emit('close')">
 
     <Tabs v-model="activeTab" class="mb-4">
       <TabsList>
@@ -159,10 +155,9 @@ async function copySnippet() {
     <Alert v-if="activeTab === 'one-click'" class="mb-4">
       <AlertDescription class="space-y-1 text-2xs">
         <div class="text-xs font-medium text-foreground">自动部署说明</div>
-        <div>自动检测公网 IP，生成随机 Worker ID，使用自签证书</div>
+        <div>自动检测公网 IP、生成节点 ID，并配置自签证书。</div>
         <div>端口自动选择：443 → 8443 → 9443（选第一个空闲的）</div>
         <div>数据目录：<code class="font-mono">/var/lib/sathop/worker</code></div>
-        <div>填写调度服务地址和访问令牌后，生成部署命令。</div>
       </AlertDescription>
     </Alert>
 
@@ -291,7 +286,7 @@ async function copySnippet() {
     </Alert>
 
     <p v-if="activeTab !== 'one-click'" class="mt-2 text-2xs text-muted-foreground">
-      命令统一假设 bash 兼容 shell（Linux / macOS / WSL / Git Bash）。Windows 用户请在 WSL 或 Git Bash 中执行——<code class="font-mono">$(id -u)</code>、<code class="font-mono">$(pwd)</code>、<code class="font-mono">\</code> 续行均为 bash 语法
+      请在 Bash 终端执行命令。Windows 可使用 WSL 或 Git Bash。
     </p>
 
     <details v-if="activeTab !== 'one-click'" class="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2.5">
@@ -327,31 +322,23 @@ async function copySnippet() {
     <Alert v-if="!valid" variant="destructive" class="mt-4">
       <AlertDescription>
         <template v-if="activeTab === 'one-click'">
-          Token / Orchestrator URL 不能为空
+          请填写访问令牌与调度服务地址。
         </template>
         <template v-else>
-          Worker ID / Token / Orchestrator URL /
-          {{ exposeMode === "caddy" ? "域名" : exposeMode === "selfsigned" ? "Worker 主机 IP" : "主机:端口" }}
-          都不能为空
+          请填写节点 ID、访问令牌、调度服务地址与
+          {{ exposeMode === "caddy" ? "域名" : exposeMode === "selfsigned" ? "节点 IP" : "主机端口" }}。
         </template>
       </AlertDescription>
     </Alert>
 
     <div v-if="exposeMode === 'selfsigned'" class="mt-4">
-      <Alert>
-        <AlertDescription class="space-y-1 text-2xs">
-          <div class="text-xs font-medium text-foreground">自签 IP HTTPS 模式工作原理：</div>
-          <div>1. Worker 启动时用 Python <code class="font-mono">cryptography</code> 生成 IP SAN 自签证书（10 年有效期，持久化在 <code class="font-mono">data/tls/</code>）</div>
-          <div>2. uvicorn 直接以该证书监听 :443，注册时把证书 PEM 当 ca_pem 上报到调度中心</div>
-          <div>3. 接收端启动时从调度中心拉取 CA 清单 → 精确验证 Worker 身份（中间人没有 worker 私钥就过不了 TLS）</div>
-          <div class="font-medium text-foreground">
-            ⚠️ 接收端 TLS 信任模式必须选「信任调度中心管理的 CA」，否则会握手失败
-          </div>
-          <div class="text-muted-foreground">
-            零额外依赖：无需 Caddy、无需 Caddyfile、无需域名。换 Worker IP 时删掉 <code class="font-mono">data/tls/</code> 触发重新签发即可
-          </div>
-        </AlertDescription>
-      </Alert>
+      <p class="rounded-lg bg-accent/60 px-4 py-3 text-xs leading-relaxed text-accent-foreground">
+        接收端请选择“信任调度服务 CA”，以验证此节点的自签证书。
+      </p>
+      <details class="mt-3 text-xs leading-relaxed text-muted-foreground">
+        <summary class="cursor-pointer font-medium hover:text-foreground">证书与连接说明</summary>
+        <p class="mt-2">节点生成与 IP 绑定的证书，保存在 <code>data/tls/</code>。调度服务保存证书，接收端据此验证节点身份，无需域名或额外代理。更换 IP 后需要重新签发证书，并更新接收端信任信息。</p>
+      </details>
     </div>
 
     <div v-else-if="exposeMode === 'caddy'" class="mt-4">
@@ -433,8 +420,8 @@ async function copySnippet() {
       </div>
     </div>
 
-    <div class="mt-5 flex justify-end gap-2">
-      <Button type="button" @click="$emit('close')">关闭</Button>
+    <div class="modal-actions">
+      <Button type="button" variant="outline" @click="$emit('close')">关闭</Button>
     </div>
   </Modal>
 </template>

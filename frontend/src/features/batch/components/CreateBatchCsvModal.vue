@@ -146,8 +146,7 @@ const dirty = computed(() => meta.value.dirty || !!file.value);
 </script>
 
 <template>
-  <Modal width-class="w-[720px]" :z-index="60" :dirty="dirty" @close="emit('close')">
-    <h3 class="mb-2 text-base font-semibold">导入 CSV / TSV</h3>
+  <Modal v-slot="{ close }" title="导入 CSV / TSV" width-class="w-[720px]" :z-index="60" :dirty="dirty" @close="emit('close')">
     <div class="mb-3 text-2xs text-muted-foreground">
       第一行必须是表头，列顺序不限。自动识别逗号或 Tab 分隔。
       <code class="font-mono text-3xs text-muted-foreground">.size / .checksum / .credential</code> 列可选。
@@ -185,8 +184,8 @@ const dirty = computed(() => meta.value.dirty || !!file.value);
           <FormMessage />
         </FormItem>
       </FormField>
-      <div class="mt-3 flex justify-end gap-2">
-        <Button type="button" variant="outline" @click="emit('close')">取消</Button>
+      <div class="modal-actions">
+        <Button type="button" variant="outline" @click="close">取消</Button>
         <Button type="submit" variant="default">导入</Button>
       </div>
     </form>
@@ -202,8 +201,8 @@ const dirty = computed(() => meta.value.dirty || !!file.value);
       <div v-else-if="fileResult?.rows" class="mt-2 text-xs text-muted-foreground">
         已解析 <span class="font-semibold text-foreground">{{ fileResult.rows.length.toLocaleString() }}</span> 条数据粒
       </div>
-      <div class="mt-3 flex justify-end gap-2">
-        <Button type="button" variant="outline" @click="emit('close')">取消</Button>
+      <div class="modal-actions">
+        <Button type="button" variant="outline" @click="close">取消</Button>
         <Button
           type="button"
           variant="default"

@@ -55,8 +55,7 @@ const onSubmit = handleSubmit((vals) => {
 </script>
 
 <template>
-  <Modal :dirty="meta.dirty" @close="emit('close')">
-    <h2 class="mb-5 text-lg font-semibold">上传任务包</h2>
+  <Modal v-slot="{ close }" title="上传任务包" description="上传处理脚本与执行配置，供批次使用。" :dirty="meta.dirty" @close="emit('close')">
     <form class="space-y-4 text-sm" @submit.prevent="onSubmit">
       <FormField v-slot="{ value, handleChange }" name="file">
         <FormItem>
@@ -77,7 +76,7 @@ const onSubmit = handleSubmit((vals) => {
           <FormControl>
             <Input
               v-bind="componentField"
-              placeholder="简短说明这个 bundle 做什么"
+              placeholder="简述任务包的处理用途"
             />
           </FormControl>
           <FormMessage />
@@ -86,8 +85,8 @@ const onSubmit = handleSubmit((vals) => {
       <Alert v-if="submitError" variant="destructive">
         <AlertDescription>{{ submitError }}</AlertDescription>
       </Alert>
-      <div class="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="outline" @click="emit('close')">取消</Button>
+      <div class="modal-actions">
+        <Button type="button" variant="outline" @click="close">取消</Button>
         <Button
           type="submit"
           variant="default"

@@ -91,7 +91,7 @@ function onUploaded(d: BundleDetail) {
       </template>
     </PageHeader>
 
-    <div class="grid gap-6 xl:grid-cols-[minmax(480px,2fr)_minmax(0,3fr)]">
+    <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       <Card>
         <QueryState :query="list">
           <template #loading>

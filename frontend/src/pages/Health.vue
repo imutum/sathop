@@ -90,6 +90,7 @@ function fmtHours(h: number): string {
         <template #empty>
           <EmptyState
             title="当前没有正在处理的数据粒"
+            compact
             description="任务开始处理后，可在此查看明细。"
             illustration="signal"
           />
@@ -160,6 +161,7 @@ function fmtHours(h: number): string {
           <EmptyState
             v-if="stuckTotal === 0"
             :title="`没有超过 ${stuckHours} 小时未推进的数据粒`"
+            compact
             description="当前未发现超过设定阈值的活动数据粒。"
             illustration="signal"
           />

@@ -85,7 +85,7 @@ function reset() {
         <Button :disabled="!canExport" :pending="exporting" @click="exportReport">导出筛选结果</Button>
       </template>
     </PageHeader>
-    <Card class="space-y-4 p-4">
+    <Card class="space-y-4 p-5">
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <label class="space-y-1 text-xs text-muted-foreground">
           搜索
@@ -111,9 +111,9 @@ function reset() {
       <p v-if="rangeError" role="alert" class="text-sm text-destructive">{{ rangeError }}</p>
     </Card>
     <div v-if="data && !rangeError" class="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <Card v-for="stat in stats" :key="stat.label" class="p-4">
+      <Card v-for="stat in stats" :key="stat.label" class="p-5">
         <div class="text-xs text-muted-foreground">{{ stat.label }}</div>
-        <div class="mt-2 text-xl font-semibold tabular-nums">{{ stat.value }}</div>
+        <div class="mt-3 text-2xl font-semibold tracking-tight tabular-nums">{{ stat.value }}</div>
       </Card>
     </div>
     <p v-if="query.error.value" role="alert" class="text-sm text-destructive">

@@ -13,6 +13,6 @@ defineProps<{ title: string; count?: number }>();
         {{ count }}
       </span>
     </div>
-    <slot />
+    <div class="min-w-0 overflow-x-auto"><slot /></div>
   </section>
 </template>

@@ -148,9 +148,8 @@ function onCreated() {
       </template>
     </PageHeader>
 
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="flex items-center gap-2">
-        <div class="w-72">
+    <div class="flex flex-wrap items-center gap-3">
+        <div class="w-full sm:w-72">
           <TextInput
             v-model="search"
             placeholder="搜索：名称 / ID / 任务包"
@@ -168,8 +167,7 @@ function onCreated() {
             { value: 'all', label: '全部', count: allCount },
           ]"
         />
-      </div>
-      <Badge variant="info" class="h-7 tabular-nums">
+      <Badge variant="info" class="ml-auto h-7 tabular-nums">
         <span class="text-foreground">{{ visible.length }}</span>
         <span class="text-muted-foreground/80">/ {{ allCount }}</span>
       </Badge>
@@ -275,7 +273,8 @@ function onCreated() {
                     </Button>
                     <Button
                       v-if="row.inFlight > 0"
-                      variant="destructive"
+                      variant="outline"
+                      class="text-danger hover:bg-danger/10 hover:text-danger"
                       size="sm"
                       :pending="cancel.isPending.value && cancel.variables.value === row.batch.batch_id"
                       pending-label="取消中…"
@@ -304,7 +303,7 @@ function onCreated() {
           </ul>
           <!-- lg+ : original table. -->
           <div class="hidden lg:block">
-            <Table class="min-w-[820px]">
+            <Table class="min-w-[960px]">
               <TableHeader class="bg-muted/50">
                 <TableRow>
                   <TableHead class="px-5">批次</TableHead>
@@ -317,9 +316,9 @@ function onCreated() {
               </TableHeader>
               <TableBody>
                 <TableRow v-for="row in visible" :key="row.batch.batch_id">
-                  <TableCell class="px-5 py-3.5">
+                  <TableCell class="min-w-[220px] px-5 py-3.5">
                     <RouterLink :to="`/batches/${row.batch.batch_id}`" class="block">
-                      <div class="flex items-center gap-2">
+                      <div class="flex flex-wrap items-center gap-2">
                         <span class="font-medium text-foreground transition-colors hover:text-primary">{{ row.batch.name }}</span>
                         <Badge v-if="row.batch.status === 'paused'" tone="warn">已暂停</Badge>
                       </div>
@@ -357,7 +356,7 @@ function onCreated() {
                       :exhausted="row.batch.objects_exhausted"
                     />
                   </TableCell>
-                  <TableCell class="py-3.5 text-cell text-muted-foreground">{{ fmtAge(row.batch.created_at) }}</TableCell>
+                  <TableCell class="whitespace-nowrap py-3.5 text-cell text-muted-foreground">{{ fmtAge(row.batch.created_at) }}</TableCell>
                   <TableCell class="whitespace-nowrap px-5 py-3.5 text-right">
                     <RowActions align="end">
                       <template #primary>
@@ -372,7 +371,8 @@ function onCreated() {
                         </Button>
                         <Button
                           v-if="row.inFlight > 0"
-                          variant="destructive"
+                          variant="outline"
+                          class="text-danger hover:bg-danger/10 hover:text-danger"
                           size="sm"
                           :pending="cancel.isPending.value && cancel.variables.value === row.batch.batch_id"
                           pending-label="取消中…"

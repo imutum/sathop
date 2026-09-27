@@ -41,6 +41,7 @@ export default {
         border: "hsl(var(--border) / <alpha-value>)",
         input: "hsl(var(--input) / <alpha-value>)",
         ring: "hsl(var(--ring) / <alpha-value>)",
+        sidebar: "hsl(var(--sidebar) / <alpha-value>)",
 
         // Status tokens (no shadcn equivalent).
         success: "hsl(var(--success) / <alpha-value>)",
@@ -51,27 +52,20 @@ export default {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
-        xl: "0.75rem",
+        xl: "0.875rem",
         "2xl": "1rem",
       },
       fontSize: {
-        // Sub-text-xs scale for the dense admin UI. Adding a literal here
-        // is preferred over `text-[NNpx]` so future tweaks happen in one
-        // file.
-        //
-        //   3xs   10px    smallest captions
-        //   mini  10.5px  uppercase mini-labels (Field / Stat / kbd)
-        //   2xs   11px    dense small UI
-        //   cell  11.5px  mono table cells / row metadata
-        "3xs": ["10px", "14px"],
-        mini: ["10.5px", "14px"],
-        "2xs": ["11px", "15px"],
-        cell: ["11.5px", "16px"],
+        // Dense metadata remains readable; body copy uses the standard scale.
+        "3xs": ["11px", "16px"],
+        mini: ["11px", "16px"],
+        "2xs": ["12px", "18px"],
+        cell: ["12px", "18px"],
       },
       letterSpacing: {
         // Two project-specific tracking values; the rest come from Tailwind defaults.
-        label: "0.12em", // mini-labels: Field / Stat / sidebar section headings
-        brand: "0.18em", // app brand mark (AppLayout / Login)
+        label: "0.04em",
+        brand: "0.08em",
       },
       fontFamily: {
         sans: [
@@ -92,8 +86,8 @@ export default {
         ],
       },
       boxShadow: {
-        soft: "0 1px 2px 0 hsl(var(--shadow) / 0.05)",
-        pop: "0 10px 24px -12px hsl(var(--shadow) / 0.24), 0 4px 8px -6px hsl(var(--shadow) / 0.18)",
+        soft: "0 2px 4px -2px hsl(var(--shadow) / 0.06), 0 8px 24px -16px hsl(var(--shadow) / 0.12)",
+        pop: "0 24px 64px -20px hsl(var(--shadow) / 0.30), 0 8px 24px -12px hsl(var(--shadow) / 0.18)",
       },
       keyframes: {
         "fade-in": {

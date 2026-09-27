@@ -161,10 +161,6 @@ const dirty = computed(
     credentialsHaveDraftContent(creds),
 );
 
-function tryClose() {
-  emit("close");
-}
-
 const onSubmit = handleSubmit(() => {
   if (canSubmit.value) create.mutate();
 });
@@ -222,25 +218,14 @@ async function applyTemplate(template: TaskTemplate) {
 </script>
 
 <template>
-  <Modal width-class="w-[min(1200px,95vw)]" :dirty="dirty" @close="tryClose">
-    <h2 class="mb-1 text-lg font-semibold">新建批次</h2>
-    <div class="mb-4 flex items-center gap-1.5 text-2xs text-muted-foreground">
-      <span>提示：</span>
-      <kbd class="kbd">Ctrl</kbd>
-      <span>+</span>
-      <kbd class="kbd">Enter</kbd>
-      <span>提交</span>
-      <span class="text-border">·</span>
-      <kbd class="kbd">Esc</kbd>
-      <span>关闭</span>
-    </div>
+  <Modal v-slot="{ close }" title="新建批次" description="配置任务包与输入数据，提交后开始调度。" width-class="w-[1080px]" :dirty="dirty" @close="emit('close')">
     <TaskTemplatePicker
       :bundle-ref="`orch:${bundleSel}`"
       :receiver-id="headerValues.targetReceiver ?? ''"
       :env-text="headerValues.envText ?? ''"
       @apply="applyTemplate"
     />
-    <form @submit.prevent="onSubmit" @keydown="onKeydown" class="space-y-3 text-sm">
+    <form @submit.prevent="onSubmit" @keydown="onKeydown" class="space-y-5 text-sm">
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <FormField v-slot="{ componentField }" name="name">
           <FormItem>
@@ -353,8 +338,9 @@ async function applyTemplate(template: TaskTemplate) {
         <AlertDescription class="whitespace-pre-wrap">{{ submitError }}</AlertDescription>
       </Alert>
 
-      <div class="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="outline" @click="tryClose">取消</Button>
+      <div class="modal-actions">
+        <span class="mr-auto hidden self-center text-xs text-muted-foreground sm:inline">Ctrl / ⌘ + Enter 提交</span>
+        <Button type="button" variant="outline" @click="close">取消</Button>
         <Button
           type="submit"
           variant="default"

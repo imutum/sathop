@@ -54,7 +54,7 @@ function onKeydown(e: KeyboardEvent, i: number) {
   <div
     role="radiogroup"
     :aria-label="ariaLabel"
-    class="inline-flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5"
+    class="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-xl bg-muted p-1"
   >
     <button
       v-for="(o, i) in options"
@@ -70,7 +70,7 @@ function onKeydown(e: KeyboardEvent, i: number) {
         heightCls,
         'inline-flex items-center gap-1.5 rounded-md font-medium transition-colors',
         o.value === model
-          ? 'bg-background text-foreground shadow-soft'
+          ? 'bg-card text-foreground shadow-soft'
           : o.dim
             ? 'text-muted-foreground/50 hover:text-muted-foreground'
             : 'text-muted-foreground hover:text-foreground',

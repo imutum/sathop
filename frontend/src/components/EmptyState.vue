@@ -3,6 +3,7 @@ withDefaults(
   defineProps<{
     title: string;
     description?: string;
+    compact?: boolean;
     /** `inbox` for genuine "no items" silence; `signal` is a soft antenna
         — used when the queue is intentionally empty (idle but healthy). */
     illustration?: "none" | "inbox" | "signal";
@@ -12,7 +13,7 @@ withDefaults(
 </script>
 
 <template>
-  <div class="flex flex-col items-center justify-center gap-4 py-14 text-center">
+  <div :class="['flex items-center gap-4', compact ? 'justify-start px-6 py-7 text-left' : 'flex-col justify-center px-6 py-10 text-center']">
     <!-- Inbox: a paper sheet behind, open inbox in front. Neutral. -->
     <svg
       v-if="illustration === 'inbox'"
@@ -20,7 +21,7 @@ withDefaults(
       height="68"
       viewBox="0 0 120 88"
       fill="none"
-      class="text-muted-foreground/55"
+      :class="['shrink-0 text-muted-foreground/65', compact ? 'h-12 w-12' : 'h-14 w-16']"
       aria-hidden
     >
       <path
@@ -55,7 +56,7 @@ withDefaults(
       height="80"
       viewBox="0 0 120 100"
       fill="none"
-      class="text-muted-foreground/55"
+      :class="['shrink-0 text-muted-foreground/65', compact ? 'h-12 w-12' : 'h-14 w-16']"
       aria-hidden
     >
       <path d="M60 70 L60 32" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
@@ -75,7 +76,7 @@ withDefaults(
 
     <div class="space-y-1">
       <div class="text-sm font-medium text-foreground">{{ title }}</div>
-      <div v-if="$slots.description || description" class="max-w-md text-xs text-muted-foreground">
+      <div v-if="$slots.description || description" class="max-w-md text-xs leading-relaxed text-muted-foreground">
         <slot name="description">{{ description }}</slot>
       </div>
     </div>

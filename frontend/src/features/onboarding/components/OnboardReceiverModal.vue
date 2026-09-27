@@ -102,11 +102,7 @@ async function copySnippet() {
 </script>
 
 <template>
-  <Modal width-class="w-[min(820px,95vw)]" @close="$emit('close')">
-    <h2 class="mb-1 text-lg font-semibold">接入新接收端</h2>
-    <p class="mb-5 text-xs text-muted-foreground">
-      填写参数后，在目标机器执行生成的命令。接收端注册后开始接收交付文件。
-    </p>
+  <Modal title="接入接收端" description="填写参数并在目标机器执行命令，注册后开始接收交付文件。" width-class="w-[820px]" @close="$emit('close')">
 
     <div class="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
       <div>
@@ -165,7 +161,7 @@ async function copySnippet() {
     </Alert>
 
     <p class="mt-2 text-2xs text-muted-foreground">
-      命令统一假设 bash 兼容 shell（Linux / macOS / WSL / Git Bash）。Windows 用户请在 WSL 或 Git Bash 中执行——<code class="font-mono">$(id -u)</code>、<code class="font-mono">$(pwd)</code>、<code class="font-mono">\</code> 续行均为 bash 语法
+      请在 Bash 终端执行命令。Windows 可使用 WSL 或 Git Bash。
     </p>
 
     <div class="mt-3">
@@ -313,8 +309,8 @@ async function copySnippet() {
       </div>
     </div>
 
-    <div class="mt-5 flex justify-end gap-2">
-      <Button type="button" @click="$emit('close')">关闭</Button>
+    <div class="modal-actions">
+      <Button type="button" variant="outline" @click="$emit('close')">关闭</Button>
     </div>
   </Modal>
 </template>

@@ -66,10 +66,10 @@ async function download() {
 
 <template>
   <div class="space-y-5 text-sm">
-    <div class="flex items-start justify-between gap-3">
-      <div>
-        <div class="flex items-center gap-2">
-          <div class="font-mono text-[14px]">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="break-all font-mono text-sm">
             <span class="font-semibold">{{ d.name }}</span>
             <span class="text-muted-foreground">@{{ d.version }}</span>
           </div>

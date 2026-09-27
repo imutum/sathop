@@ -429,11 +429,9 @@ function setRowRef(id: string, el: Element | null) {
 
     <OnboardWorkerModal v-if="showOnboard" @close="showOnboard = false" />
 
-    <Modal v-if="showBulkConc" width-class="w-[min(420px,95vw)]" @close="showBulkConc = false">
-      <h2 class="mb-1 text-base font-semibold">批量设置并发</h2>
-      <p class="mb-4 text-2xs text-muted-foreground">
-        对已选的 {{ selectedCount }} 个节点统一下发。留空 = 用各节点默认值（清除覆盖）。
-        节点流水线天花板 = 下载并发 + 处理并发；调大瞬时生效，调小会触发一次短暂排空后重建。
+    <Modal v-if="showBulkConc" title="批量设置并发" :description="`应用于已选的 ${selectedCount} 个节点。留空则恢复节点默认值。`" width-class="w-[460px]" @close="showBulkConc = false">
+      <p class="mb-5 text-xs leading-relaxed text-muted-foreground">
+        增大并发会立即扩容；减小并发需等待当前流水线排空后生效。
       </p>
       <div class="grid grid-cols-2 gap-3">
         <div>
@@ -445,14 +443,14 @@ function setRowRef(id: string, el: Element | null) {
           <Input id="bulk-pr" v-model="bulkPr" type="number" min="1" placeholder="默认" class="tabular-nums" />
         </div>
       </div>
-      <div class="mt-5 flex justify-end gap-2">
-        <Button variant="ghost" @click="showBulkConc = false">取消</Button>
+      <div class="modal-actions">
+        <Button variant="outline" @click="showBulkConc = false">取消</Button>
         <Button
           variant="default"
           :disabled="setConcurrencyBulk.isPending.value"
           @click="submitBulkConc"
         >
-          下发
+          应用设置
         </Button>
       </div>
     </Modal>
