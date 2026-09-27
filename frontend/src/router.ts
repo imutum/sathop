@@ -4,6 +4,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from "vue-router"
 // dashboard stays at the root path. `meta.title` populates document.title so
 // browser history, tab labels and screen readers reflect the active page.
 const childRoutes: RouteRecordRaw[] = [
+  { path: "deliveries", name: "deliveries", component: () => import("./pages/Deliveries.vue"), meta: { title: "交付台账" } },
   { path: "", name: "dashboard", component: () => import("./pages/Dashboard.vue"), meta: { title: "总览" } },
   { path: "health", name: "health", component: () => import("./pages/Health.vue"), meta: { title: "健康诊断" } },
   { path: "settings", name: "settings", component: () => import("./pages/Settings.vue"), meta: { title: "设置" } },

@@ -175,6 +175,39 @@ class Batch(Base):
     delivered_count: Mapped[int] = mapped_column(Integer, default=0, nullable=True)
 
 
+class TaskTemplate(Base):
+    __tablename__ = "task_templates"
+
+    template_id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, unique=True)
+    bundle_ref: Mapped[str] = mapped_column(String)
+    target_receiver_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    execution_env: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=utcnow)
+
+
+class DeliveryRecord(Base):
+    """Immutable receipts, intentionally independent of the runtime task cascade."""
+
+    __tablename__ = "delivery_records"
+    __table_args__ = (Index("idx_delivery_source", "source_object_id", "uploaded_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    identity: Mapped[str] = mapped_column(String(64), unique=True)
+    source_object_id: Mapped[int] = mapped_column(Integer)
+    uploaded_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    batch_id: Mapped[str] = mapped_column(String, index=True)
+    batch_name: Mapped[str] = mapped_column(String)
+    bundle_ref: Mapped[str] = mapped_column(String)
+    granule_id: Mapped[str] = mapped_column(String)
+    object_key: Mapped[str] = mapped_column(String)
+    sha256: Mapped[str] = mapped_column(String)
+    size: Mapped[int] = mapped_column(Integer)
+    receiver_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    delivered_at: Mapped[datetime] = mapped_column(UtcDateTime(), index=True)
+
+
 class Granule(Base):
     __tablename__ = "granules"
     granule_id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -465,6 +498,12 @@ async def init_db() -> None:
         await conn.run_sync(_ensure_columns)
         await conn.run_sync(_ensure_indexes)
         await conn.run_sync(_drop_obsolete_tables)
+        # Reconcile retained legacy receipts under the same schema lock. Rows
+        # already pruned by older releases cannot be reconstructed.
+        from .delivery_ledger import archive_confirmed
+
+        async with AsyncSession(bind=conn) as migration:
+            await archive_confirmed(migration)
         if pg:
             await conn.run_sync(_ensure_pg_table_tuning)
         if not pg:

@@ -37,6 +37,7 @@ const NAV: NavGroup[] = [
     label: "工作流",
     items: [
       { to: "/batches", label: "批次", icon: "batches" },
+      { to: "/deliveries", label: "交付台账", icon: "events" },
       { to: "/bundles", label: "任务包", icon: "bundles" },
       { to: "/shared", label: "共享文件", icon: "shared" },
     ],

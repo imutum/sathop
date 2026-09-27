@@ -205,7 +205,7 @@ async function downloadReport() {
   downloadingReport.value = true;
   try {
     await API.downloadDeliveryReport(batchId.value);
-    toast.success("交付报告已导出，包含累计数量和仍保留的产物清单");
+    toast.success("交付报告已导出，包含累计数量、交付台账和待交付产物");
   } catch (e) {
     toast.error(`导出失败：${(e as Error).message}`);
   } finally { downloadingReport.value = false; }
@@ -257,7 +257,7 @@ async function confirmDelete() {
   const ok = await requestConfirm({
     title: `永久删除批次 "${name}"？`,
     description:
-      `将删除 ${total} 条数据粒，并清除该批次在 orchestrator 上的全部记录\n` +
+      `将删除 ${total} 条数据粒并清除运行明细。已确认的交付台账继续保留。\n` +
       "（数据粒、产物、进度、阶段计时、事件）。worker 已上传的产物文件不在清理范围内。",
     confirmText: "永久删除",
     tone: "danger",
@@ -289,6 +289,7 @@ async function confirmDelete() {
           <template v-if="b" #actions>
             <RowActions align="end">
               <template #primary>
+                <Button size="sm" variant="outline" as-child><RouterLink :to="{ path: '/deliveries', query: { batch: batchId } }">查看交付台账</RouterLink></Button>
                 <Button size="sm" variant="outline" :pending="downloadingReport" pending-label="导出中…" @click="downloadReport">
                   <Icon name="download" :size="13" />
                   导出交付报告
