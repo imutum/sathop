@@ -3,6 +3,8 @@
 .github/
 .vscode/
 .idea/
+.claude/
+CLAUDE.md
 
 # Python build/runtime
 .venv/
@@ -14,6 +16,7 @@ __pycache__/
 .ruff_cache/
 
 # Runtime state — must NOT be baked into images
+.tmp/
 data/
 *.db
 *.db-wal
@@ -26,10 +29,15 @@ logs/
 .env.local
 *.key
 *.pem
+.release-seckey
+deploy/runtime/.release-seckey
 
 # Frontend build artifacts (orchestrator copies frontend/dist only when
 # needed). node_modules is huge and never used at runtime.
 frontend/node_modules/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 
 # Vendored native binaries (aria2c, minio) — provided by their own images in prod
 vendor/
